@@ -45,6 +45,8 @@ def adjust_global_logger(log_level='INFO', log_file=None):
         log_levels = {1:'CRITICAL', 2:'ERROR', 3:'WARNING', 4:'INFO', 5:'DEBUG'}
         _log_level = log_levels[np.clip(log_level, 1, 5)]
 
+    # TODO: Is there a better way to turn off logging to a file than having two
+    # separate config files?
     log_config_file =  importlib.resources.files('pipnick.utils') \
         / ('logging_config_termonly.json' if log_file is None else 'logging_config.json')
 
