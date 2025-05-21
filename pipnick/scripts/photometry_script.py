@@ -3,6 +3,7 @@ Perform photometric calibration on reduced images
 """
 
 from pipnick.scripts import scriptbase
+from pipnick.utils import log
 
 class PhotometryPipeline(scriptbase.ScriptBase):
 
@@ -54,6 +55,8 @@ class PhotometryPipeline(scriptbase.ScriptBase):
 #                            help="Displays images with sources & flux labelled")
 #        parser.add_argument('-pi', '--plot_inters', action='store_true', 
 #                            help="Displays images with initial sources & source groups for inspection")
+        parser.add_argument('-l', '--log', type=str, default=log.default_log_name(__name__),
+                            help='Log file')
         parser.add_argument('--verbose', '-v', action='count', default=0,
                             help='Level of verbosity to display (5=highest; "-vv" sets level=2)')
         parser.add_argument('--overwrite', '-o', default=False, action='store_true',
@@ -63,20 +66,17 @@ class PhotometryPipeline(scriptbase.ScriptBase):
     @staticmethod
     def main(args):
         
-        from pipnick.utils.log import adjust_global_logger
         from pipnick.pipelines.photometry import photometry_all
 
-        adjust_global_logger(log_level='INFO' if args.verbose < 1 else args.verbose, name=__name__)
+        # Initialize logger
+        log.adjust_global_logger(log_level='INFO' if args.verbose < 1 else args.verbose,
+                                 log_file=args.log)
         
         src_catalogs = photometry_all(rdxdir=args.rdxdir, raw_table=args.raw_table,
                                       phot_table=args.phot_table,
-#                                      excl_files=args.excl_files,
-#                                      excl_objs=args.excl_objs, 
-#                                      excl_filts=args.excl_filts, 
                                       thresh=args.sigma_thresh, group=args.group, 
                                       mode=args.mode, fittype=args.fittype,
                                       overwrite=args.overwrite)
-                                     #, plot_final=args.plot_final, plot_inters=args.plot_inters)
         
 #        return src_catalogs
  

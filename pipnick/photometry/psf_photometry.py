@@ -17,7 +17,7 @@ from pipnick import logger
 from pipnick.utils.fits_class import Fits_Simple
 from pipnick.utils.nickel_data import bad_columns
 from pipnick.utils.log import log_astropy_table
-from pipnick.photometry.moffat_model import MoffatElliptical2D_photutils
+from pipnick.photometry.moffat_model import EllipticalMoffat2DModel
 from pipnick.photometry import starfind
 from pipnick.photometry.fit import fit_psf_single, fit_psf_stack, psf_plot, plot_sources
 
@@ -54,13 +54,13 @@ def psf_analysis(image, thresh=10.0, mode='all', fittype='circ',
     `astropy.table.Table`
         Table containing photometric data for detected sources.
     """
-    logger.info('Detecting sources')
+    logger.info('Finding well-separated sources with well-detected fluxes')
     source_data = starfind.detect_sources(image, thresh=15., fwhm=7.)
-
-    bkg, stamps = starfind.extract_stamps(image, source_data)
 
     embed()
     exit()
+
+    bkg, stamps = starfind.extract_stamps(image, source_data)
 
     # Convert image to Fits_Simple if necessary
     if not isinstance(image, Fits_Simple):
@@ -310,7 +310,7 @@ def discrete_moffat_integral(par, fittype, step_size=1.0):
     if fittype == 'circ':
         pixel_fluxes = Moffat2D.evaluate(grid_x, grid_y, par[2], 0, 0, par[3], par[4])
     elif fittype == 'ellip':
-        pixel_fluxes = MoffatElliptical2D_photutils.evaluate(grid_x, grid_y, par[2], 0, 0,
+        pixel_fluxes = EllipticalMoffat2DModel.evaluate(grid_x, grid_y, par[2], 0, 0,
                                                              par[3], par[4], par[5], par[6])
     pixel_fluxes *= step_size**2  # Scale by the area of each pixel
     return np.sum(pixel_fluxes)  # Return total flux

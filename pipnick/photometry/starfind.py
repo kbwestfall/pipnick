@@ -237,10 +237,30 @@ def detect_sources(image, thresh=15., fwhm=7., inner_bkg=3., outer_bkg=5., min_d
     Returns
     -------
     astropy.table.Table
-        Table with detected sources and initial metrics.
+
+        Table with detected sources and initial metrics. The table metadata
+        provides all of the input parameters (except for the image), as well as
+        'mean_kron_radius', the sigma-clipped mean of the Kron radius measured
+        for each source.  The table columns are:
+
+            - 'id': running ID number for the sources
+            - 'xcen': source X centroid
+            - 'ycen': source Y centroid
+            - 'kron_bkg_raw': masked array with the background flux for the
+              "raw" Kron measurements
+            - 'kron_radius': masked array with the Kron radius for source
+            - 'kron_flux_raw': masked array with the Kron flux of each source
+              measured using "kron_radius"
+            - 'kron_bkg': masked array with the background flux for the Kron
+              measurements based on the "mean_kron_radius"
+            - 'kron_flux': masked array with the Kron flux of each source
+              measured using "mean_kron_radius"
+            - 'good': a boolean flag selecting well-separated sources with good
+              fluxes
     """
     # Read the image, and convert CCDData to a masked array
-    _image = np.asanyarray(image if isinstance(image, CCDData) else CCDData.read(image))
+#    _image = np.asanyarray(image if isinstance(image, CCDData) else CCDData.read(image))
+    _image = image if isinstance(image, CCDData) else CCDData.read(image)
     # Create images for coordinates
     nx, ny = _image.shape
     x, y = np.meshgrid(np.arange(ny, dtype=float), np.arange(nx, dtype=float))
@@ -263,11 +283,13 @@ def detect_sources(image, thresh=15., fwhm=7., inner_bkg=3., outer_bkg=5., min_d
     # Get the size and flux of each source via Kron measurements
     ap_centers = np.column_stack((sources['xcentroid'], sources['ycentroid']))  # Source positions
     kron_bkg_raw, kron_radius, kron_flux_raw \
-            = kron_stats(x, y, _image, ap_centers, fwhm, inner_bkg=inner_bkg, outer_bkg=outer_bkg)
+            = kron_stats(x, y, np.asanyarray(_image), ap_centers, fwhm, inner_bkg=inner_bkg,
+                         outer_bkg=outer_bkg)
     mean_kron_radius = sigma_clipped_stats(kron_radius, sigma=3., maxiters=None)[0]
     logger.info(f'Mean Kron radius of sources: {mean_kron_radius:.1f}')
-    kron_bkg, _, kron_flux = kron_stats(x, y, _image, ap_centers, fwhm, inner_bkg=inner_bkg,
-                                        outer_bkg=outer_bkg, source_radius=mean_kron_radius)
+    kron_bkg, _, kron_flux = kron_stats(x, y, np.asanyarray(_image), ap_centers, fwhm,
+                                        inner_bkg=inner_bkg, outer_bkg=outer_bkg,
+                                        source_radius=mean_kron_radius)
 
     # Remove sources that are too close to each other
     i, j = np.triu_indices(nsources, k=1)
@@ -291,21 +313,26 @@ def detect_sources(image, thresh=15., fwhm=7., inner_bkg=3., outer_bkg=5., min_d
 
     # Construct and return the table
     return table.Table([
-                    table.Column(name='id', data=np.arange(nsources, dtype=int)),
-                    table.Column(name='xcen', data=sources['xcentroid']),
-                    table.Column(name='ycen', data=sources['ycentroid']),
-                    table.Column(name='kron_bkg_raw', data=kron_bkg_raw.data),
-                    table.Column(name='kron_bkg_raw_mask', data=np.ma.getmaskarray(kron_bkg_raw)),
-                    table.Column(name='kron_radius', data=kron_radius.data),
-                    table.Column(name='kron_radius_mask', data=np.ma.getmaskarray(kron_radius)),
-                    table.Column(name='kron_flux_raw', data=kron_flux_raw.data),
-                    table.Column(name='kron_flux_raw_mask', data=np.ma.getmaskarray(kron_flux_raw)),
-                    table.Column(name='kron_bkg', data=kron_bkg.data),
-                    table.Column(name='kron_bkg_mask', data=np.ma.getmaskarray(kron_bkg)),
-                    table.Column(name='kron_flux', data=kron_flux.data),
-                    table.Column(name='kron_flux_mask', data=np.ma.getmaskarray(kron_flux)),
-                    table.Column(name='good', data=good)],
-                    meta=meta)
+        table.Column(name='id', data=np.arange(nsources, dtype=int)),
+        table.Column(name='xcen', data=sources['xcentroid']),
+        table.Column(name='ycen', data=sources['ycentroid']),
+        table.MaskedColumn(name='kron_bkg_raw',
+                           data=kron_bkg_raw.data,
+                           mask=np.ma.getmaskarray(kron_bkg_raw)),
+        table.MaskedColumn(name='kron_radius',
+                           data=kron_radius.data,
+                           mask=np.ma.getmaskarray(kron_radius)),
+        table.MaskedColumn(name='kron_flux_raw',
+                           data=kron_flux_raw.data,
+                           mask=np.ma.getmaskarray(kron_flux_raw)),
+        table.MaskedColumn(name='kron_bkg',
+                           data=kron_bkg.data,
+                           mask=np.ma.getmaskarray(kron_bkg)),
+        table.MaskedColumn(name='kron_flux',
+                           data=kron_flux.data,
+                           mask=np.ma.getmaskarray(kron_flux)),
+        table.Column(name='good', data=good)
+    ], meta=meta)
 
 
 def kron_stats(x, y, img, cen, fwhm, inner_bkg=3., outer_bkg=5., source_radius=None):

@@ -484,6 +484,7 @@ class FitEllipticalMoffat2D:
         original_rad = np.deg2rad(original_phi - 0.000000000001)
         return original_rad
 
+
 def make_ellipse(a, b, phi, n=500):
     """
     Generate coordinates for an ellipse.
@@ -505,7 +506,7 @@ def make_ellipse(a, b, phi, n=500):
     return x*cosr - y*sinr, y*cosr + x*sinr
 
 
-class MoffatElliptical2D_photutils(Fittable2DModel):
+class EllipticalMoffat2DModel(Fittable2DModel):
     """
     Two dimensional Moffat model.
 
