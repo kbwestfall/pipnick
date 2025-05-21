@@ -21,16 +21,6 @@ class ReductionPipeline(scriptbase.ScriptBase):
         parser.add_argument('-t', '--raw_table', default=None,
                             help='File with or for relevant metadata for the raw files to be '
                                  'processed by the data reduction script.')
-#        parser.add_argument('-s', '--save', default=False, action='store_true',
-#                            help='If True, save intermediate results during processing.')
-
-#        parser.add_argument('--excl_files', default=None, type=list,
-#                            help='List of file stems substrings to exclude (exact match not necessary).')
-#        parser.add_argument('--excl_objs', default=None, type=list,
-#                            help='List of object substrings to exclude (exact match not necessary).')
-#        parser.add_argument('--excl_filts', default=None, type=list,
-#                            help='List of filter substrings to exclude (exact match not necessary).')
-
 #        parser.add_argument('-d', '--display', action='store_true', help="Display reduced images")
         parser.add_argument('--verbose', '-v', action='count', default=0,
                             help='Level of verbosity to display (5=highest; "-vv" sets level=2)')
@@ -55,9 +45,6 @@ class ReductionPipeline(scriptbase.ScriptBase):
         # Reduce the images
         metadata = reduce_all(rawdir=args.rawdir, table=args.raw_table, rdxdir=args.rdxdir,
                               overwrite=args.overwrite, append=args.append)
-                              #save=args.save,
-                              #excl_files=args.excl_files, excl_objs=args.excl_objs, 
-                              #excl_filts=args.excl_filts)
 
 #        # Display reduced images
 #        if args.display:
