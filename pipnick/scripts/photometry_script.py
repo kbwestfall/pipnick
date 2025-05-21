@@ -56,6 +56,8 @@ class PhotometryPipeline(scriptbase.ScriptBase):
 #                            help="Displays images with initial sources & source groups for inspection")
         parser.add_argument('--verbose', '-v', action='count', default=0,
                             help='Level of verbosity to display (5=highest; "-vv" sets level=2)')
+        parser.add_argument('--overwrite', '-o', default=False, action='store_true',
+                            help='Overwrite any existing files')
         return parser
 
     @staticmethod
@@ -72,7 +74,8 @@ class PhotometryPipeline(scriptbase.ScriptBase):
 #                                      excl_objs=args.excl_objs, 
 #                                      excl_filts=args.excl_filts, 
                                       thresh=args.sigma_thresh, group=args.group, 
-                                      mode=args.mode, fittype=args.fittype)
+                                      mode=args.mode, fittype=args.fittype,
+                                      overwrite=args.overwrite)
                                      #, plot_final=args.plot_final, plot_inters=args.plot_inters)
         
 #        return src_catalogs

@@ -29,8 +29,6 @@ def build_camera_datatable(root, ext='.fits', path_key='path'):
 
     Returns
     -------
-    type
-        Class type used to parse the metadata.
     astropy.table.Table
         Table with the metadata
 
@@ -50,7 +48,8 @@ def build_camera_datatable(root, ext='.fits', path_key='path'):
     logger.info(f'Found {nfiles} data files.')
 
     # Use the first file to identify the camera
-    camera = eval(f'cameras.{cameras.identify_camera(files[0])}')
+    camera_name = cameras.identify_camera(files[0])
+    camera = eval(f'cameras.{camera_name}')
 
     # Parse the metadata into a table and write the file
     metadata = [None]*nfiles
@@ -58,8 +57,9 @@ def build_camera_datatable(root, ext='.fits', path_key='path'):
     for i,f in enumerate(files):
         metadata[i] = camera.parse_metadata(f)
     tbl = Table(data=np.asarray(metadata), names=cols)
+    tbl.meta['camera'] = camera_name
     tbl.meta[path_key] = str(_root)
-    return camera, tbl
+    return tbl
 
 #    mode=None, excl_files=None, excl_objs=None, excl_filts=None,
 #    mode : str
@@ -72,8 +72,7 @@ def build_camera_datatable(root, ext='.fits', path_key='path'):
 #    excl_filts : list
 #        List of filter names to exclude (exact match not necessary).
 
-def build_metadata(rawdir=None, filename=None, ext='.fits', overwrite=False, append=False,
-                   rdxdir=None):
+def build_metadata(rawdir=None, filename=None, ext='.fits', overwrite=False, rdxdir=None):
     """
     Construct a table with metadata needed for the data processing.
 
@@ -127,10 +126,9 @@ def build_metadata(rawdir=None, filename=None, ext='.fits', overwrite=False, app
         if rawdir is None:
             raise ValueError('Must provide a directory with the raw data if a metadata table is '
                              'not provided, it does not exist, or you wish to overwrite the file.')
-        camera, metadata = build_camera_datatable(rawdir, ext=ext, path_key='rawdir')
+        metadata = build_camera_datatable(rawdir, ext=ext, path_key='rawdir')
         if _filename is None:
-            dtime = datetime.datetime.now(datetime.UTC).strftime('%Y-%m-%dT%H:%M:%S')
-            _filename = Path(f'{camera.__name__}_{dtime}_rdx.tbl').absolute()
+            _filename = Path(default_table_name(metadata.meta['camera'], 'raw')).absolute()
         if _rdxdir is not None:
             metadata.meta['rdxdir'] = _rdxdir
         # Write it
@@ -207,7 +205,7 @@ def build_metadata(rawdir=None, filename=None, ext='.fits', overwrite=False, app
 #    return file_df
 
 
-def frame_path(metadata, select=None, path_key='rawdir'):
+def frame_path(metadata, select=None, col_key='file', path_key='rawdir'):
     """
     Construct a set of file paths for rows in the provided metadata table.
 
@@ -218,6 +216,8 @@ def frame_path(metadata, select=None, path_key='rawdir'):
     select : numpy.ndarray, optional
         A boolean or integer vector selecting the rows of the table to use.  If
         None, all rows are used.
+    col_key : str, optional
+        The keyword of the table column with the file names.
     path_key : str, optional
         The keyword in the table ``meta`` dictionary with the root path of each
         file.  Cannot be None, and must be in the ``meta`` dictionary of the
@@ -230,8 +230,43 @@ def frame_path(metadata, select=None, path_key='rawdir'):
     """
     if path_key not in metadata.meta:
         raise ValueError(f'Provided table does not include {path_key} in its metadata dictionary.')
-    files = metadata['file'] if select is None else metadata['file'][select]
+    files = metadata[col_key] if select is None else metadata[col_key][select]
     return [Path(metadata.meta[path_key]).absolute() / f for f in files]
+
+
+def default_table_name(camera, name):
+    """
+    Construct the default name for an output datatable.
+
+    The name of the file is ``{camera}_{time}_{name}.tbl``.
+
+    Parameters
+    ----------
+    camera : str
+        The name of the camera used to take the data.
+    name : str
+        A generic signifier for the type of data table.  E.g., ``'raw'`` for the
+        table with the metadata for the raw observations.
+    """
+    dtime = datetime.datetime.now(datetime.UTC).strftime('%Y-%m-%dT%H:%M:%S')
+    return f'{camera}_{dtime}_{name}.tbl'
+
+
+def default_reduced_file_name(raw_frame):
+    """
+    Return the default name of a reduced image based on the name of raw file.
+
+    Parameters
+    ----------
+    raw_frame : Path
+        Path to the raw file.
+
+    Returns
+    -------
+    str
+        Name for the reduced data file.
+    """
+    return f'{raw_frame.stem}_rdx.fits'
 
 
 def comment_out_rows(excluded_file_names, table_file, modify=True):

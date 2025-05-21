@@ -1,6 +1,11 @@
-import numpy as np
-import logging
+from pathlib import Path
 
+from IPython import embed
+
+import numpy as np
+from scipy.spatial import KDTree
+
+from astropy.table import Table
 from astropy.modeling.fitting import LevMarLSQFitter
 from astropy.modeling.functional_models import Moffat2D
 from photutils.detection import IRAFStarFinder
@@ -8,23 +13,18 @@ from photutils.psf import IterativePSFPhotometry, make_psf_model
 from photutils.background import MMMBackground, MADStdBackgroundRMS, LocalBackground
 from photutils.psf import SourceGrouper
 
-from pathlib import Path
-from astropy.table import Table
-
-from scipy.spatial import KDTree
-
+from pipnick import logger
 from pipnick.utils.fits_class import Fits_Simple
 from pipnick.utils.nickel_data import bad_columns
 from pipnick.utils.log import log_astropy_table
-
 from pipnick.photometry.moffat_model import MoffatElliptical2D_photutils
-from pipnick.photometry.starfind import generate_stamps
+from pipnick.photometry import starfind
 from pipnick.photometry.fit import fit_psf_single, fit_psf_stack, psf_plot, plot_sources
 
-logger = logging.getLogger(__name__)
-np.set_printoptions(edgeitems=100)
 
-def psf_analysis(image, proc_dir, thresh=10.0, mode='all', fittype='circ',
+#np.set_printoptions(edgeitems=100)
+
+def psf_analysis(image, thresh=10.0, mode='all', fittype='circ',
                  plot_final=True, plot_inters=False):
     """
     Perform PSF photometry on a given image, including source detection and PSF fitting.
@@ -54,7 +54,14 @@ def psf_analysis(image, proc_dir, thresh=10.0, mode='all', fittype='circ',
     `astropy.table.Table`
         Table containing photometric data for detected sources.
     """
-    
+    logger.info('Detecting sources')
+    source_data = starfind.detect_sources(image, thresh=15., fwhm=7.)
+
+    bkg, stamps = starfind.extract_stamps(image, source_data)
+
+    embed()
+    exit()
+
     # Convert image to Fits_Simple if necessary
     if not isinstance(image, Fits_Simple):
         image = Fits_Simple(image)

@@ -118,7 +118,7 @@ def reduce_all(rawdir=None, table=None, rdxdir=None, overwrite=False, append=Fal
             flat = super_flat[metadata['filter'][i]]
 
         # Trim and overscan correct it
-        rdx_file[i] = _rdxdir / f'{frame[i].stem}_rdx.fits'
+        rdx_file[i] = _rdxdir / dir_nav.default_reduced_file_name(frame[i])
         if rdx_file[i].is_file() and not overwrite:
             logger.info(f'{rdx_file[i]} exists and overwrite is False.  Continuing...')
             continue
@@ -157,7 +157,7 @@ def init_ccddata(frame, bpm=None, saturation=None, gain=None, readnoise=None):
     CCDData
         Initialized and processed CCDData object.
     """
-    warnings.simplefilter('ignore', FITSFixedWarning)
+#    warnings.simplefilter('ignore', FITSFixedWarning)
     _frame = Path(frame).absolute()
 
     logger.info(f'Initializing CCD imaging data in {_frame.name}.')

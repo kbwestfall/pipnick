@@ -2,9 +2,13 @@ from pathlib import Path
 
 from IPython import embed
 
+import numpy as np
+
+from astropy.table import Table
+
 from pipnick.photometry.psf_photometry import psf_analysis, consolidate_groups
 from pipnick.photometry.aperture_photometry import aperture_analysis
-from pipnick.utils.dir_nav import build_camera_datatable
+from pipnick.utils import dir_nav
 from pipnick import logger
 
 
@@ -66,54 +70,92 @@ def photometry_all(rdxdir=None, raw_table=None, phot_table=None,
         A list of file paths to the generated source catalogs (in CSV format).
         Each entry corresponds to an analyzed image file.
     """
-#    if rdxdir is None and raw_table is None and phot_table is None:
-#        raise ValueError('Must provide the reduction directory, the raw data table, or the '
-#                         'photometry data table.')
-#    if phot_table is not None:
-#        _phot_table = Path(phot_table).absolute()
-#        if _phot_table.is_file() and not overwrite:
-#            raise ValueError(f'{_phot_table} exists and overwrite=False!')
-#    if rdxdir is not None:
-#        phot = build_camera_datatable(rdxdir, ext='_rdx.fits')
-#    elif raw_table is not None:
-#        phot = Table.read(raw_table)
-#    else
-#    embed()
-#    exit()
+    if rdxdir is None and raw_table is None:
+        raise ValueError('Must provide the reduction directory or the raw data table.')
 
-    logger.info(f'---- photometry_all() called on main directory {maindir}')
-    
-    # Set the output directory based on whether grouping is enabled
-    maindir = Path(maindir)
-    reddir = maindir / 'reduced'
-    phot_dir = maindir / 'photometric'
-    proc_dir = phot_dir / "proc_files"
-    Path.mkdir(phot_dir, exist_ok=True)
-    Path.mkdir(proc_dir, exist_ok=True)
-    if group:
-        output_dir = phot_dir / 'consolidated'
-        output_file_append = '_photsrcs_consol.csv'
+    if raw_table is None:
+        # Find all the reduced files in the directory
+        framemeta = dir_nav.build_camera_datatable(rdxdir, ext='_rdx.fits', path_key='rdxdir')
+        # Change the name of the column
+        framemeta['file'].name = 'rdxfile'
+        # Set the reduction directory path
+        _rdxdir = Path(framemeta.meta['rdxdir']).absolute()
     else:
-        output_dir = phot_dir / 'unconsolidated'
-        output_file_append = '_photsrcs.csv'
-    Path.mkdir(output_dir, exist_ok=True)
-    
-    file_df = organize_files(reddir, use_table, 'photometry',
-                             excl_files, excl_objs, excl_filts)
-    image_paths = file_df.paths
+        # Read the table with the raw metadata
+        framemeta = Table.read(raw_table, format='ascii.ecsv')
+        # Check that the reduction directory is defined
+        if 'rdxdir' not in framemeta.meta:
+            raise KeyError('Provided raw data table does not include rdxdir metadata keyword.')
+        # Set the reduction directory path
+        _rdxdir = Path(framemeta.meta['rdxdir']).absolute()
+        # Check that the directory exists
+        if not _rdxdir.is_dir():
+            raise NotADirectoryError(f'Reduction directory in {raw_table} does not exist.  '
+                                     f'Expected to find reduced data in: {_rdxdir}')
+        # Define the paths to the raw files
+        raw_frames = dir_nav.frame_path(framemeta)
+        # Use those to build the names of the reduced files
+        rdx_frames = [_rdxdir / dir_nav.default_reduced_file_name(f) for f in raw_frames]
+        # Find which of the reduced files exist
+        found_frames = [rf.is_file() for rf in rdx_frames]
+        # Check if any of the files exist
+        if not any(found_frames):
+            return ValueError(f'None of the frames in {raw_table} have reduced counterparts in '
+                              f'{_rdxdir}.')
+        # Add the column with the expected name of the reduced files.
+        framemeta['rdxfile'] = [r.name for r in rdx_frames]
+        # Downselect to only the rows with frames that exist
+        framemeta = framemeta[found_frames]
+
+    # Define the file for the output photometry metadata
+    if phot_table is None:
+        _phot_table = Path(dir_nav.default_table_name(framemeta.meta['camera'], 'phot')).absolute()
+    else:
+        _phot_table = Path(phot_table).absolute()
+    if _phot_table.is_file() and not overwrite:
+        raise ValueError(f'{_phot_table} exists and overwrite=False!')
+
+    logger.info(f'Performing photometry on data:')
+    logger.info(f'    Reduction directory: {_rdxdir}')
+
+#    logger.info(f'---- photometry_all() called on main directory {maindir}')
+#    
+#    # Set the output directory based on whether grouping is enabled
+#    maindir = Path(maindir)
+#    reddir = maindir / 'reduced'
+#    phot_dir = maindir / 'photometric'
+#    proc_dir = phot_dir / "proc_files"
+#    Path.mkdir(phot_dir, exist_ok=True)
+#    Path.mkdir(proc_dir, exist_ok=True)
+#    if group:
+#        output_dir = phot_dir / 'consolidated'
+#        output_file_append = '_photsrcs_consol.csv'
+#    else:
+#        output_dir = phot_dir / 'unconsolidated'
+#        output_file_append = '_photsrcs.csv'
+#    Path.mkdir(output_dir, exist_ok=True)
+#    
+#    file_df = organize_files(reddir, use_table, 'photometry',
+#                             excl_files, excl_objs, excl_filts)
+#    image_paths = file_df.paths
     source_catalog_paths = []  # List to hold paths to source catalogs
+
+    rdx_frames = dir_nav.frame_path(framemeta, col_key='rdxfile', path_key='rdxdir')
     
-    for image_path in image_paths:
+    for frame in rdx_frames:
         # Set output file path
-        filestem = image_path.stem.split('_')[0]
-        obj_dir = image_path.parent
-        Path.mkdir(output_dir / obj_dir.name, exist_ok=True)
-        output_file = output_dir / obj_dir.name / (filestem + output_file_append)
+#        filestem = image_path.stem.split('_')[0]
+#        obj_dir = image_path.parent
+#        Path.mkdir(output_dir / obj_dir.name, exist_ok=True)
+#        output_file = output_dir / obj_dir.name / (filestem + output_file_append)
         
         # Perform PSF photometry on the file
-        psf_data = psf_analysis(image_path, proc_dir, thresh=thresh, mode=mode, 
-                                fittype=fittype, plot_final=plot_final, 
-                                plot_inters=plot_inters)
+        logger.info(f'Performing PSF analysis for {frame}.')
+        psf_data = psf_analysis(frame, thresh=thresh, mode=mode, 
+                                fittype=fittype) #, plot_final=plot_final, plot_inters=plot_inters)
+        
+        embed()
+        exit()
         
         # Consolidate groups of sources if enabled
         if group:
