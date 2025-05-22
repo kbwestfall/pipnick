@@ -14,6 +14,7 @@ from astropy.io import fits
 from astropy.modeling.functional_models import Moffat1D
 from astropy.visualization import AsinhStretch, ZScaleInterval, ImageNormalize
 from astropy.stats import SigmaClip
+from astropy.nddata import CCDData
 from photutils.aperture import CircularAperture
 
 from pipnick.utils.fits_class import Fits_Simple
@@ -495,7 +496,13 @@ def psf_plot(plot_file, fit, fittype='ellip', show=False, plot_fit=True):
         plt.close()
 
 
-def plot_sources(phot_data, given_fwhm, image=None, flux_name='flux_fit',
+def get_apertures(phot_data, fwhm, scale):
+    """Create circular apertures for the sources based on their positions."""
+    x = phot_data['x_fit']
+    y = phot_data['y_fit']
+    return CircularAperture(np.transpose((x, y)), r=2 * fwhm * scale)
+    
+def plot_sources(image, phot_data, fwhm, flux_name='flux_fit',
                  x_name='x_fit', y_name='y_fit', label_name='group_id',
                  scale=1):
     """
@@ -504,12 +511,12 @@ def plot_sources(phot_data, given_fwhm, image=None, flux_name='flux_fit',
 
     Parameters
     ----------
+    image : str, CCDData
+        Image to plot the sources on. If None, it is loaded from the metadata.
     phot_data : Table
         Photometric data containing positions and fluxes of sources.
     given_fwhm : float
         Full-width half-maximum (FWHM) of the sources to set aperture sizes.
-    image : Fits_Simple, optional
-        Image to plot the sources on. If None, it is loaded from the metadata.
     flux_name : str, optional
         Name of the flux column in phot_data (default is 'flux_fit').
     x_name : str, optional
@@ -521,31 +528,20 @@ def plot_sources(phot_data, given_fwhm, image=None, flux_name='flux_fit',
     scale : float, optional
         Scaling factor for the aperture sizes and annotation text (default is 1).
     """
-    
-    if image is None:
-        # Load the image from the metadata if not provided
-        image = Fits_Simple(phot_data.meta['image_path'])
-    logger.info(f'Plotting image {image}')
-    
-    if flux_name == 'flux_fit' and 'flux_fit' not in phot_data.colnames:
-        flux_name = 'flux_psf'
-    
-    def get_apertures(phot_data):
-        """Create circular apertures for the sources based on their positions."""
-        x = phot_data[x_name]
-        y = phot_data[y_name]
-        positions = np.transpose((x, y))
-        return CircularAperture(positions, r=2 * given_fwhm * scale)
+    _image = image if isinstance(image, CCDData) else CCDData.read(image)    
+#    if flux_name == 'flux_fit' and 'flux_fit' not in phot_data.colnames:
+#        flux_name = 'flux_psf'
     
     # Separate good and bad photometric data based on group size
-    good_phot_data = phot_data[phot_data['group_size'] <= 1]
-    bad_phot_data = phot_data[phot_data['group_size'] > 1]
-    bad_apertures = get_apertures(bad_phot_data)
-    good_apertures = get_apertures(good_phot_data)
+    is_single = phot_data['group_size'] <= 1
+    nsingle = np.sum(is_single)
+    in_group = phot_data['group_size'] > 1
+    single_apertures = get_apertures(phot_data[is_single], fwhm, scale)
+    group_apertures = get_apertures(phot_data[in_group], fwhm, scale)
     
     # Determine image display limits using ZScale
     interval = ZScaleInterval()
-    vmin, vmax = interval.get_limits(image.masked_array)
+    vmin, vmax = interval.get_limits(_image)
     
     # Set colormap and mask bad pixels with red
     cmap = plt.get_cmap()
@@ -553,31 +549,32 @@ def plot_sources(phot_data, given_fwhm, image=None, flux_name='flux_fit',
     
     # Plot the image and the good/bad sources
     plt.figure(figsize=(12,10))
-    plt.title(image)
-    plt.imshow(image.masked_array, origin='lower', vmin=vmin, vmax=vmax,
+#    plt.title(image)
+    plt.imshow(_image, origin='lower', vmin=vmin, vmax=vmax,
                cmap=cmap, interpolation='nearest')
     plt.colorbar()
-    good_apertures.plot(color='purple', lw=1.5*scale, alpha=1)
-    bad_apertures.plot(color='r', lw=1.5*scale, alpha=1)
+    single_apertures.plot(color='purple', lw=1.5*scale, alpha=1)
+    group_apertures.plot(color='r', lw=1.5*scale, alpha=1)
     
     # Annotate singular sources with label_name and flux_name values
-    y_offset = 3.5*given_fwhm*scale
-    for i in range(len(good_phot_data)):
-        plt.text(good_phot_data[x_name][i], good_phot_data[y_name][i]+y_offset, 
-                 f'{good_phot_data[label_name][i]}: {good_phot_data[flux_name][i]:.0f}',
+    y_offset = 3.5 * fwhm * scale
+    _phot_data = phot_data[is_single]
+    for i in range(nsingle):
+        plt.text(_phot_data[x_name][i], _phot_data[y_name][i]+y_offset, 
+                 f'{_phot_data[label_name][i]}: {_phot_data[flux_name][i]:.0f}',
                  color='white', fontsize=8*scale, ha='center', va='center')
     
     # Annotate grouped sources with label_name and flux_name values in one large stack
-    group_ids = set(bad_phot_data[label_name])
+    _phot_data = phot_data[in_group]
+    group_ids = np.unique(_phot_data[label_name].data)
     for id in group_ids:
-        group = bad_phot_data[bad_phot_data[label_name] == id]
+        group = _phot_data[_phot_data[label_name] == id]
         group_x = np.median(group[x_name])
         group_y = np.median(group[y_name]) + y_offset
         for i in range(len(group)):
-            plt.text(group_x, group_y+i*20*scale, 
-                     f'{id}: {group[flux_name][i]:.0f}',
+            plt.text(group_x, group_y+i*20*scale, f'{id}: {group[flux_name][i]:.0f}',
                      color='red', fontsize=8*scale, ha='center', va='center')
     
     # Show plot
-    plt.gcf().set_dpi(300)
+#    plt.gcf().set_dpi(300)
     plt.show()
