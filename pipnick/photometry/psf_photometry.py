@@ -6,6 +6,7 @@ import numpy as np
 from scipy.spatial import KDTree
 
 from astropy.table import Table
+from astropy.nddata import CCDData
 from astropy.modeling.fitting import LevMarLSQFitter
 from astropy.modeling.functional_models import Moffat2D
 from photutils.detection import IRAFStarFinder
@@ -17,14 +18,64 @@ from pipnick import logger
 from pipnick.utils.fits_class import Fits_Simple
 from pipnick.utils.nickel_data import bad_columns
 from pipnick.utils.log import log_astropy_table
-from pipnick.photometry.moffat_model import EllipticalMoffat2DModel
+from pipnick.photometry.moffat import FitMoffat2D, FitEllipticalMoffat2D, EllipticalMoffat2DModel
 from pipnick.photometry import starfind
 from pipnick.photometry.fit import fit_psf_single, fit_psf_stack, psf_plot, plot_sources
 
 
 #np.set_printoptions(edgeitems=100)
 
-def psf_analysis(image, thresh=10.0, mode='all', fittype='circ',
+def build_moffat_psf_model(image, thresh=15.0, fwhm=7., fittype='circ', pdf_file=None):
+    """
+    Use well-detected and well-separated sources to model the image PSF as a
+    2D Moffat function.
+
+    Parameters
+    ----------
+    image : str, CCDData
+        Image for PSF analysis.
+    thresh : float, optional
+        Detection threshold in units of background standard deviation.
+    fwhm : float, optional
+        Initial estimate of the FWHM
+    mode : str, optional
+        Mode for PSF fitting in photutils package.
+    fittype : str, optional
+        Type of PSF fit to use ('circ' for circular, 'ellip' for elliptical).
+
+    Returns
+    -------
+    stack : numpy.ma.MaskedArray
+        The stacked source image
+    par : numpy.ndarray
+        The best-fit model parameters
+    model : numpy.ndarray
+        The best-fit model sampled at each pixel of the image stamps
+    """
+    # Read the image if necessary
+    _image = image if isinstance(image, CCDData) else CCDData.read(image)
+    source_data = starfind.detect_sources(_image, thresh=thresh, fwhm=fwhm)
+    logger.info(f'Found {len(source_data)} well-separated sources with well-detected fluxes.')
+
+    logger.info('Extracting image stamps.')
+    bkg, stamps = starfind.extract_stamps(_image, source_data)
+    npix_stamp = np.prod(stamps.shape[1:])
+    mask_fraction = np.sum(np.ma.getmaskarray(stamps), axis=(1,2)) / npix_stamp
+    indx = source_data['good'].data & (mask_fraction < 0.01)
+    logger.info(f'Found {np.sum(indx)} good sources to stack for the PSF measurement.')
+
+    if pdf_file is not None:
+        starfind.plot_stamps(stamps[indx], pdf_file, vmin=None, vmax=None)
+
+    # TODO: mean or median?
+    stack = np.ma.mean(stamps[indx], axis=0)
+
+    fitter = FitMoffat2D(stack) if fittype == 'circ' else FitEllipticalMoffat2D(stack)
+    fitter.fit()
+    return stack, fitter.par, fitter.model()
+
+
+def psf_analysis(image, thresh=10.0, guess_fwhm=7., mode='all', fittype='circ',
                  plot_final=True, plot_inters=False):
     """
     Perform PSF photometry on a given image, including source detection and PSF fitting.
@@ -34,12 +85,12 @@ def psf_analysis(image, thresh=10.0, mode='all', fittype='circ',
 
     Parameters
     ----------
-    image : `Fits_Simple` or str
+    image : str, CCDData
         Image for PSF analysis.
-    proc_dir : Path
-        Directory to store intermediate processing products.
     thresh : float, optional
         Detection threshold in units of background standard deviation. Default is 10.0.
+    guess_fwhm : float, optional
+        Initial guess for the FWHM of the PSF
     mode : str, optional
         Mode for PSF fitting in photutils package. Default is 'all'.
     fittype : str, optional
@@ -54,10 +105,11 @@ def psf_analysis(image, thresh=10.0, mode='all', fittype='circ',
     `astropy.table.Table`
         Table containing photometric data for detected sources.
     """
-    logger.info('Finding well-separated sources with well-detected fluxes')
-    source_data = starfind.detect_sources(image, thresh=15., fwhm=7.)
+    psf_stack, moffat_par, moffat_model = build_moffat_psf_model(
+        image, thresh=thresh, fwhm=guess_fwhm, fittype=fittype
+    )
 
-    embed()
+    embed(header='in psf_analysis')
     exit()
 
     bkg, stamps = starfind.extract_stamps(image, source_data)

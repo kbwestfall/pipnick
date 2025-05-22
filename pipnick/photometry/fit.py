@@ -17,8 +17,8 @@ from astropy.stats import SigmaClip
 from photutils.aperture import CircularAperture
 
 from pipnick.utils.fits_class import Fits_Simple
-from pipnick.photometry.moffat_model import FitEllipticalMoffat2D, FitMoffat2D, make_ellipse
-from pipnick.photometry.starfind import generate_stamps
+from pipnick.photometry.moffat import FitEllipticalMoffat2D, FitMoffat2D, make_ellipse
+#from pipnick.photometry.starfind import generate_stamps
 from pipnick.utils.dir_nav import unzip_directories
 from pipnick.utils.nickel_data import plate_scale_approx
 
@@ -218,47 +218,47 @@ def fit_psf_generic(mode, input_base, num_images, fittype='ellip',
             return clipped_coords, clipped_fit_objs, clipped_source_images
 
 
-def get_source_pars(path_list, category_str=None, fittype='ellip'):
-    """
-    Extract source coordinates and Moffat fit parameters from image data.
-
-    Parameters
-    ----------
-    path_list : list
-        List of paths (directories or files) to unzip.
-    category_str : str, optional
-        Category string for identifying the path to data.
-    fittype : str, optional
-        Type of model to fit ('ellip' or 'circ').
-
-    Returns
-    -------
-    source_coords : `numpy.ndarray`
-        Array of source coordinates.
-    source_pars : `numpy.ndarray`
-        Array of source parameters (x0, y0, amplitude, gamma1, gamma2, phi, alpha, background).
-    img_nums : `numpy.ndarray`
-        Array of image numbers corresponding to the sources.
-    """
-    # Unzip directories to get image files
-    images = unzip_directories(path_list, output_format='Path')
-
-    # Create output directories
-    proc_dir = Path('.').resolve() / "proc_files"
-    Path.mkdir(proc_dir, exist_ok=True)
-    proc_subdir = proc_dir / fittype
-    Path.mkdir(proc_subdir, exist_ok=True)
-    base_parent = proc_subdir / category_str
-    Path.mkdir(base_parent, exist_ok=True)
-    base = proc_subdir / category_str / category_str
-
-    # Generate stamps (image of sources) for image data
-    generate_stamps(images, output_base=base)
-
-    # Fit PSF models and get source coordinates and parameters
-    source_coords, source_fits, img_nums = fit_psf_single(base, len(images))
-    source_pars = np.array([fit.par for fit in source_fits])
-    return source_coords, source_pars, img_nums
+#def get_source_pars(path_list, category_str=None, fittype='ellip'):
+#    """
+#    Extract source coordinates and Moffat fit parameters from image data.
+#
+#    Parameters
+#    ----------
+#    path_list : list
+#        List of paths (directories or files) to unzip.
+#    category_str : str, optional
+#        Category string for identifying the path to data.
+#    fittype : str, optional
+#        Type of model to fit ('ellip' or 'circ').
+#
+#    Returns
+#    -------
+#    source_coords : `numpy.ndarray`
+#        Array of source coordinates.
+#    source_pars : `numpy.ndarray`
+#        Array of source parameters (x0, y0, amplitude, gamma1, gamma2, phi, alpha, background).
+#    img_nums : `numpy.ndarray`
+#        Array of image numbers corresponding to the sources.
+#    """
+#    # Unzip directories to get image files
+#    images = unzip_directories(path_list, output_format='Path')
+#
+#    # Create output directories
+#    proc_dir = Path('.').resolve() / "proc_files"
+#    Path.mkdir(proc_dir, exist_ok=True)
+#    proc_subdir = proc_dir / fittype
+#    Path.mkdir(proc_subdir, exist_ok=True)
+#    base_parent = proc_subdir / category_str
+#    Path.mkdir(base_parent, exist_ok=True)
+#    base = proc_subdir / category_str / category_str
+#
+#    # Generate stamps (image of sources) for image data
+#    generate_stamps(images, output_base=base)
+#
+#    # Fit PSF models and get source coordinates and parameters
+#    source_coords, source_fits, img_nums = fit_psf_single(base, len(images))
+#    source_pars = np.array([fit.par for fit in source_fits])
+#    return source_coords, source_pars, img_nums
 
 
 def get_graphable_pars(file_paths, group_name, verbose=False):
