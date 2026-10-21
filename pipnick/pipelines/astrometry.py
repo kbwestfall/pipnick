@@ -1,4 +1,3 @@
-import logging
 import warnings
 import numpy as np
 from astropy.io import fits
@@ -7,6 +6,7 @@ from pathlib import Path
 from astroquery.astrometry_net import AstrometryNet
 from astroquery.exceptions import TimeoutError
 
+from pipnick import log
 from pipnick.utils.nickel_data import (bad_columns, ra_key, dec_key, fwhm_approx,
                                        fov_size_approx)
 from pipnick.utils.dir_nav import organize_files
@@ -14,8 +14,6 @@ from pipnick.utils.dir_nav import organize_files
 ######################################
 ####  ASTROMETRY.NET CALIBRATION  ####
 ######################################
-
-logger = logging.getLogger(__name__)
 
 def astrometry_all(maindir, api_key, use_table=False, resolve=False,
                    excl_files=[], excl_objs=[], excl_filts=[]):
@@ -28,7 +26,7 @@ def astrometry_all(maindir, api_key, use_table=False, resolve=False,
 
     Parameters
     ----------
-    maindir : str or Path
+    maindir : str, :class:`pathlib.Path`
         Path to the main directory containing the reduced directory
         with the FITS files to be astrometrically calibrated.
     api_key : str
@@ -47,10 +45,10 @@ def astrometry_all(maindir, api_key, use_table=False, resolve=False,
 
     Returns
     -------
-    list of Path
+    list of :class:`pathlib.Path`
         List of relative paths to all calibrated FITS images.
     """
-    logger.info(f'---- astrometry_all() called on main directory {maindir}')
+    log.info(f'---- astrometry_all() called on main directory {maindir}')
     ast = AstrometryNet()
     ast.api_key = api_key
     timeout = 60  # Seconds before timing out on initial solve
@@ -90,11 +88,11 @@ def astrometry_all(maindir, api_key, use_table=False, resolve=False,
     
     def check_wcs_header(wcs_header, output_path):
         if wcs_header:
-            logger.info(f"Solution successful, saving WCS header to {output_path}")
+            log.info(f"Solution successful, saving WCS header to {output_path}")
             wcs_header.tofile(output_path, overwrite=True)
             calibrated_fits_paths.append(output_path)
         else:
-            logger.warning(f"Solution failed; skipping this image")
+            log.warning(f"Solution failed; skipping this image")
     
     for image_path in mod_paths:
         
@@ -102,15 +100,18 @@ def astrometry_all(maindir, api_key, use_table=False, resolve=False,
         obj_dir = image_path.parent.name
         output_path = wcs_dir / obj_dir / f"{output_path_stem}_astro.fits"
         if not resolve and output_path.exists():
-            logger.info(f"Returning local copy of {image_path.name}'s solution; astrometry.net not used")
+            log.info(f"Returning local copy of {image_path.name}'s solution; "
+                     "astrometry.net not used")
             calibrated_fits_paths.append(output_path)
             continue
         
-        logger.info(f"Submitting image {image_path.name} to astrometry.net. This may take up to {timeout} seconds")
+        log.info(f"Submitting image {image_path.name} to astrometry.net. This may take up "
+                 f"to {timeout} seconds")
         try:
             wcs_header = ast.solve_from_image(image_path, fwhm=fwhm_approx,
                                               ra_key=ra_key, dec_key=dec_key,
-                                              radius=fov_size_approx/60,  # Max error of RA/Dec guess, in deg
+                                              # Max error of RA/Dec guess, in deg
+                                              radius=fov_size_approx/60,
                                               scale_units='arcminwidth',
                                               scale_type='ul',
                                               scale_lower=fov_size_approx*0.8,
@@ -121,7 +122,8 @@ def astrometry_all(maindir, api_key, use_table=False, resolve=False,
                                               verbose=False)
             check_wcs_header(wcs_header, output_path)
         except TimeoutError as e:
-            logger.info(f"No solution found on first try; will revisit after all images are submitted")
+            log.info("No solution found on first try; will revisit after all images are "
+                     "submitted")
             unsolved_submission_ids.append(e.args[1])
         
     for submission_id in unsolved_submission_ids:
@@ -130,9 +132,9 @@ def astrometry_all(maindir, api_key, use_table=False, resolve=False,
                                                 solve_timeout=120)
             check_wcs_header(wcs_header, output_path)
         except TimeoutError:
-            logger.warning(f"No solution found on second try; skipping.")
+            log.warning(f"No solution found on second try; skipping.")
     
-    logger.info('---- astrometry_all() call ended')
+    log.info('---- astrometry_all() call ended')
     return calibrated_fits_paths
 
 
@@ -145,17 +147,17 @@ def make_cleaned_inputs(image_paths, mod_dir):
 
     Parameters
     ----------
-    image_paths : list of Path
+    image_paths : list of :class:`pathlib.Path`
         List of paths to the input images.
-    mod_dir : Path
+    mod_dir : :class:`pathlib.Path`
         Directory to save the modified FITS files.
 
     Returns
     -------
-    list of Path
+    list of :class:`pathlib.Path`
         List of paths to the modified FITS files.
     """
-    logger.info("Zeroing out masked regions for faster astrometric solves")
+    log.info("Zeroing out masked regions for faster astrometric solves")
     
     mod_paths = []
     for file in image_paths:
@@ -170,7 +172,7 @@ def make_cleaned_inputs(image_paths, mod_dir):
             except KeyError:
                 # If no mask in FITS file, set bad columns to 0
                 data[:, bad_columns] = 0
-                logger.debug("No mask in FITS file--masking Nickel bad columns only")
+                log.debug("No mask in FITS file--masking Nickel bad columns only")
             # Save the modified FITS file to the output directory
             fits.writeto(mod_path, data, hdul[0].header, overwrite=True)
         mod_paths.append(mod_path)
@@ -188,19 +190,19 @@ def get_astrometric_solves(image_paths, astro_dir, mode):
 
     Parameters
     ----------
-    image_paths : list of Path
+    image_paths : list of :class:`pathlib.Path`
         List of paths to the input images.
-    astro_dir : Path
+    astro_dir : :class:`pathlib.Path`
         Path to the directory containing the astrometric solutions.
     mode : str
         Mode for retrieving files ('image' or 'corr').
 
     Returns
     -------
-    list of Path
+    list of :class:`pathlib.Path`
         List of paths to the local copies of astrometric solutions.
     """
-    logger.info("Returning local copies of astrometric solves; astrometry.net not used")
+    log.info("Returning local copies of astrometric solves; astrometry.net not used")
     calibrated_fits_paths = []
     astro_dir = Path(astro_dir)
     image_paths = [Path(image_path) for image_path in image_paths]
@@ -212,6 +214,6 @@ def get_astrometric_solves(image_paths, astro_dir, mode):
         elif mode == 'corr':
             output_path = astro_dir / obj_dir.name / f"{output_path_stem[:-5]}_corr.fits"
         if output_path.exists():
-            logger.debug(f"Found calibrated image {Path(image_path).name}; appending to list")
+            log.debug(f"Found calibrated image {Path(image_path).name}; appending to list")
             calibrated_fits_paths.append(output_path)
     return calibrated_fits_paths

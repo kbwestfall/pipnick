@@ -17,7 +17,7 @@ from photutils.detection import DAOStarFinder
 from skimage import transform
 
 from pipnick.utils.fits_class import Fits_Simple
-from pipnick import logger
+from pipnick import log
 
 
 def plot_stamps(stamps, pdf_file, vmin=None, vmax=None):
@@ -26,7 +26,7 @@ def plot_stamps(stamps, pdf_file, vmin=None, vmax=None):
 
     Parameters
     ----------
-    stamps : numpy.ndarray
+    stamps : :class:`numpy.ndarray`
         Array of stamp images.
     pdf_file : str
         Path to the output PDF file.
@@ -109,11 +109,13 @@ def plot_stamps(stamps, pdf_file, vmin=None, vmax=None):
 #        # Source detection
 #        mean, median, std = sigma_clipped_stats(masked_images[index], sigma=3.)
 #        starfind = DAOStarFinder(fwhm=default_fwhm, threshold=thresh*std)
-#        sources = starfind(masked_images[index].filled(0.0) - median, mask=np.ma.getmaskarray(masked_images[index]))
+#        sources = starfind(masked_images[index].filled(0.0) - median,
+#                           mask=np.ma.getmaskarray(masked_images[index]))
 #        if sources is None:
 #            continue
 #        nsources = len(sources)
-#        ap_centers = np.column_stack((sources['xcentroid'], sources['ycentroid']))  # Source positions
+#        # Source positions
+#        ap_centers = np.column_stack((sources['xcentroid'], sources['ycentroid']))
 #
 #        # Stamp setup
 #            # Scikit-Image uses the bottom left corner to define the coordinate system.  
@@ -129,7 +131,8 @@ def plot_stamps(stamps, pdf_file, vmin=None, vmax=None):
 #        # Process each detected source and add to stamp
 #        for i in range(nsources):
 #            t = transform.EuclideanTransform(translation=-ap_centers[i][::-1] - 0.5 + center)
-#            stamps[i] = transform.warp(masked_images[index].filled(0.0).T, t.inverse, output_shape=stamp_shape, cval=0, order=0).T
+#            stamps[i] = transform.warp(masked_images[index].filled(0.0).T, t.inverse,
+#                                       output_shape=stamp_shape, cval=0, order=0).T
 #            stamps[i, stamps[i] == 0.] = np.ma.masked  # Mask the background
 #            if np.all(np.ma.getmaskarray(stamps[i, r > 3 * default_fwhm])):
 #                continue
@@ -183,7 +186,7 @@ def plot_stamps(stamps, pdf_file, vmin=None, vmax=None):
 #                                                    np.ones(nkeep, dtype=float))),
 #                                axis=0)
 #        
-#        logger.info(f'Working on image {images[index]} ({len(stamps[keep])} stamps)')
+#        log.info(f'Working on image {images[index]} ({len(stamps[keep])} stamps)')
 #
 #        # Plot and save the stamps to a PDF file
 #        pdf_file = output_base.with_suffix(f".{images[index].path.stem.split('_')[0]}.stamps.pdf")
@@ -224,7 +227,7 @@ def detect_sources(image, thresh=15., fwhm=7., inner_bkg=3., outer_bkg=5., min_d
 
     Parameters
     ----------
-    image : str, Path, CCData
+    image : str, :class:`pathlib.Path`, :class:`astropy.nddata.CCDData`
         Image to process
     thresh : float, optional
         Detection threshold in units of the standard deviation in the
@@ -244,7 +247,7 @@ def detect_sources(image, thresh=15., fwhm=7., inner_bkg=3., outer_bkg=5., min_d
 
     Returns
     -------
-    astropy.table.Table
+    :class:`astropy.table.Table`
 
         Table with detected sources and initial metrics. The table metadata
         provides all of the input parameters (except for the image), as well as
@@ -280,13 +283,13 @@ def detect_sources(image, thresh=15., fwhm=7., inner_bkg=3., outer_bkg=5., min_d
     # NOTE: sigma_clipped_stats can work directly on _image (at least for
     # astropy 7.0.1)
     mean, median, std = sigma_clipped_stats(_image, sigma=3.)
-    logger.info(f'Median and standard deviation: {median:.1f} {std:.2f}')
+    log.info(f'Median and standard deviation: {median:.1f} {std:.2f}')
 
     # Source detection
     starfind = DAOStarFinder(fwhm=fwhm, threshold=thresh*std)
     sources = starfind((_image - median).filled(0.0), mask=np.ma.getmaskarray(_image))
     nsources = len(sources)
-    logger.info(f'Detected {nsources} sources.')
+    log.info(f'Detected {nsources} sources.')
 
     # Get the size and flux of each source via Kron measurements
     ap_centers = np.column_stack((sources['xcentroid'], sources['ycentroid']))  # Source positions
@@ -294,7 +297,7 @@ def detect_sources(image, thresh=15., fwhm=7., inner_bkg=3., outer_bkg=5., min_d
             = kron_stats(x, y, np.asanyarray(_image), ap_centers, fwhm, inner_bkg=inner_bkg,
                          outer_bkg=outer_bkg)
     mean_kron_radius = sigma_clipped_stats(kron_radius, sigma=3., maxiters=None)[0]
-    logger.info(f'Mean Kron radius of sources: {mean_kron_radius:.1f}')
+    log.info(f'Mean Kron radius of sources: {mean_kron_radius:.1f}')
     kron_bkg, _, kron_flux = kron_stats(x, y, np.asanyarray(_image), ap_centers, fwhm,
                                         inner_bkg=inner_bkg, outer_bkg=outer_bkg,
                                         source_radius=mean_kron_radius)
@@ -314,7 +317,7 @@ def detect_sources(image, thresh=15., fwhm=7., inner_bkg=3., outer_bkg=5., min_d
     good = (np.ma.argmax(_kflux, axis=1) == np.arange(nsources)) \
             & (kron_flux.data > min_flux) \
             & np.logical_not(np.ma.getmaskarray(kron_flux))
-    logger.info(f'Selected {np.sum(good)} well-separated sources with good flux')
+    log.info(f'Selected {np.sum(good)} well-separated sources with good flux')
 
     meta = {'thresh': thresh, 'fwhm': fwhm, 'inner_bkg': inner_bkg, 'outer_bkg': outer_bkg,
             'min_dist_fwhm': min_dist_fwhm, 'min_flux': min_flux,
@@ -350,11 +353,11 @@ def kron_stats(x, y, img, cen, fwhm, inner_bkg=3., outer_bkg=5., source_radius=N
 
     Parameters
     ----------
-    x, y : numpy.ndarray
+    x, y : :class:`numpy.ndarray`
         X and Y coordinates in pixels.
-    img : numpy.ndarray, numpy.ma.MaskedArray
+    img : :class:`numpy.ndarray`, :class:`numpy.ma.MaskedArray`
         Image data
-    cen : numpy.ndarray
+    cen : :class:`numpy.ndarray`
         Array with the center coordinates of the detected sources.  Shape must
         be (N,2) for N sources.
     inner_bkg : float, optional
@@ -369,11 +372,11 @@ def kron_stats(x, y, img, cen, fwhm, inner_bkg=3., outer_bkg=5., source_radius=N
 
     Returns
     -------
-    kron_bkg : numpy.ndarray
+    kron_bkg : :class:`numpy.ndarray`
         The local background near each source.
-    kron_rad : numpy.ndarray
+    kron_rad : :class:`numpy.ndarray`
         The measured Kron radius in pixels for each source.
-    kron_flx : numpy.ndarray
+    kron_flx : :class:`numpy.ndarray`
         The measured Kron flux for each source.
     """
 
@@ -417,9 +420,9 @@ def extract_stamps(image, source_data, inner_bkg=5., window=10., radius_unit='kr
 
     Parameters
     ----------
-    image : CCDData
+    image : :class:`astropy.nddata.CCDData`
         Image with sources
-    source_data : astropy.table.Table
+    source_data : :class:`astropy.table.Table`
         Table with the source data (see :func:`detect_sources`)
     inner_bkg : float, optional
         Inner radius for background determination
@@ -431,9 +434,9 @@ def extract_stamps(image, source_data, inner_bkg=5., window=10., radius_unit='kr
 
     Returns
     -------
-    bkg : numpy.ndarray
+    bkg : :class:`numpy.ndarray`
         Array with measured background for each stamp
-    stamps : numpy.ndarray
+    stamps : :class:`numpy.ndarray`
         A 3D array with the stamps organized along the first axis.
 
     """

@@ -199,27 +199,27 @@ Output:
 
 Images:
 
-.. image:: /_static/images/d1052_sources.png
+.. image:: /figures/d1052_sources.png
     :alt: NGC 3982 - V
     :align: center
     :width: 600px
 
-.. image:: /_static/images/d1059_sources.png
+.. image:: /figures/d1059_sources.png
     :alt: NGC 6205 - V
     :align: center
     :width: 600px
 
-.. image:: /_static/images/d1047_sources.png
+.. image:: /figures/d1047_sources.png
     :alt: PG1323-085 - V
     :align: center
     :width: 600px
 
-.. image:: /_static/images/d1083_sources.png
+.. image:: /figures/d1083_sources.png
     :alt: UGC 9837 - V
     :align: center
     :width: 600px
 
-.. image:: /_static/images/d1048_sources.png
+.. image:: /figures/d1048_sources.png
     :alt: NGC 4147 - V
     :align: center
     :width: 600px

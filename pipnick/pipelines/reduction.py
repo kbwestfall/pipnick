@@ -14,7 +14,7 @@ import ccdproc
 
 from pipnick import cameras
 from pipnick.utils import dir_nav
-from pipnick import logger
+from pipnick import log
 
 
 def reduce_all(rawdir=None, table=None, rdxdir=None, overwrite=False, append=False):
@@ -22,16 +22,20 @@ def reduce_all(rawdir=None, table=None, rdxdir=None, overwrite=False, append=Fal
     Perform reduction of raw astronomical data frames (overscan subtraction,
     bias subtraction, flat division, cosmic ray masking).
 
+    The processing steps use :func:`ccdproc.subtract_overscan`,
+    :func:`ccdproc.trim_image`, :func:`ccdproc.subtract_bias`,
+    :func:`ccdproc.flat_correct`, and :func:`ccdproc.cosmicray_lacosmic`.
+
     Parameters
     ----------
-    rawdir : str, Path, optional
+    rawdir : str, :class:`pathlib.Path`, optional
         Path to the parent directory of the raw directory containing the raw
         FITS files to be reduced.  If None, ``table`` *must* be provided.
-    table : str, Path, optional
+    table : str, :class:`pathlib.Path`, optional
         A file with the tabulated data to reduce.  If None, this file is
         automatically generated based on the data found and reduced in
         ``rawdir``; see :func:`~pipnick.utils.dir_nav.build_metadata`.
-    rdxdir : str, Path, optional
+    rdxdir : str, :class:`pathlib.Path`, optional
         Top-level directory for the reduced data.  If None, this is the parent
         directory of ``rawdir``.  I.e., if the raw directory is
         ``/User/janedoe/Nickel/raw``, ``rdxdir`` will be set to
@@ -68,14 +72,14 @@ def reduce_all(rawdir=None, table=None, rdxdir=None, overwrite=False, append=Fal
     if not _rdxdir.is_dir():
         _rdxdir.mkdir(parents=True)
 
-    logger.info(f'Reducing data:')
-    logger.info(f'    Metadata file: {metafile}')
-    logger.info(f'    Reduction directory: {_rdxdir}')
+    log.info(f'Reducing data:')
+    log.info(f'    Metadata file: {metafile}')
+    log.info(f'    Reduction directory: {_rdxdir}')
 
     # Get the super bias
     super_bias = get_super_bias(metadata, rdxdir=metadata.meta['rdxdir'], overwrite=overwrite)
     if super_bias is None:
-        logger.warning('No bias frames available. Attempting to continue anyway...')
+        log.warning('No bias frames available. Attempting to continue anyway...')
 
     # Get the super flat.  Try to get sky flats first:
     super_flat = get_super_flats(metadata, rdxdir=metadata.meta['rdxdir'],
@@ -86,13 +90,13 @@ def reduce_all(rawdir=None, table=None, rdxdir=None, overwrite=False, append=Fal
                                      flattype='domeflat', bias=super_bias, overwrite=overwrite)
     # Still no flats.  Warn the user and keep going
     if super_flat is None:
-        logger.warning('No flat frames available.  Attempting to continue anyway...')
+        log.warning('No flat frames available.  Attempting to continue anyway...')
     
     # Assume all unknown frame types are on-sky science observations (but this
     # will include pointing and focus frames!)
     is_science = metadata['frametype'] == 'None'
     if np.sum(is_science) == 0:
-        logger.warning('No science frames available.  Reduction will end.')
+        log.warning('No science frames available.  Reduction will end.')
         return metadata
     
     # Perform the basic processing of all science frames
@@ -111,12 +115,12 @@ def reduce_all(rawdir=None, table=None, rdxdir=None, overwrite=False, append=Fal
         # Trim and overscan correct it
         rdx_file[i] = _rdxdir / dir_nav.default_reduced_file_name(frame[i])
         if rdx_file[i].is_file() and not overwrite:
-            logger.info(f'{rdx_file[i]} exists and overwrite is False.  Continuing...')
+            log.info(f'{rdx_file[i]} exists and overwrite is False.  Continuing...')
             continue
 
         rdx_frame = process_frame(frame[i], flag_cosmics=True, bias=super_bias, flat=flat)
         rdx_frame.write(rdx_file[i], overwrite=True)
-        logger.info(f'Saved processed frame to {rdx_file[i]}')
+        log.info(f'Saved processed frame to {rdx_file[i]}')
 
     # Return the metadata table
     return metadata
@@ -140,18 +144,18 @@ def init_ccddata(frame, bpm=None, saturation=None, gain=None, readnoise=None):
 
     Parameters
     ----------
-    frame : str, Path
+    frame : str, :class:`pathlib.Path`
         Path to the FITS file.
 
     Returns
     -------
-    CCDData
+    :class:`astropy.nddata.CCDData`
         Initialized and processed CCDData object.
     """
 #    warnings.simplefilter('ignore', FITSFixedWarning)
     _frame = Path(frame).absolute()
 
-    logger.info(f'Initializing CCD imaging data in {_frame.name}.')
+    log.info(f'Initializing CCD imaging data in {_frame.name}.')
     ccd = CCDData.read(_frame, unit=units.adu)
 
     # Determine the camera used
@@ -196,18 +200,18 @@ def process_frame(raw_frame, bias=None, flat=None, flag_cosmics=True):
 
     Parameters
     ----------
-    raw_frame : str, Path
+    raw_frame : str, :class:`pathlib.Path`
         Data file to process.
     flag_cosmics : bool, optional
         Identify and mask cosmic rays
-    bias : CCDData, optional
+    bias : :class:`astropy.nddata.CCDData`, optional
         Image to use for the bias subtraction
-    flat : CCDData, optional
+    flat : :class:`astropy.nddata.CCDData`, optional
         Image to use for the field-flattening
 
     Returns
     -------
-    CCDData
+    :class:`astropy.nddata.CCDData`
         Processed CCDData object with overscan subtracted and image trimmed.
     """
 #    warnings.simplefilter("error", RuntimeWarning)
@@ -215,20 +219,20 @@ def process_frame(raw_frame, bias=None, flat=None, flag_cosmics=True):
     try:
         oscansec = eval(f'cameras.{ccd.meta["camera"]}').oscansec(ccd.header)
     except:
-        logger.warning('Could not determine overscan region!')
+        log.warning('Could not determine overscan region!')
         oscansec = None
     else:
-        logger.info('Subtracting overscan and trimming image.')
+        log.info('Subtracting overscan and trimming image.')
         ccd = ccdproc.subtract_overscan(ccd, fits_section=oscansec, overscan_axis=1)
         ccd = ccdproc.trim_image(ccd, fits_section=ccd.header['DATASEC'])
     if bias is not None:
-        logger.info('Subtracting super bias')
+        log.info('Subtracting super bias')
         ccd = ccdproc.subtract_bias(ccd, bias)
     if flat is not None:
-        logger.info('Applying flat-field correction')
+        log.info('Applying flat-field correction')
         ccd = ccdproc.flat_correct(ccd, flat)
     if flag_cosmics:
-        logger.info(f'Removing cosmic rays from {raw_frame}')
+        log.info(f'Removing cosmic rays from {raw_frame}')
         ccd = ccdproc.cosmicray_lacosmic(ccd, gain_apply=False, gain=1.0,
                                          readnoise=ccd.meta['PROCRN'], verbose=True)
     return ccd
@@ -247,7 +251,7 @@ def stack_frames(raw_frames, scale=False, bias=None, flat=None, flag_cosmics=Tru
 
     Returns
     -------
-    CCDData
+    :class:`astropy.nddata.CCDData`
         Combined CCDData object.
     """
     # TODO: For *many* images, this may be too memory intensive.
@@ -261,7 +265,7 @@ def stack_frames(raw_frames, scale=False, bias=None, flat=None, flag_cosmics=Tru
         factor = factor[len(factor)//2] / factor
         rdx_frames = [f.multiply(s) for s,f in zip(factor, rdx_frames)]
 
-    logger.info('Identifying outliers using sigma clipping')
+    log.info('Identifying outliers using sigma clipping')
     combiner = ccdproc.Combiner(rdx_frames)
 
     old_n_masked = 0
@@ -280,7 +284,7 @@ def stack_frames(raw_frames, scale=False, bias=None, flat=None, flag_cosmics=Tru
 #    if frame_type == 'flat':
 #        combiner.scaling = lambda arr: 1/np.ma.mean(arr)
 
-    logger.info('Creating sigma-clipped average image.')
+    log.info('Creating sigma-clipped average image.')
     mean = combiner.average_combine(scale_func=np.ma.mean)
 
     # TODO: Fill the masked regions?
@@ -293,22 +297,22 @@ def get_super_bias(metadata, rdxdir=None, overwrite=False):
 
     Parameters
     ----------
-    metadata : Table
+    metadata : :class:`astropy.table.Table`
         Astropy Table containing file information.
-    rdxdir : str, Path, optional
+    rdxdir : str, :class:`pathlib.Path`, optional
         Directory to save the super bias frame.
     overwrite : bool, optional
         Overwrite any existing files.
 
     Returns
     -------
-    CCDData
+    :class:`astropy.nddata.CCDData`
         SuperBias CCDData object.
     """
     if rdxdir is not None:
         ofile = Path(rdxdir).absolute() / 'Bias.fits'
         if ofile.is_file() and not overwrite:
-            logger.info(f'{ofile} exists.  Loading existing data and continuing.')
+            log.info(f'{ofile} exists.  Loading existing data and continuing.')
             super_bias = CCDData.read(ofile)
             return super_bias
 
@@ -318,7 +322,7 @@ def get_super_bias(metadata, rdxdir=None, overwrite=False):
     if nbias == 0:
         return None
 
-    logger.info(f'Found {nbias} bias frames to process and combine.')
+    log.info(f'Found {nbias} bias frames to process and combine.')
 
     frames = dir_nav.frame_path(metadata, select=indx, path_key='rawdir')
     super_bias = stack_frames(frames, flag_cosmics=False)
@@ -328,7 +332,7 @@ def get_super_bias(metadata, rdxdir=None, overwrite=False):
     
     super_bias.header["OBJECT"] = "Bias"
     super_bias.write(ofile, overwrite=overwrite)
-    logger.info(f"Saved super bias to {ofile}")
+    log.info(f"Saved super bias to {ofile}")
     return super_bias
 
 
@@ -340,13 +344,13 @@ def get_super_flats(metadata, rdxdir=None, flattype='skyflat', bias=None, filter
 
     Parameters
     ----------
-    metadata : Table
+    metadata : :class:`astropy.table.Table`
         Astropy Table containing file information.
-    rdxdir : str, Path, optional
+    rdxdir : str, :class:`pathlib.Path`, optional
         Directory to save the super flat frames.
     flattype : str, optional
         Type of flats to use.  Must be 'domeflat' or 'skyflat'.
-    bias : CCDData, optional
+    bias : :class:`astropy.nddata.CCDData`, optional
         Super bias
     filter : list, optional
         List of strings with the filters to process.  If None, process all
@@ -361,7 +365,7 @@ def get_super_flats(metadata, rdxdir=None, flattype='skyflat', bias=None, filter
     """
     indx = metadata['frametype'] == flattype
     if np.sum(indx) == 0:
-        logger.warning(f'No {flattype} frames found!')
+        log.warning(f'No {flattype} frames found!')
         return None
     
     _rdxdir = None if rdxdir is None else Path(rdxdir).absolute()
@@ -380,11 +384,11 @@ def get_super_flats(metadata, rdxdir=None, flattype='skyflat', bias=None, filter
         if _rdxdir is not None:
             ofile = _rdxdir / f'{title}_{f}.fits'
             if ofile.is_file() and not overwrite:
-                logger.info(f'{ofile} exists.  Loading existing data and continuing.')
+                log.info(f'{ofile} exists.  Loading existing data and continuing.')
                 super_flat[f] = CCDData.read(ofile)
                 continue
     
-        logger.info(f'Processing and combining {np.sum(_indx)} {f} flats')
+        log.info(f'Processing and combining {np.sum(_indx)} {f} flats')
         frames = dir_nav.frame_path(metadata, select=_indx, path_key='rawdir')
         super_flat[f] = stack_frames(frames, scale=True, bias=bias, flag_cosmics=False)
         if _rdxdir is None:
@@ -392,7 +396,7 @@ def get_super_flats(metadata, rdxdir=None, flattype='skyflat', bias=None, filter
 
         super_flat[f].header["OBJECT"] = title
         super_flat[f].write(ofile, overwrite=True)
-        logger.info(f'Saving {f} super {title} to {ofile}')
+        log.info(f'Saving {f} super {title} to {ofile}')
 
     return super_flat
 

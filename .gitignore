@@ -154,7 +154,7 @@ cython_debug/
 
 # setuptools generated version files #
 ######################################
-*/version.py
+pipnick/pkg/version.py
 
 # PyCharm
 #  JetBrains specific template is maintained in a separate JetBrains.gitignore that can
@@ -173,3 +173,5 @@ testing
 *.log.2
 *proc_files
 *.tbl
+# tox working directories
+.tmp/

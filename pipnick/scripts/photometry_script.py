@@ -3,7 +3,6 @@ Perform photometric calibration on reduced images
 """
 
 from pipnick.scripts import scriptbase
-from pipnick.utils import log
 
 class PhotometryPipeline(scriptbase.ScriptBase):
 
@@ -30,20 +29,26 @@ class PhotometryPipeline(scriptbase.ScriptBase):
                             help='Summary file with the metadata for the photometry results.')
 
 #        parser.add_argument('maindir', type=str,
-#                            help='Path to main directory containing reduced directory with the files to be photometrically analyzed.')
+#                            help='Path to main directory containing reduced directory with '
+#                                 'the files to be photometrically analyzed.')
 #        parser.add_argument('-t', '--use_table', action='store_true',
-#                            help='Whether to use the table file to automatically exclude files that have been commented-out')
+#                            help='Whether to use the table file to automatically exclude '
+#                                 'files that have been commented-out')
 #        parser.add_argument('--excl_files', default=[], type=list,
-#                            help='List of file stems substrings to exclude (exact match not necessary).')
+#                            help='List of file stems substrings to exclude (exact match not '
+#                                 'necessary).')
 #        parser.add_argument('--excl_objs', default=[], type=list,
-#                            help='List of object substrings to exclude (exact match not necessary).')
+#                            help='List of object substrings to exclude (exact match not '
+#                                 'necessary).')
 #        parser.add_argument('--excl_filts', default=[], type=list,
-#                            help='List of filter substrings to exclude (exact match not necessary).')
+#                            help='List of filter substrings to exclude (exact match not '
+#                                 'necessary).')
 
         parser.add_argument('-s', '--sigma_thresh', default=8.0, type=float,
                             help='Threshold for source detection = background std * thresh.')
         parser.add_argument('-g', '--group', action='store_true', 
-                            help='Consolidates groups of sources detected together into one source')
+                            help='Consolidates groups of sources detected together into one '
+                                 'source')
         parser.add_argument('-m', '--mode', default='all', type=str,
                             help='Mode to run photutils PSFPhotometry. `all` recommended.',
                             choices=['all', 'new'])
@@ -54,23 +59,19 @@ class PhotometryPipeline(scriptbase.ScriptBase):
 #        parser.add_argument('-pf', '--plot_final', action='store_true', 
 #                            help="Displays images with sources & flux labelled")
 #        parser.add_argument('-pi', '--plot_inters', action='store_true', 
-#                            help="Displays images with initial sources & source groups for inspection")
-        parser.add_argument('-l', '--log', type=str, default=log.default_log_name(__name__),
-                            help='Log file')
-        parser.add_argument('--verbose', '-v', action='count', default=0,
-                            help='Level of verbosity to display (5=highest; "-vv" sets level=2)')
+#                            help="Displays images with initial sources & source groups for "
+#                                 "inspection")
         parser.add_argument('--overwrite', '-o', default=False, action='store_true',
                             help='Overwrite any existing files')
         return parser
 
-    @staticmethod
-    def main(args):
-        
+    @classmethod
+    def main(cls, args):
+
         from pipnick.pipelines.photometry import photometry_all
 
         # Initialize logger
-        log.adjust_global_logger(log_level='INFO' if args.verbose < 1 else args.verbose,
-                                 log_file=args.log)
+        cls.init_log(args)
         
         src_catalogs = photometry_all(rdxdir=args.rdxdir, raw_table=args.raw_table,
                                       phot_table=args.phot_table,
@@ -79,4 +80,3 @@ class PhotometryPipeline(scriptbase.ScriptBase):
                                       overwrite=args.overwrite)
         
 #        return src_catalogs
- 

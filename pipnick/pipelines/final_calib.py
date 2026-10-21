@@ -1,17 +1,15 @@
-import logging
 from pathlib import Path
 from astropy.io import ascii, fits
 from astropy.wcs import WCS
 from astropy.coordinates import SkyCoord
 import astropy.units as u
 
+from pipnick import log
 from pipnick.utils.log import log_astropy_table
 
 #################################################
 ####  This pipeline is currently incomplete  ####
 #################################################
-
-logger = logging.getLogger(__name__)
 
 def final_calib_all(maindir, use_table=False,
                     excl_files=[], excl_objs=[], excl_filts=[]):
@@ -27,7 +25,7 @@ def final_calib_all(maindir, use_table=False,
 
     Parameters
     ----------
-    maindir : str or Path
+    maindir : str, :class:`pathlib.Path`
         Path to the main directory containing the photometric and
         astrometric directories with the WCS astrometric solutions
         and photometric tables to complete calibrating.
@@ -70,11 +68,11 @@ def convert_coords_all(photo_dir, astro_dir, final_calib_dir):
 
     Parameters
     ----------
-    photo_dir : Path or str
+    photo_dir : :class:`pathlib.Path`, str
         Directory containing photometric source catalogs to be converted.
-    astro_dir : Path or str
+    astro_dir : :class:`pathlib.Path`, str
         Directory containing astrometric calibration files.
-    final_calib_dir : Path or str
+    final_calib_dir : :class:`pathlib.Path`, str
         Directory where the final calibrated catalogs will be saved.
 
     Returns
@@ -85,7 +83,8 @@ def convert_coords_all(photo_dir, astro_dir, final_calib_dir):
     """
     
     # Create a dictionary of astrometric calibration files indexed by object name
-    astro_calibs = {astro_calib.name.split('_')[0]: astro_calib for astro_calib in astro_dir.iterdir()}
+    astro_calibs = {astro_calib.name.split('_')[0]: astro_calib
+                    for astro_calib in astro_dir.iterdir()}
     astrophot_datas = {}
 
     # Iterate over all sub-directories in photo_dir
@@ -103,38 +102,42 @@ def convert_coords_all(photo_dir, astro_dir, final_calib_dir):
         Path.mkdir(astrophot_dir, exist_ok=True)
         Path.mkdir(output_dir, exist_ok=True)
         
-        logger.info(f"Saving photometric source catalogs with sky coordinates (RA/Dec) to {output_dir}")
+        log.info("Saving photometric source catalogs with sky coordinates (RA/Dec) to "
+                 f"{output_dir}")
 
         result_datas = {}
         
-        # Convert coordinates for each photometric data file if corresponding calibration is available
+        # Convert coordinates for each photometric data file if corresponding
+        # calibration is available
         for key, phot_data in phot_datas.items():
             output_path = output_dir / (key + '_astrophotsrcs.csv')
             if key in astro_calibs.keys():
                 result_datas[key] = convert_coords(phot_data, output_path, astro_calibs[key]) 
-                result_datas[key].meta['image_path'] = photo_dir.parent.parent / 'reduced' / obj_dir.name / (key + '_red.fits')
+                result_datas[key].meta['image_path'] \
+                        = photo_dir.parent.parent / 'reduced' / obj_dir.name / (key + '_red.fits')
             else:
-                logger.warning(f"No astrometric solution found for image {key}; skipping")
+                log.warning(f"No astrometric solution found for image {key}; skipping")
         
         astrophot_datas[obj_dir.name] = result_datas
     return astrophot_datas
 
 def convert_coords(phot_data_inpath, phot_data_outpath, astrometric_img_path):
     """
-    Convert pixel coordinates in a photometric source catalog to sky coordinates (RA/Dec) using an astrometric FITS file.
+    Convert pixel coordinates in a photometric source catalog to sky coordinates
+    (RA/Dec) using an astrometric FITS file.
 
     Parameters
     ----------
-    phot_data_inpath : Path or str
+    phot_data_inpath : :class:`pathlib.Path`, str
         Path to the input photometric source catalog (CSV format).
-    phot_data_outpath : Path or str
+    phot_data_outpath : :class:`pathlib.Path`, str
         Path to the output catalog with RA/Dec coordinates (CSV format).
-    astrometric_img_path : Path or str
+    astrometric_img_path : :class:`pathlib.Path`, str
         Path to the astrometric FITS file used for coordinate transformation.
 
     Returns
     -------
-    astropy.table.Table
+    :class:`astropy.table.Table`
         The updated photometric source catalog with RA/Dec coordinates.
     """
     
@@ -179,6 +182,6 @@ def convert_coords(phot_data_inpath, phot_data_outpath, astrometric_img_path):
     # Save the updated catalog to the specified output path
     phot_data.write(phot_data_outpath, format='csv', overwrite=True)
     
-    logger.debug(f"Source Catalog with Sky Coordinates: \n{log_astropy_table(phot_data)}")
-    logger.info(f"Saving source catalog with RA/Dec coordinates to {phot_data_outpath}")
+    log.debug(f"Source Catalog with Sky Coordinates: \n{log_astropy_table(phot_data)}")
+    log.info(f"Saving source catalog with RA/Dec coordinates to {phot_data_outpath}")
     return phot_data

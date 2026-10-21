@@ -8,9 +8,11 @@ Submodules
    :maxdepth: 4
 
    pipnick.scripts.astrometry_script
+   pipnick.scripts.metadata
    pipnick.scripts.photometry_script
-   pipnick.scripts.reduction_script
+   pipnick.scripts.reduce
    pipnick.scripts.scriptbase
+   pipnick.scripts.version
 
 Module contents
 ---------------
@@ -18,5 +20,5 @@ Module contents
 .. automodule:: pipnick.scripts
    :members:
    :private-members:
-   :undoc-members:
    :show-inheritance:
+   :undoc-members:

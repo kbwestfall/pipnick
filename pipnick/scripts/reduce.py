@@ -4,7 +4,6 @@ bias subtraction, flat division, cosmic ray masking)
 """ 
 
 from pipnick.scripts import scriptbase
-from pipnick.utils import log
 
 class Reduce(scriptbase.ScriptBase):
 
@@ -22,10 +21,6 @@ class Reduce(scriptbase.ScriptBase):
                             help='File with or for relevant metadata for the raw files to be '
                                  'processed by the data reduction script.')
 #        parser.add_argument('-d', '--display', action='store_true', help="Display reduced images")
-        parser.add_argument('-v', '--verbose', action='count', default=0,
-                            help='Level of verbosity to display (5=highest; "-vv" sets level=2)')
-        parser.add_argument('-l', '--log', type=str, default=log.default_log_name(__name__),
-                            help='Log file')
         parser.add_argument('-o', '--overwrite', default=False, action='store_true',
                             help='Overwrite any existing files')
         parser.add_argument('-a', '--append', default=False, action='store_true',
@@ -35,14 +30,13 @@ class Reduce(scriptbase.ScriptBase):
                                  'entire reduction again from scratch.')
         return parser
 
-    @staticmethod
-    def main(args):
+    @classmethod
+    def main(cls, args):
         from pipnick.pipelines.reduction import reduce_all
         from pipnick.utils.display_fits import display_many_nickel
 
         # Initialize logger
-        log.adjust_global_logger(log_level='INFO' if args.verbose < 1 else args.verbose,
-                                 log_file=args.log)
+        cls.init_log(args)
 
         # Reduce the images
         metadata = reduce_all(rawdir=args.rawdir, table=args.raw_table, rdxdir=args.rdxdir,

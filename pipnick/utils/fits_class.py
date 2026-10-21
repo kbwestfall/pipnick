@@ -6,6 +6,7 @@ from astropy.visualization import ZScaleInterval
 from pathlib import Path
 from typing import Union
 
+from pipnick import log
 from pipnick.utils.nickel_data import (ccd_shape, fov_shape)
 #from pipnick.utils.nickel_masks import get_masks_from_file
 
@@ -15,15 +16,15 @@ class Fits_Simple:
 
     Attributes
     ----------
-    path : Path
+    path : :class:`pathlib.Path`
         The file path to the FITS image.
     filename : str
         The name of the FITS file.
     filenamebase : str
         The base name of the FITS file (before any underscores).
-    _data : ndarray
+    _data : :class:`numpy.ndarray`
         Cached image data from the FITS file.
-    _mask : ndarray
+    _mask : :class:`numpy.ndarray`
         Cached mask data from the FITS file.
     """
 
@@ -41,7 +42,7 @@ class Fits_Simple:
 
         Returns
         -------
-        Fits_Simple
+        :class:`~pipnick.utils.fits_class.Fits_Simple`
             An instance of the Fits_Simple class.
         """
         if args and isinstance(args[0], cls):
@@ -54,7 +55,7 @@ class Fits_Simple:
 
         Parameters
         ----------
-        image_path : Union[str, Path]
+        image_path : str, :class:`pathlib.Path`
             The file path to the FITS image. Can be a string or a Path object.
         """
         if isinstance(image_path, Fits_Simple):
@@ -74,7 +75,7 @@ class Fits_Simple:
 
         Returns
         -------
-        header : Header
+        header : :class:`astropy.io.fits.Header`
             The header information from the FITS file.
         """
         with fits.open(self.path) as hdul:
@@ -87,7 +88,7 @@ class Fits_Simple:
 
         Returns
         -------
-        data : ndarray
+        data : :class:`numpy.ndarray`
             The image data from the FITS file.
         """
         if self._data is None:
@@ -102,7 +103,7 @@ class Fits_Simple:
 
         Parameters
         ----------
-        new_data : ndarray
+        new_data : :class:`numpy.ndarray`
             The new data to replace the existing data in the FITS file.
         """
         self._data = new_data
@@ -115,7 +116,7 @@ class Fits_Simple:
 
         Returns
         -------
-        mask : ndarray
+        mask : :class:`numpy.ndarray`
             The mask data from the FITS file or a default mask.
         """
         if self._mask is None:
@@ -123,7 +124,7 @@ class Fits_Simple:
                 try:
                     self._mask = hdul['MASK'].data
                 except KeyError:
-                    logger.debug(f'No mask in FITS file {self.path.name}; returning default mask')
+                    log.debug(f'No mask in FITS file {self.path.name}; returning default mask')
                     if all(self.shape == ccd_shape):
                         self._mask = get_masks_from_file('mask')
                     elif all(self.shape == fov_shape):
@@ -137,16 +138,17 @@ class Fits_Simple:
 
         Parameters
         ----------
-        new_mask : ndarray
+        new_mask : :class:`numpy.ndarray`
             The new mask to replace the existing mask in the FITS file.
 
         Raises
         ------
-        ValueError
+        :exc:`ValueError`
             If the shape of the new mask does not match the shape of the data.
         """
         if new_mask.shape != self.shape:
-            raise ValueError(f"new_mask must have same shape as data {self.data.shape}. new_mask.shape = {new_mask.shape}")
+            raise ValueError(f"new_mask must have same shape as data {self.data.shape}. "
+                             f"new_mask.shape = {new_mask.shape}")
         self._mask = new_mask
 
     @property
@@ -156,7 +158,7 @@ class Fits_Simple:
 
         Returns
         -------
-        masked_array : MaskedArray
+        masked_array : :class:`numpy.ma.MaskedArray`
             The masked array combining the FITS data and mask.
         """
         return ma.masked_array(self.data, self.mask)

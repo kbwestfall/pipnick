@@ -66,7 +66,7 @@ class NickelCamera:
 
         Parameters
         ----------
-        rawfile : str, Path
+        rawfile : str, :class:`pathlib.Path`
             Raw file to reduce
         keys : list of str
             A list of metadata keys to (try to) extract from the header.  The
@@ -208,13 +208,13 @@ def get_header(inp):
 
     Parameters
     ----------
-    inp : str, Path, fits.Header
+    inp : str, :class:`pathlib.Path`, :class:`astropy.io.fits.Header`
         File or header to read.  If a Header object, the object is simply
         returned.
 
     Returns
     -------
-    hdr : fits.Header
+    hdr : :class:`astropy.io.fits.Header`
         Fits header
     """
     if isinstance(inp, fits.Header):

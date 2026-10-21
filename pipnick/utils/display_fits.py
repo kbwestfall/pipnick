@@ -41,7 +41,7 @@ def display_nickel(image: Union[str, Path, Fits_Simple]):
 
     Parameters
     ----------
-    image : Union[str, Path, Fits_Simple]
+    image : str, :class:`pathlib.Path`, :class:`~pipnick.utils.fits_class.Fits_Simple`
         The Fits_Simple object or path to the FITS image.
     """
     if not isinstance(image, Fits_Simple):
@@ -82,7 +82,7 @@ def show_image(image: Union[str, Path, CCDData]):
 
     Parameters
     ----------
-    image : Union[str, Path, Fits_Simple]
+    image : str, :class:`pathlib.Path`, :class:`~pipnick.utils.fits_class.Fits_Simple`
         The Fits_Simple object or path to the FITS image.
     """
     if not isinstance(image, CCDData):
@@ -100,4 +100,3 @@ def show_image(image: Union[str, Path, CCDData]):
     ax.imshow(data_masked, origin='lower', cmap=cmap, vmin=vmin, vmax=vmax)
     pyplot.colorbar(cm.ScalarMappable(cmap=cmap), ax=ax)
     pyplot.show()
-   

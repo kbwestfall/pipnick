@@ -8,7 +8,6 @@ from matplotlib import pyplot as plt
 from matplotlib import ticker
 from matplotlib.backends.backend_pdf import PdfPages
 from pathlib import Path
-import logging
 
 from astropy.io import fits
 from astropy.modeling.functional_models import Moffat1D
@@ -17,28 +16,34 @@ from astropy.stats import SigmaClip
 from astropy.nddata import CCDData
 from photutils.aperture import CircularAperture
 
+from pipnick import log
 from pipnick.utils.fits_class import Fits_Simple
 from pipnick.photometry.moffat import FitEllipticalMoffat2D, FitMoffat2D, make_ellipse
 #from pipnick.photometry.starfind import generate_stamps
 from pipnick.utils.dir_nav import unzip_directories
 from pipnick.utils.nickel_data import plate_scale_approx
 
-logger = logging.getLogger(__name__)
-
 
 def fit_psf_stack(input_base, num_images, fittype='ellip', ofile=None):
     """
     Fit one PSF to the stack of all sources found in the directory specified,
-    and save this information to relevant files
+    and save this information to relevant files.
 
-    Args:
-        input_base (Path): Base of path to files w/ stamp data
-        num_images (int): Number of images to process.
-        fittype (str, optional): Type of model to fit ('ellip' or 'circ')
-        ofile (str, optional): Output file path.
-        
-    Returns:
-        ndarray: Fit of all sources stacked (fit.par = parameters)
+    Parameters
+    ----------
+    input_base : :class:`pathlib.Path`
+        Base of path to files with stamp data.
+    num_images : int
+        Number of images to process.
+    fittype : str, optional
+        Type of model to fit ('ellip' or 'circ').
+    ofile : str, optional
+        Output file path.
+
+    Returns
+    -------
+    :class:`numpy.ndarray`
+        Fit of all sources stacked (fit.par = parameters).
     """
     return fit_psf_generic('stack', input_base, num_images, fittype, 
                            ofile=ofile)
@@ -46,18 +51,27 @@ def fit_psf_stack(input_base, num_images, fittype='ellip', ofile=None):
 def fit_psf_single(input_base, num_images, fittype='ellip', sigma_clip=True):
     """
     Fit a PSF to each source found in the directory specified, and return the
-    source coordinates, fit parameters, and image number
+    source coordinates, fit parameters, and image number.
 
-    Args:
-        input_base (Path): Base of path to files w/ stamp data
-        num_images (int): Number of images to process.
-        fittype (str, optional): Type of model to fit ('ellip' or 'circ')
-        sigma_clip (bool, optional): If True, remove PSF fit sources w/ unusual FWHM
-        
-    Returns:
-        ndarray: Coordinates of all sources
-        ndarray: Fits of all sources (fit.par = parameters)
-        ndarray: Image number of all sources
+    Parameters
+    ----------
+    input_base : :class:`pathlib.Path`
+        Base of path to files with stamp data.
+    num_images : int
+        Number of images to process.
+    fittype : str, optional
+        Type of model to fit ('ellip' or 'circ').
+    sigma_clip : bool, optional
+        If True, remove PSF fit sources with unusual FWHM.
+
+    Returns
+    -------
+    coords : :class:`numpy.ndarray`
+        Coordinates of all sources.
+    fits : :class:`numpy.ndarray`
+        Fits of all sources (fit.par = parameters).
+    img_nums : :class:`numpy.ndarray`
+        Image number of all sources.
     """
     return fit_psf_generic('single', input_base, num_images, fittype, 
                            sigma_clip=sigma_clip, ofile=None)
@@ -67,13 +81,20 @@ def fit_psf_generic(mode, input_base, num_images, fittype='ellip',
     """
     Generic function to fit PSFs to images.
 
-    Args:
-        mode (str): Mode of fitting ('stack' or 'single').
-        input_base (Path): Base of path to files w/ stamp data
-        num_images (int): Number of images in directory to process.
-        fittype (str, optional): Type of model to fit ('ellip' or 'circ')
-        sigma_clip (bool, optional): If True, remove PSF fit sources w/ unusual FWHM
-        ofile (str, optional): Output file path for 'stack' mode.
+    Parameters
+    ----------
+    mode : str
+        Mode of fitting ('stack' or 'single').
+    input_base : :class:`pathlib.Path`
+        Base of path to files with stamp data.
+    num_images : int
+        Number of images in directory to process.
+    fittype : str, optional
+        Type of model to fit ('ellip' or 'circ').
+    sigma_clip : bool, optional
+        If True, remove PSF fit sources with unusual FWHM.
+    ofile : str, optional
+        Output file path for 'stack' mode.
     """
     if fittype == 'ellip':
         fitter = FitEllipticalMoffat2D  # Type of fitting function to use
@@ -213,8 +234,9 @@ def fit_psf_generic(mode, input_base, num_images, fittype='ellip',
                 clipped_coords = clipped_coords[~masked_fwhm2.mask]
                 clipped_source_images = clipped_source_images[~masked_fwhm2.mask]
             
-            logger.info(f"Number of sources removed in sigma clipping = {len(fit_pars) - len(clipped_fit_objs)}")
-            logger.info(f"Number of sources remaining = {len(clipped_fit_objs)}")
+            log.info("Number of sources removed in sigma clipping = "
+                     f"{len(fit_pars) - len(clipped_fit_objs)}")
+            log.info(f"Number of sources remaining = {len(clipped_fit_objs)}")
             
             return clipped_coords, clipped_fit_objs, clipped_source_images
 
@@ -325,16 +347,16 @@ def get_param_list(param_type, pars, shape, img_nums=None):
     ----------
     param_type : str
         Type of parameter ('fwhm', 'fwhm residuals', 'phi', 'ecc').
-    pars : `numpy.ndarray`
+    pars : :class:`numpy.ndarray`
         Fit parameters (list of par).
     shape : tuple
         Shape to output param_list.
-    img_nums : `numpy.ndarray`, optional
+    img_nums : :class:`numpy.ndarray`, optional
         Image number for each source.
 
     Returns
     -------
-    param_list : `numpy.ndarray`
+    param_list : :class:`numpy.ndarray`
         List of parameter values.
     color_range : list
         Range of colors for plotting.
@@ -343,7 +365,7 @@ def get_param_list(param_type, pars, shape, img_nums=None):
 
     Raises
     ------
-    ValueError
+    :exc:`ValueError`
         If the input `param_type` is not 'fwhm', 'phi', 'ecc', or 'fwhm residuals'.
     """
     if param_type == 'fwhm':
@@ -387,12 +409,20 @@ def get_param_list(param_type, pars, shape, img_nums=None):
 
 def psf_plot(plot_file, fit, fittype='ellip', show=False, plot_fit=True):
     """
-    Plot the PSF fitting results and save to a PDF
+    Plot the PSF fitting results and save to a PDF.
 
-    Args:
-        plot_file (str): Output PDF file path.
-        fit (object): Fitting results.
-        verbose (bool, optional): If True, print detailed output during processing.
+    Parameters
+    ----------
+    plot_file : :class:`pathlib.Path`
+        Output PDF file path.
+    fit : :class:`~.FitMoffat2D`, :class:`~.FitEllipticalMoffat2D`
+        Fitting results.
+    fittype : str, optional
+        Type of model fit.  Currently only 'ellip' is implemented.
+    show : bool, optional
+        Show the plot.
+    plot_fit : bool, optional
+        Include the model fit in the plot.
     """
     if fittype != 'ellip':
         raise ValueError(f"psf_plot() not yet implemented for fittype={fittype}")
@@ -512,9 +542,9 @@ def plot_sources(image, phot_data, fwhm, flux_name='flux_fit',
 
     Parameters
     ----------
-    image : str, CCDData
+    image : str, :class:`astropy.nddata.CCDData`
         Image to plot the sources on. If None, it is loaded from the metadata.
-    phot_data : Table
+    phot_data : :class:`astropy.table.Table`
         Photometric data containing positions and fluxes of sources.
     given_fwhm : float
         Full-width half-maximum (FWHM) of the sources to set aperture sizes.
@@ -525,7 +555,8 @@ def plot_sources(image, phot_data, fwhm, flux_name='flux_fit',
     y_name : str, optional
         Name of the y-coordinate column in phot_data (default is 'y_fit').
     label_name : str, optional
-        Name of the label column in phot_data to use for annotating sources (default is 'group_id').
+        Name of the label column in phot_data to use for annotating sources
+        (default is 'group_id').
     scale : float, optional
         Scaling factor for the aperture sizes and annotation text (default is 1).
     """

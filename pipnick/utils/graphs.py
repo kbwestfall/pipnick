@@ -1,5 +1,4 @@
 import numpy as np
-import logging
 from matplotlib import pyplot as plt
 from matplotlib import cm
 from matplotlib.colors import ListedColormap
@@ -8,10 +7,9 @@ from loess.loess_2d import loess_2d
 from photutils.aperture import CircularAperture
 from astropy.visualization import ZScaleInterval
 
+from pipnick import log
 from pipnick.utils.nickel_data import ccd_shape
 from pipnick.utils.fits_class import Fits_Simple
-
-logger = logging.getLogger(__name__)
 
 def smooth_contour(data_x, data_y, data_vals, color_range, backgrd_ax=None, 
                    frac=0.3, title=None, category_str=None):
@@ -20,15 +18,15 @@ def smooth_contour(data_x, data_y, data_vals, color_range, backgrd_ax=None,
 
     Parameters
     ----------
-    data_x : ndarray
+    data_x : :class:`numpy.ndarray`
         Array of x-coordinates of the data points.
-    data_y : ndarray
+    data_y : :class:`numpy.ndarray`
         Array of y-coordinates of the data points.
-    data_vals : ndarray
+    data_vals : :class:`numpy.ndarray`
         Array of data values at the corresponding (x, y) points.
     color_range : tuple
         Tuple specifying the range of colors for the contour levels (min, max).
-    backgrd_ax : matplotlib.axes.Axes, optional
+    backgrd_ax : :class:`matplotlib.axes.Axes`, optional
         Background axes to plot on. If None, a new figure and axes are created.
     frac : float, optional
         Fraction of data used to compute locally weighted regression (default is 0.3).
@@ -39,9 +37,9 @@ def smooth_contour(data_x, data_y, data_vals, color_range, backgrd_ax=None,
 
     Returns
     -------
-    ax : matplotlib.axes.Axes
+    ax : :class:`matplotlib.axes.Axes`
         Axes object with the contour plot.
-    cp : QuadContourSet or None
+    cp : :class:`matplotlib.contour.QuadContourSet`, None
         Contour set from the plot. None if the plot could not be generated.
     """
     
@@ -65,8 +63,8 @@ def smooth_contour(data_x, data_y, data_vals, color_range, backgrd_ax=None,
         param_list, _ = loess_2d(data_x, data_y, data_vals, xnew=grid_x.flatten(),
                                  ynew=grid_y.flatten(), frac=frac)
     except np.linalg.LinAlgError:
-        logger.warning("LinAlgError: SVD did not converge in Linear Least Squares")
-        logger.warning("Skipping this contour plot")
+        log.warning("LinAlgError: SVD did not converge in Linear Least Squares")
+        log.warning("Skipping this contour plot")
         return ax, None
     
     # Reshape the smoothed parameters to match the grid shape
@@ -91,15 +89,15 @@ def scatter_sources(data_x, data_y, data_vals, color_range, backgrd_ax=None,
 
     Parameters
     ----------
-    data_x : ndarray
+    data_x : :class:`numpy.ndarray`
         Array of x-coordinates of the data points.
-    data_y : ndarray
+    data_y : :class:`numpy.ndarray`
         Array of y-coordinates of the data points.
-    data_vals : ndarray
+    data_vals : :class:`numpy.ndarray`
         Array of data values at the corresponding (x, y) points.
     color_range : tuple
         Tuple specifying the range of colors for the scatter points (min, max).
-    backgrd_ax : matplotlib.axes.Axes, optional
+    backgrd_ax : :class:`matplotlib.axes.Axes`, optional
         Background axes to plot on. If None, a new figure and axes are created.
     title : str, optional
         Title of the plot.
@@ -108,9 +106,9 @@ def scatter_sources(data_x, data_y, data_vals, color_range, backgrd_ax=None,
 
     Returns
     -------
-    ax : matplotlib.axes.Axes
+    ax : :class:`matplotlib.axes.Axes`
         Axes object with the scatter plot.
-    cmap_custom : ListedColormap
+    cmap_custom : :class:`matplotlib.colors.ListedColormap`
         Colormap used for the scatter plot.
     """
     
@@ -151,11 +149,11 @@ def plot_sources(phot_data, given_fwhm, image=None, flux_name='flux_fit',
 
     Parameters
     ----------
-    phot_data : Table
+    phot_data : :class:`astropy.table.Table`
         Photometric data containing positions and fluxes of sources.
     given_fwhm : float
         Full-width half-maximum (FWHM) of the sources to set aperture sizes.
-    image : Fits_Simple, optional
+    image : :class:`~pipnick.utils.fits_class.Fits_Simple`, optional
         Image to plot the sources on. If None, it is loaded from the metadata.
     flux_name : str, optional
         Name of the flux column in phot_data (default is 'flux_fit').
@@ -164,7 +162,8 @@ def plot_sources(phot_data, given_fwhm, image=None, flux_name='flux_fit',
     y_name : str, optional
         Name of the y-coordinate column in phot_data (default is 'y_fit').
     label_name : str, optional
-        Name of the label column in phot_data to use for annotating sources (default is 'group_id').
+        Name of the label column in phot_data to use for annotating sources
+        (default is 'group_id').
     scale : float, optional
         Scaling factor for the aperture sizes and annotation text (default is 1).
 
@@ -176,7 +175,7 @@ def plot_sources(phot_data, given_fwhm, image=None, flux_name='flux_fit',
     if image is None:
         # Load the image from the metadata if not provided
         image = Fits_Simple(phot_data.meta['image_path'])
-    logger.info(f'Plotting image {image}')
+    log.info(f'Plotting image {image}')
     
     if flux_name == 'flux_fit' and 'flux_fit' not in phot_data.colnames:
         flux_name = 'flux_psf'

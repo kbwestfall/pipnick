@@ -22,17 +22,17 @@ def photometric_calibration_coefficients_iterej(mag_c, mag_i, airmass, color_def
 
     Parameters
     ----------
-    mag_c : `numpy.ndarray`
+    mag_c : :class:`numpy.ndarray`
         Known catalog stellar magnitudes.  Shape must match ``mag_i``.
-    mag_i : `numpy.ndarray`
+    mag_i : :class:`numpy.ndarray`
         Measured instrumental magnitudes, :math:`-2.5\log_{10}(f)` with
         :math:`f` in counts.  Shape is :math:`(N_{\rm obs}, N_{\rm
         band})`, where :math:`N_{\rm obs}` is the number of independent
         observations and :math:`N_{\rm band}` is the number of broadband
         filters used.
-    airmass : `numpy.ndarray`
+    airmass : :class:`numpy.ndarray`
         Airmass of each observation.  Shape must match ``mag_i``.
-    color_defs : `numpy.ndarray`
+    color_defs : :class:`numpy.ndarray`
         An array indicating how to construct the color used for
         calibrating each magnitude.  Shape must be :math:`(N_{\rm band},
         2)`.  The array contents provide the column indices in ``mag_c``
@@ -42,30 +42,30 @@ def photometric_calibration_coefficients_iterej(mag_c, mag_i, airmass, color_def
         calibrate the fluxes in ``mag_i[:,0]``, use
         ``mag_c[:,2]-mag_c[:,1]`` to construct the color used to
         calibrate the fluxes in ``mag_i[:,1]``, etc.
-    order : :obj:`int`, optional
+    order : int, optional
         Order of the color terms.  Order=1 adopts only linear terms; see
         :func:`photometric_calibration_coefficients`.
-    weights : `numpy.ndarray`, optional
+    weights : :class:`numpy.ndarray`, optional
         Weights for each measured magnitude.  If None, weights are
         uniform.  Shape must match ``mag_i``.
-    gpm : `numpy.ndarray`, optional
+    gpm : :class:`numpy.ndarray`, optional
         Boolean flag selecting valid measurements.  Shape must match
         ``mag_i``.
-    rej : :obj:`float`, optional
+    rej : float, optional
         Number of standard deviations used for rejecting data points
         during each iteration.
-    maxiter : :obj:`int`, optional
+    maxiter : int, optional
         Maximum number of fit/rejection iterations.
 
     Returns
     -------
-    coeff : `numpy.ndarray`
+    coeff : :class:`numpy.ndarray`
         Best-fit calibration coefficients; one set per broadband filter.
-    app_mag : `numpy.ndarray`
+    app_mag : :class:`numpy.ndarray`
         Apparent magnitudes constructed by combining the instrumental
         magnitudes with the calibration coefficients.  See
         :func:`apply_photometric_calibration`.  Shape matches ``mag_i``.
-    gpm : `numpy.ndarray`
+    gpm : :class:`numpy.ndarray`
         A boolean array selecting the data used during the calibration.
         Shape matches ``mag_i``.
 
@@ -135,27 +135,27 @@ def photometric_calibration_coefficients(mag_c, color_c, mag_i, airmass, order=2
 
     Parameters
     ----------
-    mag_c : `numpy.ndarray`
+    mag_c : :class:`numpy.ndarray`
         Known catalog stellar magnitudes
-    color_c : `numpy.ndarray`
+    color_c : :class:`numpy.ndarray`
         Known catalog stellar colors
-    mag_i : `numpy.ndarray`
+    mag_i : :class:`numpy.ndarray`
         Measured instrumental magnitudes, :math:`-2.5\log_{10}(f)` with
         :math:`f` in counts.
-    airmass : `numpy.ndarray`
+    airmass : :class:`numpy.ndarray`
         Airmass of each observation.
-    order : :obj:`int`, optional
+    order : int, optional
         Order of the color terms.  Order=1 adopts only linear terms.
         To include quadratic terms, set ``order=2``, etc.
-    weights : `numpy.ndarray`, optional
+    weights : :class:`numpy.ndarray`, optional
         Weights for each measured magnitude.  If None, weights are
         uniform.
-    gpm : `numpy.ndarray`, optional
+    gpm : :class:`numpy.ndarray`, optional
         Boolean flag selection valid measurements.
 
     Returns
     -------
-    `numpy.ndarray`
+    :class:`numpy.ndarray`
         Returns the series of :math:`n+3` coefficients, where :math:`n`
         is the fit ``order``.
     """
@@ -184,17 +184,17 @@ def calibration_design_matrix(airmass, color, order=2):
     Parameters
     ----------
 
-    airmass : `numpy.ndarray`
+    airmass : :class:`numpy.ndarray`
         1D array with the airmass of each observation
-    color : `numpy.ndarray`
+    color : :class:`numpy.ndarray`
         1D array with the stellar colors
-    order : :obj:`int`, optional
+    order : int, optional
         Order of the color terms.  Order=1 adopts only linear terms.
         To include quadratic terms, set ``order=2``, etc.
    
     Returns
     -------
-    x : `numpy.ndarray`
+    x : :class:`numpy.ndarray`
         The result for eqn. 3.2 from Harris et al. (1981) for x_ij.
     """
     x = [np.ones_like(airmass), airmass, airmass*color, color] 
@@ -213,21 +213,21 @@ def apparent_mag(mag_i, color, airmass, coeffs):
 
     Parameters
     ----------
-    mag_i : `numpy.ndarray`
+    mag_i : :class:`numpy.ndarray`
         1D vector with the measured instrumental magnitudes,
         :math:`-2.5\log_{10}(f)` with :math:`f` in counts.
-    color : `numpy.ndarray`
+    color : :class:`numpy.ndarray`
         Known catalog stellar colors, *not* the instrumental colors.
-    airmass : `numpy.ndarray`
+    airmass : :class:`numpy.ndarray`
         Airmass of each observation.
-    coeffs : `numpy.ndarray`
+    coeffs : :class:`numpy.ndarray`
         1D array with the calibration coefficients.  The order of the
         fit is 3 less than the length of this array; i.e., this should
         contain 5 coefficients for an order-2 fit.
     
     Returns
     -------
-    `numpy.ndarray`
+    :class:`numpy.ndarray`
         1D vector with the calibrated apparent magnitudes.
     """
     x = calibration_design_matrix(airmass, color, len(coeffs)-3)
@@ -251,17 +251,17 @@ def apply_photometric_calibration(mag, airmass, coeff, color_defs, atol=1e-2, ma
 
     Parameters
     ----------
-    mag : `numpy.ndarray`
+    mag : :class:`numpy.ndarray`
         The instrumental magnitudes to calibrate, where
         :math:`-2.5\log_{10}(f)` with :math:`f` in counts.  Shape is
         :math:`(N_{\rm obs}, N_{\rm band})`, where :math:`N_{\rm obs}`
         is the number of independent observations and :math:`N_{\rm
         band}` is the number of broadband filters used.
-    airmass : `numpy.ndarray`
+    airmass : :class:`numpy.ndarray`
         Airmass of each observation.  Shape must match ``mag``.
-    coeff : `numpy.ndarray`
+    coeff : :class:`numpy.ndarray`
         Best-fit calibration coefficients; one set per broadband filter.
-    color_defs : `numpy.ndarray`
+    color_defs : :class:`numpy.ndarray`
         An array indicating how to construct the color used for
         calibrating each magnitude.  Shape must be :math:`(N_{\rm band},
         2)`.  The array contents provide the column indices in ``mag_c``
@@ -271,23 +271,23 @@ def apply_photometric_calibration(mag, airmass, coeff, color_defs, atol=1e-2, ma
         calibrate the fluxes in ``mag_i[:,0]``, use
         ``mag_c[:,2]-mag_c[:,1]`` to construct the color used to
         calibrate the fluxes in ``mag_i[:,1]``, etc.
-    atol : :obj:`float`, optional
+    atol : float, optional
         The absolute tolerance for the RMS difference between the
         original and updated colors; see function description.
-    maxiter : :obj:`int`, optional
+    maxiter : int, optional
         Maximum number of update iterations.
-    gpm : `numpy.ndarray`, optional
+    gpm : :class:`numpy.ndarray`, optional
         Boolean flag selecting valid measurements.  Shape must match
         ``mag``.
 
     Returns
     -------
-    app_mag : `numpy.ndarray`
+    app_mag : :class:`numpy.ndarray`
         Calibrated apparent magnitudes.  Shape matches ``mag``.
 
     Raises
     ------
-    ValueError
+    :exc:`ValueError`
         Raised if input arrays have inappropriate/mismatching shapes.
 
     """
