@@ -1,14 +1,15 @@
 import numpy as np
-import logging
+
+from astropy.nddata import CCDData
 from photutils.aperture import CircularAperture
 from photutils.aperture import ApertureStats
 
+from pipnick import logger
 from pipnick.utils.fits_class import Fits_Simple
 from pipnick.utils.log import log_astropy_table
 
-logger = logging.getLogger(__name__)
 
-def aperture_analysis(phot_data, image, aper_size=8.0):
+def aperture_analysis(image, x, y, aper_size=8.0):
     """
     Perform aperture photometry on an image, based on a PSF photometry
     source catalog.
@@ -18,12 +19,12 @@ def aperture_analysis(phot_data, image, aper_size=8.0):
 
     Parameters
     ----------
-    phot_data : `astropy.table.Table`
-        Table of photometric data, including source coordinates and local background.
-    image : `Fits_Simple` or str
+    image : str, CCDData
         Image from which to perform aperture photometry.
+    x, y : numpy.ndarray
+        Pixel coordinates at which to measure the aperture photometry
     aper_size : float, optional
-        Radius of the circular aperture in pixels. Default is 8.0.
+        Radius of the circular aperture in pixels.
 
     Returns
     -------

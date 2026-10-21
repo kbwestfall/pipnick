@@ -115,8 +115,7 @@ def photometry_all(rdxdir=None, raw_table=None, phot_table=None, thresh=8.0, gro
     for frame in rdx_frames:
         # Perform PSF photometry on the file
         logger.info(f'Performing PSF analysis for {frame}.')
-        psf_data = psf_analysis(frame, thresh=thresh, mode=mode, 
-                                fittype=fittype) #, plot_final=plot_final, plot_inters=plot_inters)
+        psf_par, psf_data = psf_analysis(frame, thresh=thresh, mode=mode, fittype=fittype)
         
         embed()
         exit()
@@ -126,7 +125,7 @@ def photometry_all(rdxdir=None, raw_table=None, phot_table=None, thresh=8.0, gro
             psf_data = consolidate_groups(psf_data)
         
         # Perform aperture photometry
-        all_data = aperture_analysis(psf_data, image_path)
+        all_data = aperture_analysis(frame, psf_data)
         
         # Save result
         all_data.write(output_file, format='csv', overwrite=True)

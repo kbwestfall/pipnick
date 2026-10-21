@@ -88,9 +88,6 @@ def show_image(image: Union[str, Path, CCDData]):
     if not isinstance(image, CCDData):
         _image = CCDData.read(image)
 
-    embed()
-    exit()
-
     data_masked = image.masked_array
     fig = pyplot.figure(figsize=(8, 6))
     ax = fig.add_axes([0.1, 0.1, 0.8, 0.8])

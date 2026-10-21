@@ -81,8 +81,7 @@ def build_moffat_psf_model(image, thresh=15.0, fwhm=7., fittype='circ', pdf_file
     return stack, fitter.par, fitter.model()
 
 
-def psf_analysis(image, thresh=10.0, guess_fwhm=7., mode='all', fittype='circ',
-                 plot_final=True, plot_inters=False):
+def psf_analysis(image, thresh=10.0, guess_fwhm=7., mode='all', fittype='circ', show=False):
     """
     Perform PSF photometry on a given image, including source detection and PSF fitting.
 
@@ -94,22 +93,22 @@ def psf_analysis(image, thresh=10.0, guess_fwhm=7., mode='all', fittype='circ',
     image : str, CCDData
         Image for PSF analysis.
     thresh : float, optional
-        Detection threshold in units of background standard deviation. Default is 10.0.
+        Detection threshold in units of background standard deviation.
     guess_fwhm : float, optional
-        Initial guess for the FWHM of the PSF
+        Initial guess for the FWHM of the PSF in pixels
     mode : str, optional
         Mode for PSF fitting in photutils package. Default is 'all'.
     fittype : str, optional
         Type of PSF fit to use ('circ' for circular, 'ellip' for elliptical). Default is 'circ'.
-    plot_final : bool, optional
-        If True, plot final results. Default is True.
-    plot_inters : bool, optional
-        If True, plot intermediate results. Default is False.
+    show : bool, optional
+        Show the image with the sources marked
 
     Returns
     -------
+    numpy.ndarray
+        Best-fit parameters for the PSF used for the photometry
     `astropy.table.Table`
-        Table containing photometric data for detected sources.
+        Table containing the results of the PSF photometry
     """
     _image = image if isinstance(image, CCDData) else CCDData.read(image)
     psf_stack, moffat_par, moffat_model = build_moffat_psf_model(
@@ -132,17 +131,11 @@ def psf_analysis(image, thresh=10.0, guess_fwhm=7., mode='all', fittype='circ',
     std = bkgrms(_image)
 
     iraffind = IRAFStarFinder(fwhm=fit_fwhm, threshold=thresh * std, minsep_fwhm=0.1)  # Source finder
+    # TODO: Make this a parameter
     grouper = SourceGrouper(min_separation=2 * fit_fwhm)  # Grouping algorithm
     mmm_bkg = MMMBackground()  # Background estimator
-    local_bkg = LocalBackground(*local_bkg_range, mmm_bkg)  # Local background
+    local_bkg = LocalBackground(*local_bkg_range, bkg_estimator=mmm_bkg)  # Local background
     fitter = LevMarLSQFitter()  # Optimization algorithm
-
-#    # Set bad columns to the background value
-#    bkgd = mmm_bkg.calc_background(img)
-#    new_data = img.data.copy()
-#    new_data[:, bad_columns] = bkgd
-#    img = np.ma.masked_array(new_data, img.mask)
-#    image.data = new_data
 
     # Define the PSF model
     if fittype == 'circ':
@@ -164,91 +157,78 @@ def psf_analysis(image, thresh=10.0, guess_fwhm=7., mode='all', fittype='circ',
     
     # Perform the fitting and collect photometric data
     phot_data = phot(data=_image.data, mask=_image.mask)
-#    , init_params=Table(sources['xcentroid', 'ycentroid', 'flux'],
-#                                       names=('x_0', 'y_0', 'flux_0')))
     phot_data['airmass'] = np.full(len(phot_data), _image.header['AIRMASS'], dtype=float)
-#    phot_data.meta['image_path'] = image.path
 
-    plot_sources(_image, phot_data, fit_fwhm)
+    if show:
+        plot_sources(_image, phot_data, fit_fwhm)
 
-    embed(header='in psf_analysis')
-    exit()
-
-    table_str = log_astropy_table(phot_data)
-    logger.debug(f"Sources Found (Iter 2): \n{table_str}")
-
-    if plot_inters:
-        plot_groups(phot_data, source_coords, source_fits, base)  # Plot group results
-    if plot_final:
-        plot_sources(phot_data, fit_fwhm)  # Plot final results
-    
-    return phot_data
+    return moffat_par, phot_data
 
 
-def plot_groups(phot_data, source_coords, source_fits, base):
-    """
-    Show stamp images, side profiles, and PSF fits of sources in groups
-    identified in the photometric data.
-
-    Parameters
-    ----------
-    phot_data : `astropy.table.Table`
-        Table containing photometric data of detected sources.
-    source_coords : `numpy.ndarray`
-        Coordinates of the sources from initial fitting.
-    source_fits : list
-        List of fitted source models.
-    base : Path
-        Base path for output plots.
-    """
-    group_data = phot_data[phot_data['group_size'] > 1]  # Filter groups with multiple sources
-    group_ids = list(sorted(set(group_data['group_id'])))  # Unique group IDs
-
-    # Show plots for each group ID
-    for id in group_ids:
-        logger.warning(f"Group {id} has multiple fitted PSFs: displaying original source")
-        group = phot_data[phot_data['group_id'] == id]
-        
-        # Match coordinates of the group center to original source coordinates
-        group_x = np.median(group['x_fit'])
-        group_y = np.median(group['y_fit'])
-        matching_indices = match_coords((group_x, group_y), source_coords, 2.0)
-        if len(matching_indices) == 0:
-            matching_indices = match_coords((group_x, group_y), source_coords, 4.0)
-            if len(matching_indices) == 0:
-                logger.warning("No nearby source found to display")
-        if len(matching_indices) > 1:
-            logger.info(f"Multiple nearby sources that could match this group; displaying all")
-        
-        # Display plots for all potential matching sources
-        for index in matching_indices:
-            matching_fit = source_fits[index]
-            plot_file = Path(f'{str(base)}_src{index+1}.psf.pdf').resolve()
-            psf_plot(plot_file, matching_fit, show=True, plot_fit=True)
-
-
-def match_coords(target, search_space, max_dist=2.0):
-    """
-    Match target coordinates to a search space using KDTree.
-
-    Parameters
-    ----------
-    target : tuple
-        Target coordinates to match.
-    search_space : `numpy.ndarray`
-        Array of coordinates to search within.
-    max_dist : float, optional
-        Maximum distance for matching. Default is 2.0.
-
-    Returns
-    -------
-    list
-        List of indices in the search space that are within max_dist of the target.
-    """
-    search_tree = KDTree(search_space)  # Create KDTree for fast searching
-    indices = search_tree.query_ball_point(target, max_dist)  # Find nearby points
-    logger.debug(f"Search found indices {indices} within {max_dist} of {target}")
-    return indices
+# def plot_groups(phot_data, source_coords, source_fits, base):
+#     """
+#     Show stamp images, side profiles, and PSF fits of sources in groups
+#     identified in the photometric data.
+# 
+#     Parameters
+#     ----------
+#     phot_data : `astropy.table.Table`
+#         Table containing photometric data of detected sources.
+#     source_coords : `numpy.ndarray`
+#         Coordinates of the sources from initial fitting.
+#     source_fits : list
+#         List of fitted source models.
+#     base : Path
+#         Base path for output plots.
+#     """
+#     group_data = phot_data[phot_data['group_size'] > 1]  # Filter groups with multiple sources
+#     group_ids = list(sorted(set(group_data['group_id'])))  # Unique group IDs
+# 
+#     # Show plots for each group ID
+#     for id in group_ids:
+#         logger.warning(f"Group {id} has multiple fitted PSFs: displaying original source")
+#         group = phot_data[phot_data['group_id'] == id]
+#         
+#         # Match coordinates of the group center to original source coordinates
+#         group_x = np.median(group['x_fit'])
+#         group_y = np.median(group['y_fit'])
+#         matching_indices = match_coords((group_x, group_y), source_coords, 2.0)
+#         if len(matching_indices) == 0:
+#             matching_indices = match_coords((group_x, group_y), source_coords, 4.0)
+#             if len(matching_indices) == 0:
+#                 logger.warning("No nearby source found to display")
+#         if len(matching_indices) > 1:
+#             logger.info(f"Multiple nearby sources that could match this group; displaying all")
+#         
+#         # Display plots for all potential matching sources
+#         for index in matching_indices:
+#             matching_fit = source_fits[index]
+#             plot_file = Path(f'{str(base)}_src{index+1}.psf.pdf').resolve()
+#             psf_plot(plot_file, matching_fit, show=True, plot_fit=True)
+# 
+# 
+# def match_coords(target, search_space, max_dist=2.0):
+#     """
+#     Match target coordinates to a search space using KDTree.
+# 
+#     Parameters
+#     ----------
+#     target : tuple
+#         Target coordinates to match.
+#     search_space : `numpy.ndarray`
+#         Array of coordinates to search within.
+#     max_dist : float, optional
+#         Maximum distance for matching. Default is 2.0.
+# 
+#     Returns
+#     -------
+#     list
+#         List of indices in the search space that are within max_dist of the target.
+#     """
+#     search_tree = KDTree(search_space)  # Create KDTree for fast searching
+#     indices = search_tree.query_ball_point(target, max_dist)  # Find nearby points
+#     logger.debug(f"Search found indices {indices} within {max_dist} of {target}")
+#     return indices
 
 
 def gamma_to_fwhm(gamma, alpha):
@@ -270,42 +250,42 @@ def gamma_to_fwhm(gamma, alpha):
     return 2 * gamma * np.sqrt(2**(1/alpha) - 1)
 
 
-def discrete_moffat_integral(par, fittype, step_size=1.0):
-    """
-    Calculate the integral of a Moffat function over a discrete grid.
-
-    Parameters
-    ----------
-    par : array-like
-        Parameters for the Moffat model.
-    fittype : str
-        Type of Moffat fit ('circ' or 'ellip').
-    step_size : float, optional
-        Size of the grid step for integration. Default is 1.0.
-
-    Returns
-    -------
-    float
-        Total flux integral over the grid.
-    """
-    
-    # Calculate the start and end points for the grid
-    grid_size = 10
-    half_size = grid_size // 2
-    x_start, x_end = -half_size + step_size / 2, half_size - step_size / 2
-    y_start, y_end = half_size - step_size / 2, -half_size + step_size / 2
-    x_coords = np.arange(x_start, x_end + step_size, step_size)
-    y_coords = np.arange(y_start, y_end - step_size, -step_size)
-    grid_x, grid_y = np.meshgrid(x_coords, y_coords)
-
-    # Calculate flux in each pixel based on the fit type
-    if fittype == 'circ':
-        pixel_fluxes = Moffat2D.evaluate(grid_x, grid_y, par[2], 0, 0, par[3], par[4])
-    elif fittype == 'ellip':
-        pixel_fluxes = EllipticalMoffat2DModel.evaluate(grid_x, grid_y, par[2], 0, 0,
-                                                             par[3], par[4], par[5], par[6])
-    pixel_fluxes *= step_size**2  # Scale by the area of each pixel
-    return np.sum(pixel_fluxes)  # Return total flux
+#def discrete_moffat_integral(par, fittype, step_size=1.0):
+#    """
+#    Calculate the integral of a Moffat function over a discrete grid.
+#
+#    Parameters
+#    ----------
+#    par : array-like
+#        Parameters for the Moffat model.
+#    fittype : str
+#        Type of Moffat fit ('circ' or 'ellip').
+#    step_size : float, optional
+#        Size of the grid step for integration. Default is 1.0.
+#
+#    Returns
+#    -------
+#    float
+#        Total flux integral over the grid.
+#    """
+#    
+#    # Calculate the start and end points for the grid
+#    grid_size = 10
+#    half_size = grid_size // 2
+#    x_start, x_end = -half_size + step_size / 2, half_size - step_size / 2
+#    y_start, y_end = half_size - step_size / 2, -half_size + step_size / 2
+#    x_coords = np.arange(x_start, x_end + step_size, step_size)
+#    y_coords = np.arange(y_start, y_end - step_size, -step_size)
+#    grid_x, grid_y = np.meshgrid(x_coords, y_coords)
+#
+#    # Calculate flux in each pixel based on the fit type
+#    if fittype == 'circ':
+#        pixel_fluxes = Moffat2D.evaluate(grid_x, grid_y, par[2], 0, 0, par[3], par[4])
+#    elif fittype == 'ellip':
+#        pixel_fluxes = EllipticalMoffat2DModel.evaluate(grid_x, grid_y, par[2], 0, 0,
+#                                                             par[3], par[4], par[5], par[6])
+#    pixel_fluxes *= step_size**2  # Scale by the area of each pixel
+#    return np.sum(pixel_fluxes)  # Return total flux
 
 
 def process_par(par, fittype):
@@ -352,7 +332,8 @@ def consolidate_groups(phot_data, preserve=[]):
     """
     new_data = phot_data.copy()
     group_data = new_data[new_data['group_size'] > 1]  # Filter groups with multiple sources
-    group_data = group_data.copy()[~np.isin(group_data['group_id'], preserve)]  # Exclude preserved groups
+    # Exclude preserved groups
+    group_data = group_data.copy()[np.logical_not(np.isin(group_data['group_id'], preserve))]
 
     group_ids = list(sorted(set(group_data['group_id'])))  # Unique group IDs
     logger.info(f"Consolidating groups {group_ids}")
@@ -387,6 +368,6 @@ def consolidate_groups(phot_data, preserve=[]):
         new_data.add_row(new_row)  # Add new row for consolidated group
     
     new_data.sort('group_id')  # Sort consolidated data by group ID
-    table_str = log_astropy_table(new_data)  # Log consolidated data
-    logger.debug(f"Consolidated sources: \n{table_str}")
+#    table_str = log_astropy_table(new_data)  # Log consolidated data
+#    logger.debug(f"Consolidated sources: \n{table_str}")
     return new_data  # Return consolidated data

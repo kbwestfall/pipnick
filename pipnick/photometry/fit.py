@@ -501,7 +501,8 @@ def get_apertures(phot_data, fwhm, scale):
     x = phot_data['x_fit']
     y = phot_data['y_fit']
     return CircularAperture(np.transpose((x, y)), r=2 * fwhm * scale)
-    
+
+
 def plot_sources(image, phot_data, fwhm, flux_name='flux_fit',
                  x_name='x_fit', y_name='y_fit', label_name='group_id',
                  scale=1):
