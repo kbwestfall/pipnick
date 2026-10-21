@@ -21,5 +21,5 @@ Module contents
 .. automodule:: pipnick.utils
    :members:
    :private-members:
-   :undoc-members:
    :show-inheritance:
+   :undoc-members:

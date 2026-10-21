@@ -26,7 +26,7 @@ def astrometry_all(maindir, api_key, use_table=False, resolve=False,
 
     Parameters
     ----------
-    maindir : str or Path
+    maindir : str, :class:`pathlib.Path`
         Path to the main directory containing the reduced directory
         with the FITS files to be astrometrically calibrated.
     api_key : str
@@ -45,7 +45,7 @@ def astrometry_all(maindir, api_key, use_table=False, resolve=False,
 
     Returns
     -------
-    list of Path
+    list of :class:`pathlib.Path`
         List of relative paths to all calibrated FITS images.
     """
     log.info(f'---- astrometry_all() called on main directory {maindir}')
@@ -143,14 +143,14 @@ def make_cleaned_inputs(image_paths, mod_dir):
 
     Parameters
     ----------
-    image_paths : list of Path
+    image_paths : list of :class:`pathlib.Path`
         List of paths to the input images.
-    mod_dir : Path
+    mod_dir : :class:`pathlib.Path`
         Directory to save the modified FITS files.
 
     Returns
     -------
-    list of Path
+    list of :class:`pathlib.Path`
         List of paths to the modified FITS files.
     """
     log.info("Zeroing out masked regions for faster astrometric solves")
@@ -186,16 +186,16 @@ def get_astrometric_solves(image_paths, astro_dir, mode):
 
     Parameters
     ----------
-    image_paths : list of Path
+    image_paths : list of :class:`pathlib.Path`
         List of paths to the input images.
-    astro_dir : Path
+    astro_dir : :class:`pathlib.Path`
         Path to the directory containing the astrometric solutions.
     mode : str
         Mode for retrieving files ('image' or 'corr').
 
     Returns
     -------
-    list of Path
+    list of :class:`pathlib.Path`
         List of paths to the local copies of astrometric solutions.
     """
     log.info("Returning local copies of astrometric solves; astrometry.net not used")

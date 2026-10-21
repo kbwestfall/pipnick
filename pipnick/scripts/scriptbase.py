@@ -13,7 +13,7 @@ class SmartFormatter(argparse.HelpFormatter):
     r"""
     Enable a combination of both fixed-format and wrappable lines to be
     formatted for the help statements for command-line arguments used with
-    `argparse.ArgumentParser`.
+    :class:`argparse.ArgumentParser`.
 
     Borrows from
     https://stackoverflow.com/questions/3853722/python-argparse-how-to-insert-newline-in-the-help-text
@@ -22,8 +22,8 @@ class SmartFormatter(argparse.HelpFormatter):
     help string is parsed by the base class.
 
     When parsed by this formatter, the leading "R|" characters are stripped and
-    the lines to be printed are parsed using `str.splitlines`.  Each resulting
-    line is wrapped using `textwrap.wrap`, unless it begins with the characters
+    the lines to be printed are parsed using :meth:`str.splitlines`.  Each resulting
+    line is wrapped using :func:`textwrap.wrap`, unless it begins with the characters
     "F|", which forces the line to remain unaltered (except for stripping the
     leading characters).
 
@@ -151,21 +151,23 @@ class ScriptBase:
         """
         Construct the command-line argument parser.
 
-        Args:
-            description (:obj:`str`, optional):
-                A short description of the purpose of the script.
-            width (:obj:`int`, optional):
-                Restrict the width of the formatted help output to be no longer
-                than this number of characters, if possible given the help
-                formatter.  If None, the width is the same as the terminal
-                width.
-            formatter (`argparse.HelpFormatter`):
-                Class used to format the help output.
-            include_log_options (:obj:`bool`, optional):
-                Include the options controlling logging.
+        Parameters
+        ----------
+        description : str, optional
+            A short description of the purpose of the script.
+        width : int, optional
+            Restrict the width of the formatted help output to be no longer
+            than this number of characters, if possible given the help
+            formatter.  If None, the width is the same as the terminal width.
+        formatter : argparse.HelpFormatter, optional
+            Class used to format the help output.
+        include_log_options : bool, optional
+            Include the options controlling logging.
 
-        Returns:
-            `argparse.ArgumentParser`: Command-line interpreter.
+        Returns
+        -------
+        :class:`argparse.ArgumentParser`
+            Command-line interpreter.
         """
         parser = argparse.ArgumentParser(description=description,
                                          formatter_class=lambda prog: formatter(prog, width=width))
@@ -194,10 +196,11 @@ class ScriptBase:
         """
         Initialize the logger from the parsed command-line arguments.
 
-        Args:
-            args (`argparse.Namespace`):
-                The parsed arguments, carrying ``verbosity``, ``log_file`` and
-                ``log_level``.
+        Parameters
+        ----------
+        args : :class:`argparse.Namespace`
+            The parsed arguments, carrying ``verbosity``, ``log_file`` and
+            ``log_level``.
         """
         level = log.convert_verbosity_to_logging_level(args.verbosity)
         log_file_level = (
@@ -217,8 +220,10 @@ class ScriptBase:
         """
         Return the default name for the log file.
 
-        Returns:
-            :obj:`str`: The script name and a UT timestamp, to the minute.
+        Returns
+        -------
+        str
+            The script name and a UT timestamp, to the minute.
         """
         timestamp = datetime.datetime.now(datetime.UTC).strftime('%Y%m%d-%H%M')
         return f'{cls.name()}_{timestamp}.log'

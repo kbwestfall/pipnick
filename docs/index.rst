@@ -22,7 +22,7 @@ an issue on our GitHub page, if you have any problems.
    example
    issues
 
-   API <api/modules>
+   API <api/pipnick>
 
 
 

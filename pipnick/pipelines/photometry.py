@@ -21,42 +21,42 @@ def photometry_all(rdxdir=None, raw_table=None, phot_table=None, thresh=8.0, gro
     
         - Extract image files from the provided directory.
         - Perform PSF photometry on each image using 
-          :func:`psf_analysis`.
+          :func:`~pipnick.photometry.psf_photometry.psf_analysis`.
         - Optionally consolidate detected sources into groups
-          using :func:`consolidate_groups`.
+          using :func:`~pipnick.photometry.psf_photometry.consolidate_groups`.
         - Conduct aperture photometry on the results with
-          :func:`aperture_analysis`.
+          :func:`~pipnick.photometry.aperture_photometry.aperture_analysis`.
         - Save the source catalogs to CSV files in the output directory.
 
     Parameters
     ----------
-    rdxdir : str, Path, optional
+    rdxdir : str, :class:`pathlib.Path`, optional
         Path to directory containing the reduced images for photometry.  Must
         provide this or ``raw_table``.
-    raw_table : str, Path, optional
+    raw_table : str, :class:`pathlib.Path`, optional
         File with the metadata table of the raw data.  This is the same as the
         ``table`` argument in :func:`~pipnick.pipelines.reduction.reduce_all`.
         Must provide this or ``rdxdir``.
-    phot_table : str, Path, optional
+    phot_table : str, :class:`pathlib.Path`, optional
         Name for the output photometry data table
-    thresh : :obj:`float`, optional
+    thresh : float, optional
         Threshold for source detection, defined as a multiple of the background 
         standard deviation.
-    group : :obj:`bool`, optional
+    group : bool, optional
         If True, consolidate detected sources that belong to the same group 
         into a single source.
-    mode : :obj:`str`, optional
+    mode : str, optional
         Mode to run PSF photometry. Use 'all' for a complete analysis or 'new'
         for only analyzing newly detected sources.
-    fittype : :obj:`str`, optional
+    fittype : str, optional
         Type of Moffat fit to use for PSF photometry. Use 'circ' for a circular
         function or 'ellip' for an elliptical function.
-    overwrite : :obj:`bool`, optional
+    overwrite : bool, optional
         Overwrite any existing files.
 
     Returns
     -------
-    source_catalog_paths : `list`
+    source_catalog_paths : list
         A list of file paths to the generated source catalogs (in CSV format).
         Each entry corresponds to an analyzed image file.
     """

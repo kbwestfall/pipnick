@@ -9,6 +9,8 @@ Subpackages
 
    pipnick.cameras
    pipnick.photometry
+   pipnick.pipelines
+   pipnick.pkg
    pipnick.scripts
    pipnick.utils
 
@@ -18,5 +20,5 @@ Module contents
 .. automodule:: pipnick
    :members:
    :private-members:
-   :undoc-members:
    :show-inheritance:
+   :undoc-members:

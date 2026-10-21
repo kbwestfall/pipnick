@@ -23,7 +23,7 @@ def build_camera_datatable(root, ext='.fits', path_key='path'):
 
     Parameters
     ----------
-    root : str, Path
+    root : str, :class:`pathlib.Path`
         Path to directory with the observed data files.
     ext : str, optional
         Extension of the files to use in the search string.
@@ -32,7 +32,7 @@ def build_camera_datatable(root, ext='.fits', path_key='path'):
 
     Returns
     -------
-    astropy.table.Table
+    :class:`astropy.table.Table`
         Table with metadata for each frame found in ``root``.  The columns are
         defined by the ``parse_metadata`` function of the class relevant to
         each camera.  The camera is identified by the header of the first
@@ -40,7 +40,7 @@ def build_camera_datatable(root, ext='.fits', path_key='path'):
 
     Raises
     ------
-    NotADirectoryError
+    :exc:`NotADirectoryError`
         Raised if the provided raw directory does not exist.
     """
     # Check the inputs
@@ -91,7 +91,7 @@ def build_metadata(rawdir=None, filename=None, ext='.fits', overwrite=False, rdx
 
     Parameters
     ----------
-    rawdir : str, Path, optional
+    rawdir : str, :class:`pathlib.Path`, optional
         Path to the directory containing the FITS files to be analyzed.  See
         above for the various execution modes and how this parameter interacts
         with ``filename`` and ``overwrite``.
@@ -105,15 +105,15 @@ def build_metadata(rawdir=None, filename=None, ext='.fits', overwrite=False, rdx
         files.
     overwrite : bool, optional
         Overwrite existing files.
-    rdxdir : str, Path, optional
+    rdxdir : str, :class:`pathlib.Path`, optional
         Path to the directory for the reduced data products.  If provided, this
         is included in the table as a ``meta`` keyword.
 
     Returns
     -------
-    Path
+    :class:`pathlib.Path`
         Path to the file with the metadata.
-    astropy.table.Table
+    :class:`astropy.table.Table`
         Table containing file metadata.
 
     """
@@ -153,9 +153,9 @@ def frame_path(metadata, select=None, col_key='file', path_key='rawdir'):
 
     Parameters
     ----------
-    metadata : astropy.table.Table
+    metadata : :class:`astropy.table.Table`
         Table with the fits file metadata
-    select : numpy.ndarray, optional
+    select : :class:`numpy.ndarray`, optional
         A boolean or integer vector selecting the rows of the table to use.  If
         None, all rows are used.
     col_key : str, optional
@@ -200,7 +200,7 @@ def default_reduced_file_name(raw_frame):
 
     Parameters
     ----------
-    raw_frame : Path
+    raw_frame : :class:`pathlib.Path`
         Path to the raw file.
 
     Returns
@@ -282,7 +282,7 @@ def create_exclusion_func(exclude_list):
 
     Returns
     -------
-    function
+    callable
         Function that takes a target (string) and returns True if any
         string in exclude_list is in target.
     """

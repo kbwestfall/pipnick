@@ -4,7 +4,7 @@ def log_astropy_table(table):
 
     Parameters
     ----------
-    table : astropy.table.Table
+    table : :class:`astropy.table.Table`
         The Astropy Table to be formatted.
 
     Returns

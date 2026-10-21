@@ -11,10 +11,10 @@ def polygon_winding_number(polygon, point):
 
     Parameters
     ----------
-    polygon : np.ndarray
+    polygon : :class:`numpy.ndarray`
         An Nx2 array containing the x,y coordinates of a polygon.  The points
         should be ordered either counter-clockwise or clockwise.
-    point : np.ndarray
+    point : :class:`numpy.ndarray`
         One or more points for the winding number calculation.  Must be either a
         2-element array for a single (x,y) pair, or an Nx2 array with N (x,y)
         points.
@@ -22,14 +22,14 @@ def polygon_winding_number(polygon, point):
     Returns
     -------
 
-    :obj:`int`, np.ndarray
+    int, :class:`numpy.ndarray`
         The winding number of each point with respect to the provided polygon.
         Points inside the polygon have winding numbers of 1 or -1; see
         :func:`point_inside_polygon`.
 
     Raises
     ------
-    ValueError
+    :exc:`ValueError`
         Raised if ``polygon`` is not 2D, if ``polygon`` does not have two
         columns, or if the last axis of ``point`` does not have 2 and only 2
         elements.
@@ -70,17 +70,17 @@ def point_inside_polygon(polygon, point):
 
     Parameters
     ----------
-    polygon : np.ndarray
+    polygon : :class:`numpy.ndarray`
         An Nx2 array containing the x,y coordinates of a polygon.  The points
         should be ordered either counter-clockwise or clockwise.
-    point : np.ndarray
+    point : :class:`numpy.ndarray`
         One or more points for the winding number calculation.  Must be either a
         2-element array for a single (x,y) pair, or an Nx2 array with N (x,y)
         points.
 
     Returns
     -------
-    :obj:`bool`, `np.ndarray`
+    bool, :class:`numpy.ndarray`
         Boolean indicating whether or not each point is within the polygon.
     """
     return np.absolute(polygon_winding_number(polygon, point)) == 1
@@ -107,7 +107,7 @@ def mask_polygons(shape, polygons):
 
     Returns
     -------
-    np.ndarray
+    :class:`numpy.ndarray`
         A boolean numpy array selecting pixels that should be masked
         (masked=True; unmasked=False).
     """
@@ -144,7 +144,7 @@ def create_mask(shape, bad_cols=None, bad_slices=None, bad_regions=None):
 
     Returns
     -------
-    mask : np.ndarray
+    mask : :class:`numpy.ndarray`
         Boolean mask (masked=True, unmasked=False)
     """
     mask = np.zeros(shape, dtype=bool) if bad_regions is None \

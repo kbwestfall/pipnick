@@ -18,26 +18,20 @@ class FitMoffat2D:
     Fit a 2D Moffat model to the given data.
 
     There are six model parameters:
-        0. x0, x-coordinate of the center
-        1. y0, y-coordinate of the center
-        2. amplitude, Peak value
-        3. gamma, width
-        4. alpha, fall-off slope
-        5. background, background
+
+        0. ``x0``: x-coordinate of the center
+        1. ``y0``: y-coordinate of the center
+        2. ``amplitude``: peak value
+        3. ``gamma``: width
+        4. ``alpha``: fall-off slope
+        5. ``background``: background
 
     Parameters
     ----------
-    c : numpy.ndarray
-        Data to fit
-
+    c : :class:`numpy.ndarray`
+        2D array of data to fit.
     """
     def __init__(self, c):
-        """
-        Initialize the fitting object with data.
-
-        Args:
-            c (ndarray): 2D array of data to be fitted. 
-        """
         self.c = c
         self.shape = self.c.shape
         self.x, self.y = np.meshgrid(np.arange(self.shape[0]).astype(float),
@@ -50,11 +44,21 @@ class FitMoffat2D:
 
     def guess_par(self, image_moments=True, alpha=3.5):
         """
-        Guess initial parameters for the Moffat fit based on data
+        Guess initial parameters for the Moffat fit based on data.
 
-        Returns:
-            ndarray: Initial parameter guesses.
-                     (x0, y0, amplitude, gamma, alpha, background)
+        Parameters
+        ----------
+        image_moments : bool, optional
+            Use the image moments to set the center and amplitude.  If False,
+            these are set using the center of the image.
+        alpha : float, optional
+            Moffat fall-off slope.
+
+        Returns
+        -------
+        :class:`numpy.ndarray`
+            Initial parameter guesses: (x0, y0, amplitude, gamma, alpha,
+            background).
         """
         par = np.zeros(6, dtype=float)
         # Clip high values to guess the background
@@ -83,8 +87,12 @@ class FitMoffat2D:
         """
         Define default bounds for the parameters.
 
-        Returns:
-            tuple: Lower and upper bounds (2 lists in par format)
+        Returns
+        -------
+        lb : :class:`numpy.ndarray`
+            Lower bounds, ordered as the model parameters.
+        ub : :class:`numpy.ndarray`
+            Upper bounds, ordered as the model parameters.
         """
         lb = np.zeros(6, dtype=float)
         ub = np.zeros(6, dtype=float)
@@ -101,9 +109,11 @@ class FitMoffat2D:
         """
         Set the parameter values for the model.
 
-        Args:
-            par (ndarray): Array of parameter values.
-                           (x0, y0, amplitude, gamma, alpha, background)
+        Parameters
+        ----------
+        par : :class:`numpy.ndarray`
+            Array of parameter values: (x0, y0, amplitude, gamma, alpha,
+            background).  Can also be only the free parameters.
         """
         if par.ndim != 1:
             raise ValueError('Parameter array must be a 1D vector.')
@@ -119,12 +129,16 @@ class FitMoffat2D:
         Evaluate the Moffat model with the object's parameters or
         the given parameters.
 
-        Args:
-            par (ndarray, optional): Parameters for the model.
-                        (x0, y0, amplitude, gamma, alpha, background)
+        Parameters
+        ----------
+        par : :class:`numpy.ndarray`, optional
+            Parameters for the model: (x0, y0, amplitude, gamma, alpha,
+            background).  If None, use the current parameters.
 
-        Returns:
-            ndarray: Evaluated model.
+        Returns
+        -------
+        :class:`numpy.ndarray`
+            Evaluated model.
         """
         if par is not None:
             self._set_par(par)
@@ -151,11 +165,18 @@ class FitMoffat2D:
         """
         Fit the Moffat model to the data and modify parameters accordingly.
 
-        Args:
-            p0 (ndarray, optional): Initial parameter guesses.
-            fix (ndarray, optional): Boolean array indicating which parameters to fix.
-            lb (ndarray, optional): Lower bounds for the parameters.
-            ub (ndarray, optional): Upper bounds for the parameters.
+        Parameters
+        ----------
+        p0 : :class:`numpy.ndarray`, optional
+            Initial parameter guesses.  If None, use :meth:`guess_par`.
+        fix : :class:`numpy.ndarray`, optional
+            Boolean array indicating which parameters to fix.
+        lb : :class:`numpy.ndarray`, optional
+            Lower bounds for the parameters.  If None, use
+            :meth:`default_bounds`.
+        ub : :class:`numpy.ndarray`, optional
+            Upper bounds for the parameters.  If None, use
+            :meth:`default_bounds`.
         """
         if p0 is None:
             p0 = self.guess_par()
@@ -203,23 +224,23 @@ class FitEllipticalMoffat2D:
     """
     Fit an elliptical 2D Moffat model to the given data.
 
-    Parameters are:
-        par[0]: x0 (center x-coordinate)
-        par[1]: y0 (center y-coordinate)
-        par[2]: amplitude
-        par[3]: gamma1 (width parameter in 1st arbitrary(?) direction)
-        par[4]: gamma2 (width parameter in 2nd arbitrary(?) direction)
-        par[5]: phi (rotation angle in radians)
-        par[6]: alpha (shape parameter)
-        par[7]: background
+    There are eight model parameters:
+
+        0. ``x0``: x-coordinate of the center
+        1. ``y0``: y-coordinate of the center
+        2. ``amplitude``: peak value
+        3. ``gamma1``: width in the 1st arbitrary(?) direction
+        4. ``gamma2``: width in the 2nd arbitrary(?) direction
+        5. ``phi``: rotation angle in radians
+        6. ``alpha``: fall-off slope
+        7. ``background``: background
+
+    Parameters
+    ----------
+    c : :class:`numpy.ndarray`
+        2D array of data to fit.
     """
     def __init__(self, c):
-        """
-        Initialize the fitting object with data.
-
-        Args:
-            c (ndarray): 2D array of data to be fitted.
-        """
         self.c = c
         self.shape = self.c.shape
         self.x, self.y = np.meshgrid(np.arange(self.shape[0]).astype(float),
@@ -251,11 +272,21 @@ class FitEllipticalMoffat2D:
 
     def guess_par(self, image_moments=True, alpha=3.5):
         """
-        Guess initial parameters for the Moffat fit based on data
+        Guess initial parameters for the Moffat fit based on data.
 
-        Returns:
-            ndarray: Initial parameter guesses.
-                     (x0, y0, amplitude, gamma, alpha, background)
+        Parameters
+        ----------
+        image_moments : bool, optional
+            Use the image moments to set the center and amplitude.  If False,
+            these are set using the center of the image.
+        alpha : float, optional
+            Moffat fall-off slope.
+
+        Returns
+        -------
+        :class:`numpy.ndarray`
+            Initial parameter guesses: (x0, y0, amplitude, gamma1, gamma2, phi,
+            alpha, background).
         """
         par = np.zeros(6, dtype=float)
         # Clip high values to guess the background
@@ -288,8 +319,12 @@ class FitEllipticalMoffat2D:
         """
         Define default bounds for the parameters.
 
-        Returns:
-            tuple: Lower and upper bounds (2 lists in par format)
+        Returns
+        -------
+        lb : :class:`numpy.ndarray`
+            Lower bounds, ordered as the model parameters.
+        ub : :class:`numpy.ndarray`
+            Upper bounds, ordered as the model parameters.
         """
         lb = np.zeros(8, dtype=float)
         ub = np.zeros(8, dtype=float)
@@ -308,9 +343,11 @@ class FitEllipticalMoffat2D:
         """
         Set the parameter values for the model.
 
-        Args:
-            par (ndarray): Array of parameter values.
-                           (x0, y0, amplitude, gamma1, gamma2, phi, alpha, background)
+        Parameters
+        ----------
+        par : :class:`numpy.ndarray`
+            Array of parameter values: (x0, y0, amplitude, gamma1, gamma2, phi,
+            alpha, background).  Can also be only the free parameters.
         """
         if par.ndim != 1:
             raise ValueError('Parameter array must be a 1D vector.')
@@ -324,17 +361,23 @@ class FitEllipticalMoffat2D:
     @staticmethod
     def _eval_moffat(par, x, y):
         """
-        Evaluates Moffat function given a set of Moffat fit parameters at a
-        set of x, y coordinates. Static method.
+        Evaluate the Moffat function given a set of Moffat fit parameters at a
+        set of x, y coordinates.
 
-        Args:
-            par (ndarray): Model parameters.
-                        (x0, y0, amplitude, gamma1, gamma2, phi, alpha, background)
-            x (array-like): x-coordinate values.
-            y (array-like): y-coordinate values.
+        Parameters
+        ----------
+        par : :class:`numpy.ndarray`
+            Model parameters: (x0, y0, amplitude, gamma1, gamma2, phi, alpha,
+            background).
+        x : array-like
+            x-coordinate values.
+        y : array-like
+            y-coordinate values.
 
-        Returns:
-            array: Evaluated Moffat function values at given x, y coordinates.
+        Returns
+        -------
+        :class:`numpy.ndarray`
+            Evaluated Moffat function values at the given x, y coordinates.
         """
         cosr = np.cos(par[5])
         sinr = np.sin(par[5])
@@ -349,17 +392,23 @@ class FitEllipticalMoffat2D:
     @staticmethod
     def _eval_moffat_deriv(par, x, y):
         """
-        Calculates the derivatives of the Moffat function with respect to a
-        set of given parameters at a set of x, y coordinates. Static method.
+        Calculate the derivatives of the Moffat function with respect to a
+        set of given parameters at a set of x, y coordinates.
 
-        Args:
-            par (ndarray): Model parameters
-                        (x0, y0, amplitude, gamma1, gamma2, phi, alpha, background)
-            x (array-like): x-coordinate values.
-            y (array-like): y-coordinate values.
+        Parameters
+        ----------
+        par : :class:`numpy.ndarray`
+            Model parameters: (x0, y0, amplitude, gamma1, gamma2, phi, alpha,
+            background).
+        x : array-like
+            x-coordinate values.
+        y : array-like
+            y-coordinate values.
 
-        Returns:
-            ndarray: Derivatives of the Moffat function wrt each parameter.
+        Returns
+        -------
+        list
+            Derivatives of the Moffat function with respect to each parameter.
         """
         cosr = np.cos(par[5])
         sinr = np.sin(par[5])
@@ -409,14 +458,21 @@ class FitEllipticalMoffat2D:
         """
         Evaluate the Moffat model with the given or stored parameters.
 
-        Args:
-            par (ndarray, optional): List of Moffat fit parameters. Defaults to None.
-                    (x0, y0, amplitude, gamma1, gamma2, phi, alpha, background)
-            x (array-like, optional): x-coordinate values. Defaults to None.
-            y (array-like, optional): y-coordinate values. Defaults to None.
+        Parameters
+        ----------
+        par : :class:`numpy.ndarray`, optional
+            Moffat fit parameters: (x0, y0, amplitude, gamma1, gamma2, phi,
+            alpha, background).  If None, use the current parameters.
+        x : array-like, optional
+            x-coordinate values.  If None, use the data coordinates.
+        y : array-like, optional
+            y-coordinate values.  If None, use the data coordinates.
 
-        Returns:
-            array: Evaluated Moffat model values at given or stored x, y coordinates.
+        Returns
+        -------
+        :class:`numpy.ndarray`
+            Evaluated Moffat model values at the given or stored x, y
+            coordinates.
         """
         if par is not None:
             self._set_par(par)
@@ -442,12 +498,19 @@ class FitEllipticalMoffat2D:
         """
         Fit the Moffat model to the data and modify parameters accordingly.
 
-        Args:
-            p0 (ndarray, optional): Initial parameter guesses.
-                        (x0, y0, amplitude, gamma1, gamma2, phi, alpha, background)
-            fix (ndarray, optional): Boolean array indicating which parameters to fix.
-            lb (ndarray, optional): Lower bounds for the parameters.
-            ub (ndarray, optional): Upper bounds for the parameters.
+        Parameters
+        ----------
+        p0 : :class:`numpy.ndarray`, optional
+            Initial parameter guesses: (x0, y0, amplitude, gamma1, gamma2, phi,
+            alpha, background).  If None, use :meth:`guess_par`.
+        fix : :class:`numpy.ndarray`, optional
+            Boolean array indicating which parameters to fix.
+        lb : :class:`numpy.ndarray`, optional
+            Lower bounds for the parameters.  If None, use
+            :meth:`default_bounds`.
+        ub : :class:`numpy.ndarray`, optional
+            Upper bounds for the parameters.  If None, use
+            :meth:`default_bounds`.
         """
         # Guess parameters if no initial guess given
         if p0 is None:
@@ -501,12 +564,16 @@ class FitEllipticalMoffat2D:
         """
         Convert phi to angle between semi-major axis and +x-axis in degrees.
 
-        Args:
-            par (list): Fit parameters
-                        (x0, y0, amplitude, gamma1, gamma2, phi, alpha, background)
+        Parameters
+        ----------
+        par : array-like
+            Fit parameters: (x0, y0, amplitude, gamma1, gamma2, phi, alpha,
+            background).
 
-        Returns:
-            float: Nice phi in degrees.
+        Returns
+        -------
+        float
+            Nice phi in degrees.
         """
         nice_phi = np.rad2deg(par[5]) + 0.000000000001
         if par[3] < par[4]:
@@ -522,13 +589,19 @@ class FitEllipticalMoffat2D:
         """
         Convert nice phi back to original phi (rad).
 
-        Args:
-            gamma1 (float): Gamma value in x-direction.
-            gamma2 (float): Gamma value in y-direction.
-            nice_phi (float): Nice phi in degrees.
+        Parameters
+        ----------
+        gamma1 : float
+            Gamma value in x-direction.
+        gamma2 : float
+            Gamma value in y-direction.
+        nice_phi : float
+            Nice phi in degrees.
 
-        Returns:
-            float: Original phi in radians.
+        Returns
+        -------
+        float
+            Original phi in radians.
         """
         if gamma1 < gamma2:
             if nice_phi >= -89.999:  # This accounts for the previous condition nice_phi - 90 > 0.001
@@ -546,14 +619,23 @@ def make_ellipse(a, b, phi, n=500):
     """
     Generate coordinates for an ellipse.
 
-    Args:
-        a (float): Semi-major axis length.
-        b (float): Semi-minor axis length.
-        phi (float): Rotation angle in radians.
-        n (int, optional): Number of points to generate. Defaults to 500.
+    Parameters
+    ----------
+    a : float
+        Semi-major axis length.
+    b : float
+        Semi-minor axis length.
+    phi : float
+        Rotation angle in radians.
+    n : int, optional
+        Number of points to generate.
 
-    Returns:
-        tuple: x and y coordinates of the ellipse.
+    Returns
+    -------
+    x : :class:`numpy.ndarray`
+        x coordinates of the ellipse.
+    y : :class:`numpy.ndarray`
+        y coordinates of the ellipse.
     """
     cosr = np.cos(phi)
     sinr = np.sin(phi)

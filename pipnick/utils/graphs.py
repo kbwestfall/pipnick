@@ -18,15 +18,15 @@ def smooth_contour(data_x, data_y, data_vals, color_range, backgrd_ax=None,
 
     Parameters
     ----------
-    data_x : ndarray
+    data_x : :class:`numpy.ndarray`
         Array of x-coordinates of the data points.
-    data_y : ndarray
+    data_y : :class:`numpy.ndarray`
         Array of y-coordinates of the data points.
-    data_vals : ndarray
+    data_vals : :class:`numpy.ndarray`
         Array of data values at the corresponding (x, y) points.
     color_range : tuple
         Tuple specifying the range of colors for the contour levels (min, max).
-    backgrd_ax : matplotlib.axes.Axes, optional
+    backgrd_ax : :class:`matplotlib.axes.Axes`, optional
         Background axes to plot on. If None, a new figure and axes are created.
     frac : float, optional
         Fraction of data used to compute locally weighted regression (default is 0.3).
@@ -37,9 +37,9 @@ def smooth_contour(data_x, data_y, data_vals, color_range, backgrd_ax=None,
 
     Returns
     -------
-    ax : matplotlib.axes.Axes
+    ax : :class:`matplotlib.axes.Axes`
         Axes object with the contour plot.
-    cp : QuadContourSet or None
+    cp : :class:`matplotlib.contour.QuadContourSet`, None
         Contour set from the plot. None if the plot could not be generated.
     """
     
@@ -89,15 +89,15 @@ def scatter_sources(data_x, data_y, data_vals, color_range, backgrd_ax=None,
 
     Parameters
     ----------
-    data_x : ndarray
+    data_x : :class:`numpy.ndarray`
         Array of x-coordinates of the data points.
-    data_y : ndarray
+    data_y : :class:`numpy.ndarray`
         Array of y-coordinates of the data points.
-    data_vals : ndarray
+    data_vals : :class:`numpy.ndarray`
         Array of data values at the corresponding (x, y) points.
     color_range : tuple
         Tuple specifying the range of colors for the scatter points (min, max).
-    backgrd_ax : matplotlib.axes.Axes, optional
+    backgrd_ax : :class:`matplotlib.axes.Axes`, optional
         Background axes to plot on. If None, a new figure and axes are created.
     title : str, optional
         Title of the plot.
@@ -106,9 +106,9 @@ def scatter_sources(data_x, data_y, data_vals, color_range, backgrd_ax=None,
 
     Returns
     -------
-    ax : matplotlib.axes.Axes
+    ax : :class:`matplotlib.axes.Axes`
         Axes object with the scatter plot.
-    cmap_custom : ListedColormap
+    cmap_custom : :class:`matplotlib.colors.ListedColormap`
         Colormap used for the scatter plot.
     """
     
@@ -149,11 +149,11 @@ def plot_sources(phot_data, given_fwhm, image=None, flux_name='flux_fit',
 
     Parameters
     ----------
-    phot_data : Table
+    phot_data : :class:`astropy.table.Table`
         Photometric data containing positions and fluxes of sources.
     given_fwhm : float
         Full-width half-maximum (FWHM) of the sources to set aperture sizes.
-    image : Fits_Simple, optional
+    image : :class:`~pipnick.utils.fits_class.Fits_Simple`, optional
         Image to plot the sources on. If None, it is loaded from the metadata.
     flux_name : str, optional
         Name of the flux column in phot_data (default is 'flux_fit').

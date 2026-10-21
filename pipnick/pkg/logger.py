@@ -287,7 +287,7 @@ class PipnickLogger(logging.Logger):
 
         Raises
         ------
-        ValueError
+        :exc:`ValueError`
             Raised if the input verbosity level is not 0, 1, or 2.
         """
         match v:
@@ -385,7 +385,7 @@ def get_logger(
 
     Returns
     -------
-    PipnickLogger
+    :class:`~pipnick.pkg.logger.PipnickLogger`
         Logging object for pipnick.
     """
     orig_logger = logging.getLoggerClass()

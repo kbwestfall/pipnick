@@ -25,7 +25,7 @@ def final_calib_all(maindir, use_table=False,
 
     Parameters
     ----------
-    maindir : str or Path
+    maindir : str, :class:`pathlib.Path`
         Path to the main directory containing the photometric and
         astrometric directories with the WCS astrometric solutions
         and photometric tables to complete calibrating.
@@ -68,11 +68,11 @@ def convert_coords_all(photo_dir, astro_dir, final_calib_dir):
 
     Parameters
     ----------
-    photo_dir : Path or str
+    photo_dir : :class:`pathlib.Path`, str
         Directory containing photometric source catalogs to be converted.
-    astro_dir : Path or str
+    astro_dir : :class:`pathlib.Path`, str
         Directory containing astrometric calibration files.
-    final_calib_dir : Path or str
+    final_calib_dir : :class:`pathlib.Path`, str
         Directory where the final calibrated catalogs will be saved.
 
     Returns
@@ -123,16 +123,16 @@ def convert_coords(phot_data_inpath, phot_data_outpath, astrometric_img_path):
 
     Parameters
     ----------
-    phot_data_inpath : Path or str
+    phot_data_inpath : :class:`pathlib.Path`, str
         Path to the input photometric source catalog (CSV format).
-    phot_data_outpath : Path or str
+    phot_data_outpath : :class:`pathlib.Path`, str
         Path to the output catalog with RA/Dec coordinates (CSV format).
-    astrometric_img_path : Path or str
+    astrometric_img_path : :class:`pathlib.Path`, str
         Path to the astrometric FITS file used for coordinate transformation.
 
     Returns
     -------
-    astropy.table.Table
+    :class:`astropy.table.Table`
         The updated photometric source catalog with RA/Dec coordinates.
     """
     

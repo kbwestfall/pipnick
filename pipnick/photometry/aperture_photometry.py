@@ -19,16 +19,16 @@ def aperture_analysis(image, x, y, aper_size=8.0):
 
     Parameters
     ----------
-    image : str, CCDData
+    image : str, :class:`astropy.nddata.CCDData`
         Image from which to perform aperture photometry.
-    x, y : numpy.ndarray
+    x, y : :class:`numpy.ndarray`
         Pixel coordinates at which to measure the aperture photometry
     aper_size : float, optional
         Radius of the circular aperture in pixels.
 
     Returns
     -------
-    `astropy.table.Table`
+    :class:`astropy.table.Table`
         Table containing updated photometric data, including aperture flux and flux ratios.
     """
     # Ensure image is a Fits_Simple object
@@ -75,12 +75,12 @@ def format_table(phot_data):
 
     Parameters
     ----------
-    phot_data : `astropy.table.Table`
+    phot_data : :class:`astropy.table.Table`
         Table containing photometric data to be formatted.
 
     Returns
     -------
-    `astropy.table.Table`
+    :class:`astropy.table.Table`
         Formatted table containing a concise selection of columns.
     """
     # Specify the desired column order and names

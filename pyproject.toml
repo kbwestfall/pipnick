@@ -55,9 +55,11 @@ test = [
     "tox",
 ]
 docs = [
-    "sphinx",
-    "sphinx-automodapi",
-    "sphinx_rtd_theme",
+    "docutils<0.22",
+    "numpydoc>=1.8",
+    "pydata-sphinx-theme>=0.22",
+    "sphinx>6",
+    "sphinx-design",
 ]
 dev = [
     "pipnick[test,docs]",

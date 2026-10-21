@@ -32,24 +32,25 @@ def build_moffat_psf_model(image, thresh=15.0, fwhm=7., fittype='circ', pdf_file
 
     Parameters
     ----------
-    image : str, CCDData
+    image : str, :class:`astropy.nddata.CCDData`
         Image for PSF analysis.
     thresh : float, optional
         Detection threshold in units of background standard deviation.
     fwhm : float, optional
         Initial estimate of the FWHM
     mode : str, optional
-        Mode for PSF fitting in photutils package.
+        Mode for PSF fitting; see
+        :class:`photutils.psf.IterativePSFPhotometry`.
     fittype : str, optional
         Type of PSF fit to use ('circ' for circular, 'ellip' for elliptical).
 
     Returns
     -------
-    stack : numpy.ma.MaskedArray
+    stack : :class:`numpy.ma.MaskedArray`
         The stacked source image
-    par : numpy.ndarray
+    par : :class:`numpy.ndarray`
         The best-fit model parameters
-    model : numpy.ndarray
+    model : :class:`numpy.ndarray`
         The best-fit model sampled at each pixel of the image stamps
     """
     # Read the image if necessary
@@ -90,14 +91,15 @@ def psf_analysis(image, thresh=10.0, guess_fwhm=7., mode='all', fittype='circ', 
 
     Parameters
     ----------
-    image : str, CCDData
+    image : str, :class:`astropy.nddata.CCDData`
         Image for PSF analysis.
     thresh : float, optional
         Detection threshold in units of background standard deviation.
     guess_fwhm : float, optional
         Initial guess for the FWHM of the PSF in pixels
     mode : str, optional
-        Mode for PSF fitting in photutils package. Default is 'all'.
+        Mode for PSF fitting; see
+        :class:`photutils.psf.IterativePSFPhotometry`.
     fittype : str, optional
         Type of PSF fit to use ('circ' for circular, 'ellip' for elliptical). Default is 'circ'.
     show : bool, optional
@@ -105,9 +107,9 @@ def psf_analysis(image, thresh=10.0, guess_fwhm=7., mode='all', fittype='circ', 
 
     Returns
     -------
-    numpy.ndarray
+    :class:`numpy.ndarray`
         Best-fit parameters for the PSF used for the photometry
-    `astropy.table.Table`
+    :class:`astropy.table.Table`
         Table containing the results of the PSF photometry
     """
     _image = image if isinstance(image, CCDData) else CCDData.read(image)
@@ -320,14 +322,14 @@ def consolidate_groups(phot_data, preserve=[]):
 
     Parameters
     ----------
-    phot_data : `astropy.table.Table`
+    phot_data : :class:`astropy.table.Table`
         Table containing photometric data of detected sources.
     preserve : list, optional
         List of group IDs to preserve during consolidation. Default is an empty list.
 
     Returns
     -------
-    `astropy.table.Table`
+    :class:`astropy.table.Table`
         A new table containing consolidated photometric data.
     """
     new_data = phot_data.copy()

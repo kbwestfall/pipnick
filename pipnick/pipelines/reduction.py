@@ -22,16 +22,20 @@ def reduce_all(rawdir=None, table=None, rdxdir=None, overwrite=False, append=Fal
     Perform reduction of raw astronomical data frames (overscan subtraction,
     bias subtraction, flat division, cosmic ray masking).
 
+    The processing steps use :func:`ccdproc.subtract_overscan`,
+    :func:`ccdproc.trim_image`, :func:`ccdproc.subtract_bias`,
+    :func:`ccdproc.flat_correct`, and :func:`ccdproc.cosmicray_lacosmic`.
+
     Parameters
     ----------
-    rawdir : str, Path, optional
+    rawdir : str, :class:`pathlib.Path`, optional
         Path to the parent directory of the raw directory containing the raw
         FITS files to be reduced.  If None, ``table`` *must* be provided.
-    table : str, Path, optional
+    table : str, :class:`pathlib.Path`, optional
         A file with the tabulated data to reduce.  If None, this file is
         automatically generated based on the data found and reduced in
         ``rawdir``; see :func:`~pipnick.utils.dir_nav.build_metadata`.
-    rdxdir : str, Path, optional
+    rdxdir : str, :class:`pathlib.Path`, optional
         Top-level directory for the reduced data.  If None, this is the parent
         directory of ``rawdir``.  I.e., if the raw directory is
         ``/User/janedoe/Nickel/raw``, ``rdxdir`` will be set to
@@ -140,12 +144,12 @@ def init_ccddata(frame, bpm=None, saturation=None, gain=None, readnoise=None):
 
     Parameters
     ----------
-    frame : str, Path
+    frame : str, :class:`pathlib.Path`
         Path to the FITS file.
 
     Returns
     -------
-    CCDData
+    :class:`astropy.nddata.CCDData`
         Initialized and processed CCDData object.
     """
 #    warnings.simplefilter('ignore', FITSFixedWarning)
@@ -196,18 +200,18 @@ def process_frame(raw_frame, bias=None, flat=None, flag_cosmics=True):
 
     Parameters
     ----------
-    raw_frame : str, Path
+    raw_frame : str, :class:`pathlib.Path`
         Data file to process.
     flag_cosmics : bool, optional
         Identify and mask cosmic rays
-    bias : CCDData, optional
+    bias : :class:`astropy.nddata.CCDData`, optional
         Image to use for the bias subtraction
-    flat : CCDData, optional
+    flat : :class:`astropy.nddata.CCDData`, optional
         Image to use for the field-flattening
 
     Returns
     -------
-    CCDData
+    :class:`astropy.nddata.CCDData`
         Processed CCDData object with overscan subtracted and image trimmed.
     """
 #    warnings.simplefilter("error", RuntimeWarning)
@@ -247,7 +251,7 @@ def stack_frames(raw_frames, scale=False, bias=None, flat=None, flag_cosmics=Tru
 
     Returns
     -------
-    CCDData
+    :class:`astropy.nddata.CCDData`
         Combined CCDData object.
     """
     # TODO: For *many* images, this may be too memory intensive.
@@ -293,16 +297,16 @@ def get_super_bias(metadata, rdxdir=None, overwrite=False):
 
     Parameters
     ----------
-    metadata : Table
+    metadata : :class:`astropy.table.Table`
         Astropy Table containing file information.
-    rdxdir : str, Path, optional
+    rdxdir : str, :class:`pathlib.Path`, optional
         Directory to save the super bias frame.
     overwrite : bool, optional
         Overwrite any existing files.
 
     Returns
     -------
-    CCDData
+    :class:`astropy.nddata.CCDData`
         SuperBias CCDData object.
     """
     if rdxdir is not None:
@@ -340,13 +344,13 @@ def get_super_flats(metadata, rdxdir=None, flattype='skyflat', bias=None, filter
 
     Parameters
     ----------
-    metadata : Table
+    metadata : :class:`astropy.table.Table`
         Astropy Table containing file information.
-    rdxdir : str, Path, optional
+    rdxdir : str, :class:`pathlib.Path`, optional
         Directory to save the super flat frames.
     flattype : str, optional
         Type of flats to use.  Must be 'domeflat' or 'skyflat'.
-    bias : CCDData, optional
+    bias : :class:`astropy.nddata.CCDData`, optional
         Super bias
     filter : list, optional
         List of strings with the filters to process.  If None, process all

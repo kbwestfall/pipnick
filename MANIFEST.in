@@ -2,7 +2,7 @@
 prune .github
 prune build
 prune dist
-prune docs/_build
+prune docs
 
 # Remove file types
 global-exclude *.pyc *.o *.so *.DS_Store *.ipynb
