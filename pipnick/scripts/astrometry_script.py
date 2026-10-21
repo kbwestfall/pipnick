@@ -45,5 +45,3 @@ class AstrometryPipeline(scriptbase.ScriptBase):
                                      args.excl_filts)
         
         return calib_files
-        
-        

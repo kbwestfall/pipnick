@@ -80,4 +80,3 @@ class PhotometryPipeline(scriptbase.ScriptBase):
                                       overwrite=args.overwrite)
         
 #        return src_catalogs
- 

@@ -100,4 +100,3 @@ def show_image(image: Union[str, Path, CCDData]):
     ax.imshow(data_masked, origin='lower', cmap=cmap, vmin=vmin, vmax=vmax)
     pyplot.colorbar(cm.ScalarMappable(cmap=cmap), ax=ax)
     pyplot.show()
-   
