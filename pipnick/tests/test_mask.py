@@ -4,6 +4,7 @@ import numpy as np
 
 from pipnick.utils import masking
 
+
 def test_polygons():
     vertices = np.array([[-0.5,33.5], [34.5, -0.5], [-0.5, -0.5], [-0.5,33.5]])
     shape = (900,1200)

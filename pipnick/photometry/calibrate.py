@@ -205,7 +205,7 @@ def calibration_design_matrix(airmass, color, order=2):
 
 def apparent_mag(mag_i, color, airmass, coeffs):
     r"""
-    Calculate the apparent magnitudes given the relevant meausrements
+    Calculate the apparent magnitudes given the relevant measurements
     and the calibration coefficients.
 
     This is equivalent to the first equation in the equations sets 2.9

@@ -1,10 +1,12 @@
-import numpy as np
-import matplotlib.pyplot as plt
-from matplotlib import cm
 from pathlib import Path
 from typing import Union
+
+import numpy as np
+from matplotlib import pyplot, cm
+
 from astropy.io import fits
 from astropy.visualization import ZScaleInterval
+from astropy.nddata import CCDData
 
 from pipnick.utils.fits_class import Fits_Simple
 from pipnick.utils.dir_nav import unzip_directories
@@ -23,13 +25,13 @@ def print_fits_info(image_path: str):
         print("\nHDU Header")
         print(repr(hdul[0].header))
         
-        plt.figure(figsize=(8, 6))
+        pyplot.figure(figsize=(8, 6))
         interval = ZScaleInterval()
         vmin, vmax = interval.get_limits(hdul[0].data)
-        plt.imshow(hdul[0].data, origin='lower', vmin=vmin, vmax=vmax)
-        plt.gcf().set_dpi(300)
-        plt.colorbar()
-        plt.show()
+        pyplot.imshow(hdul[0].data, origin='lower', vmin=vmin, vmax=vmax)
+        pyplot.gcf().set_dpi(300)
+        pyplot.colorbar()
+        pyplot.show()
 
 
 def display_nickel(image: Union[str, Path, Fits_Simple]):
@@ -46,18 +48,19 @@ def display_nickel(image: Union[str, Path, Fits_Simple]):
         image = Fits_Simple(image)
 
     data_masked = image.masked_array
-    fig = plt.figure(figsize=(8, 6))
+    fig = pyplot.figure(figsize=(8, 6))
     ax = fig.add_axes([0.1, 0.1, 0.8, 0.8])
     ax.set_title(image)
 
     interval = ZScaleInterval()
     vmin, vmax = interval.get_limits(data_masked)
-    cmap = plt.get_cmap()
+    cmap = pyplot.get_cmap()
     cmap.set_bad('r', alpha=0.5)
     ax.imshow(data_masked, origin='lower', cmap=cmap, vmin=vmin, vmax=vmax)
-    plt.colorbar(cm.ScalarMappable(cmap=cmap), ax=ax)
-    plt.show()
-   
+    pyplot.colorbar(cm.ScalarMappable(cmap=cmap), ax=ax)
+    pyplot.show()
+
+
 def display_many_nickel(path_list):
     """
     Display the data of all images in a list of directories or files.
@@ -70,3 +73,31 @@ def display_many_nickel(path_list):
     images = unzip_directories(path_list, output_format='Fits_Simple')
     for image in images:
         display_nickel(image)
+
+
+def show_image(image: Union[str, Path, CCDData]):
+    """
+    Display the data of a FITS image using zscale coloring, with masked
+    pixels colored red.
+
+    Parameters
+    ----------
+    image : Union[str, Path, Fits_Simple]
+        The Fits_Simple object or path to the FITS image.
+    """
+    if not isinstance(image, CCDData):
+        _image = CCDData.read(image)
+
+    data_masked = image.masked_array
+    fig = pyplot.figure(figsize=(8, 6))
+    ax = fig.add_axes([0.1, 0.1, 0.8, 0.8])
+    ax.set_title(image)
+
+    interval = ZScaleInterval()
+    vmin, vmax = interval.get_limits(data_masked)
+    cmap = pyplot.get_cmap()
+    cmap.set_bad('r', alpha=0.5)
+    ax.imshow(data_masked, origin='lower', cmap=cmap, vmin=vmin, vmax=vmax)
+    pyplot.colorbar(cm.ScalarMappable(cmap=cmap), ax=ax)
+    pyplot.show()
+   

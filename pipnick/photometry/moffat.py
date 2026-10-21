@@ -3,24 +3,33 @@
 ########  Fit objects to model PSFs  ########
 #############################################
 
+from IPython import embed
+
 import numpy as np
 from scipy import optimize
 
 from astropy.modeling.functional_models import Moffat2D, Fittable2DModel
 from astropy.modeling.parameters import Parameter
 from astropy.units import UnitsError
+from astropy.stats import sigma_clipped_stats
 
 class FitMoffat2D:
     """
     Fit a 2D Moffat model to the given data.
 
-    Parameters are:
-        x0: x-coordinate of the center
-        y0: y-coordinate of the center
-        amplitude: 
-        gamma: width
-        alpha: fall-off slope
-        background: background
+    There are six model parameters:
+        0. x0, x-coordinate of the center
+        1. y0, y-coordinate of the center
+        2. amplitude, Peak value
+        3. gamma, width
+        4. alpha, fall-off slope
+        5. background, background
+
+    Parameters
+    ----------
+    c : numpy.ndarray
+        Data to fit
+
     """
     def __init__(self, c):
         """
@@ -39,7 +48,7 @@ class FitMoffat2D:
         self.nfree = self.npar
         self.free = np.ones(self.npar, dtype=bool)
 
-    def guess_par(self):
+    def guess_par(self, image_moments=True, alpha=3.5):
         """
         Guess initial parameters for the Moffat fit based on data
 
@@ -48,13 +57,26 @@ class FitMoffat2D:
                      (x0, y0, amplitude, gamma, alpha, background)
         """
         par = np.zeros(6, dtype=float)
-        par[0] = self.x[self.shape[0]//2, self.shape[1]//2]
-        par[1] = self.y[self.shape[0]//2, self.shape[1]//2]
-        par[2] = self.c[self.shape[0]//2, self.shape[1]//2]
+        # Clip high values to guess the background
+        par[5] = sigma_clipped_stats(self.c, sigma_lower=3., sigma_upper=1.)[1]
+        c_bkg = self.c - par[5]
+        if image_moments:
+            # Use moments to calculate the center, peak value, and width
+            par[0] = np.ma.sum(self.x * c_bkg)/np.ma.sum(c_bkg)
+            par[1] = np.ma.sum(self.y * c_bkg)/np.ma.sum(c_bkg)
+            # Set the amplitude to be the value at the image center
+            par[2] = c_bkg[int(np.round(par[0])), int(np.round(par[1]))]
+        else:
+            # Set the parameters based on the image center
+            par[0] = self.x[self.shape[0]//2, self.shape[1]//2]
+            par[1] = self.y[self.shape[0]//2, self.shape[1]//2]
+            par[2] = self.c[self.shape[0]//2, self.shape[1]//2]
+        # Always set alpha explicitly
+        par[4] = alpha
+        # Set the width based on the first moment of the radius
         r = np.sqrt((self.x-par[0])**2 + (self.y-par[1])**2)
-        par[3] = np.sum(r*self.c)/np.sum(self.c)/2
-        par[4] = 3.5
-        par[5] = 0.
+        fwhm = 2 * np.ma.sum(r * c_bkg)/np.ma.sum(c_bkg)
+        par[3] = self.to_gamma(fwhm, par[4])
         return par
 
     def default_bounds(self):
@@ -207,24 +229,59 @@ class FitEllipticalMoffat2D:
         self.nfree = self.npar
         self.free = np.ones(self.npar, dtype=bool)
 
-    def guess_par(self):
+#    def guess_par(self):
+#        """
+#        Guess initial parameters for the elliptical Moffat fit based on data
+#
+#        Returns:
+#            ndarray: Initial parameter guesses.
+#                     (x0, y0, amplitude, gamma1, gamma2, phi, alpha, background)
+#        """
+#        par = np.zeros(8, dtype=float)
+#        par[0] = self.x[self.shape[0]//2, self.shape[1]//2]
+#        par[1] = self.y[self.shape[0]//2, self.shape[1]//2]
+#        par[2] = self.c[self.shape[0]//2, self.shape[1]//2]
+#        r = np.sqrt((self.x-par[0])**2 + (self.y-par[1])**2)
+#        par[3] = np.sum(r*self.c)/np.sum(self.c)/2
+#        par[4] = np.sum(r*self.c)/np.sum(self.c)/2
+#        par[5] = 0.
+#        par[6] = 3.5
+#        par[7] = 0.
+#        return par
+
+    def guess_par(self, image_moments=True, alpha=3.5):
         """
-        Guess initial parameters for the elliptical Moffat fit based on data
+        Guess initial parameters for the Moffat fit based on data
 
         Returns:
             ndarray: Initial parameter guesses.
-                     (x0, y0, amplitude, gamma1, gamma2, phi, alpha, background)
+                     (x0, y0, amplitude, gamma, alpha, background)
         """
-        par = np.zeros(8, dtype=float)
-        par[0] = self.x[self.shape[0]//2, self.shape[1]//2]
-        par[1] = self.y[self.shape[0]//2, self.shape[1]//2]
-        par[2] = self.c[self.shape[0]//2, self.shape[1]//2]
+        par = np.zeros(6, dtype=float)
+        # Clip high values to guess the background
+        par[7] = sigma_clipped_stats(self.c, sigma_lower=3., sigma_upper=1.)[1]
+        c_bkg = self.c - par[7]
+        if image_moments:
+            # Use moments to calculate the center, peak value, and width
+            par[0] = np.ma.sum(self.x * c_bkg)/np.ma.sum(c_bkg)
+            par[1] = np.ma.sum(self.y * c_bkg)/np.ma.sum(c_bkg)
+            # Set the amplitude to be the value at the image center
+            par[2] = c_bkg[int(np.round(par[0])), int(np.round(par[1]))]
+        else:
+            # Set the parameters based on the image center
+            par[0] = self.x[self.shape[0]//2, self.shape[1]//2]
+            par[1] = self.y[self.shape[0]//2, self.shape[1]//2]
+            par[2] = self.c[self.shape[0]//2, self.shape[1]//2]
+        # Always set alpha explicitly
+        par[6] = alpha
+        # Set the width based on the first moment of the radius
         r = np.sqrt((self.x-par[0])**2 + (self.y-par[1])**2)
-        par[3] = np.sum(r*self.c)/np.sum(self.c)/2
-        par[4] = np.sum(r*self.c)/np.sum(self.c)/2
+        fwhm = 2 * np.ma.sum(r * c_bkg)/np.ma.sum(c_bkg)
+        par[3] = self.to_gamma(fwhm, par[4])
+        # Guess it's circular
+        par[4] = par[3]
+        # And that the rotation angle is 0.
         par[5] = 0.
-        par[6] = 3.5
-        par[7] = 0.
         return par
 
     def default_bounds(self):
@@ -484,6 +541,7 @@ class FitEllipticalMoffat2D:
         original_rad = np.deg2rad(original_phi - 0.000000000001)
         return original_rad
 
+
 def make_ellipse(a, b, phi, n=500):
     """
     Generate coordinates for an ellipse.
@@ -505,7 +563,7 @@ def make_ellipse(a, b, phi, n=500):
     return x*cosr - y*sinr, y*cosr + x*sinr
 
 
-class MoffatElliptical2D_photutils(Fittable2DModel):
+class EllipticalMoffat2DModel(Fittable2DModel):
     """
     Two dimensional Moffat model.
 

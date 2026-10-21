@@ -57,7 +57,7 @@ class NickelCamera:
         """
         Return the metadata columns for this class.  See :func:`parse_metadata`.
         """
-        return ['path', 'file', 'frametype'] + list(cls.meta_keys.keys())
+        return ['file', 'frametype'] + list(cls.meta_keys.keys())
     
     @classmethod
     def parse_metadata(cls, rawfile, keys=None):
@@ -76,10 +76,9 @@ class NickelCamera:
         -------
         list
             List of the metadata extracted from the file.  See
-            :func:`metadata_cols`.  The first three elements are always the
-            parent path (Path) to the file, the file name (str), and the
-            automatically determined frame type (str).  The remaining metadata
-            can be specific to each camera.
+            :func:`metadata_cols`.  The first two elements are always the file
+            name (str) and the automatically determined frame type (str).  The
+            remaining metadata can be specific to each camera.
         """
         _file = Path(rawfile).absolute()
         hdr = get_header(_file)
@@ -93,7 +92,7 @@ class NickelCamera:
 
         metadata = [hdr[cls.meta_keys[key]] if cls.meta_keys[key] in hdr else None
                     for key in cls.meta_keys.keys()]
-        return [str(_file.parent), _file.name, frametype] + metadata
+        return [_file.name, frametype] + metadata
     
     @classmethod
     def bpm(cls):
