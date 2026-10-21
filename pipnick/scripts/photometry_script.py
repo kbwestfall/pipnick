@@ -29,20 +29,26 @@ class PhotometryPipeline(scriptbase.ScriptBase):
                             help='Summary file with the metadata for the photometry results.')
 
 #        parser.add_argument('maindir', type=str,
-#                            help='Path to main directory containing reduced directory with the files to be photometrically analyzed.')
+#                            help='Path to main directory containing reduced directory with '
+#                                 'the files to be photometrically analyzed.')
 #        parser.add_argument('-t', '--use_table', action='store_true',
-#                            help='Whether to use the table file to automatically exclude files that have been commented-out')
+#                            help='Whether to use the table file to automatically exclude '
+#                                 'files that have been commented-out')
 #        parser.add_argument('--excl_files', default=[], type=list,
-#                            help='List of file stems substrings to exclude (exact match not necessary).')
+#                            help='List of file stems substrings to exclude (exact match not '
+#                                 'necessary).')
 #        parser.add_argument('--excl_objs', default=[], type=list,
-#                            help='List of object substrings to exclude (exact match not necessary).')
+#                            help='List of object substrings to exclude (exact match not '
+#                                 'necessary).')
 #        parser.add_argument('--excl_filts', default=[], type=list,
-#                            help='List of filter substrings to exclude (exact match not necessary).')
+#                            help='List of filter substrings to exclude (exact match not '
+#                                 'necessary).')
 
         parser.add_argument('-s', '--sigma_thresh', default=8.0, type=float,
                             help='Threshold for source detection = background std * thresh.')
         parser.add_argument('-g', '--group', action='store_true', 
-                            help='Consolidates groups of sources detected together into one source')
+                            help='Consolidates groups of sources detected together into one '
+                                 'source')
         parser.add_argument('-m', '--mode', default='all', type=str,
                             help='Mode to run photutils PSFPhotometry. `all` recommended.',
                             choices=['all', 'new'])
@@ -53,7 +59,8 @@ class PhotometryPipeline(scriptbase.ScriptBase):
 #        parser.add_argument('-pf', '--plot_final', action='store_true', 
 #                            help="Displays images with sources & flux labelled")
 #        parser.add_argument('-pi', '--plot_inters', action='store_true', 
-#                            help="Displays images with initial sources & source groups for inspection")
+#                            help="Displays images with initial sources & source groups for "
+#                                 "inspection")
         parser.add_argument('--overwrite', '-o', default=False, action='store_true',
                             help='Overwrite any existing files')
         return parser

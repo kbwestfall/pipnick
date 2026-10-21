@@ -52,7 +52,9 @@ extensions = [
 
 root_doc = 'index'
 source_suffix = '.rst'
-exclude_patterns = ['_build', 'figures', 'sphinx_warnings.out']
+# The release notes are included into whatsnew.rst, as in PypeIt, rather than
+# built as pages of their own.
+exclude_patterns = ['_build', 'releases/*.rst', 'figures', 'sphinx_warnings.out']
 templates_path = []
 
 pygments_style = 'sphinx'

@@ -173,3 +173,5 @@ testing
 *.log.2
 *proc_files
 *.tbl
+# tox working directories
+.tmp/

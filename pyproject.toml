@@ -6,7 +6,7 @@ authors = [
     { name = "Kyle B. Westfall", email = "westfall@ucolick.org" },
 ]
 license = "BSD-3-Clause"
-license-files = ["LICENSE.rst"]
+license-files = ["LICENSE.rst", "licenses/PYPEIT_LICENSE.rst"]
 description = "Photometric Pipeline for the Nickel Telescope"
 keywords = [
     "photometry",
@@ -27,11 +27,11 @@ classifiers = [
     "Natural Language :: English",
     "Operating System :: OS Independent",
     "Programming Language :: Python",
-    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
 ]
-requires-python = ">=3.11"
+requires-python = ">=3.12,<3.15"
 dependencies = [
     "astropy>=7.0",
     "astroquery>=0.4",
@@ -41,7 +41,7 @@ dependencies = [
     "matplotlib>=3.9",
     "numpy>=2.0",
     "pandas>=2.2",
-    "photutils>=1.12",
+    "photutils>=3.0",
     "requests>=2.32",
     "scikit-image>=0.24",
     "scipy>=1.13",
@@ -87,8 +87,10 @@ build-backend = 'setuptools.build_meta'
 [tool.setuptools]
 include-package-data = true
 
-[tool.setuptools.packages]
-find = {}
+[tool.setuptools.packages.find]
+# Without an explicit include, namespace-package discovery also picks up
+# non-package directories (e.g., licenses/) and installs them at the top level.
+include = ["pipnick*"]
 
 [tool.setuptools_scm]
 version_file = "pipnick/pkg/version.py"

@@ -83,7 +83,8 @@ def convert_coords_all(photo_dir, astro_dir, final_calib_dir):
     """
     
     # Create a dictionary of astrometric calibration files indexed by object name
-    astro_calibs = {astro_calib.name.split('_')[0]: astro_calib for astro_calib in astro_dir.iterdir()}
+    astro_calibs = {astro_calib.name.split('_')[0]: astro_calib
+                    for astro_calib in astro_dir.iterdir()}
     astrophot_datas = {}
 
     # Iterate over all sub-directories in photo_dir
@@ -101,16 +102,19 @@ def convert_coords_all(photo_dir, astro_dir, final_calib_dir):
         Path.mkdir(astrophot_dir, exist_ok=True)
         Path.mkdir(output_dir, exist_ok=True)
         
-        log.info(f"Saving photometric source catalogs with sky coordinates (RA/Dec) to {output_dir}")
+        log.info("Saving photometric source catalogs with sky coordinates (RA/Dec) to "
+                 f"{output_dir}")
 
         result_datas = {}
         
-        # Convert coordinates for each photometric data file if corresponding calibration is available
+        # Convert coordinates for each photometric data file if corresponding
+        # calibration is available
         for key, phot_data in phot_datas.items():
             output_path = output_dir / (key + '_astrophotsrcs.csv')
             if key in astro_calibs.keys():
                 result_datas[key] = convert_coords(phot_data, output_path, astro_calibs[key]) 
-                result_datas[key].meta['image_path'] = photo_dir.parent.parent / 'reduced' / obj_dir.name / (key + '_red.fits')
+                result_datas[key].meta['image_path'] \
+                        = photo_dir.parent.parent / 'reduced' / obj_dir.name / (key + '_red.fits')
             else:
                 log.warning(f"No astrometric solution found for image {key}; skipping")
         
@@ -119,7 +123,8 @@ def convert_coords_all(photo_dir, astro_dir, final_calib_dir):
 
 def convert_coords(phot_data_inpath, phot_data_outpath, astrometric_img_path):
     """
-    Convert pixel coordinates in a photometric source catalog to sky coordinates (RA/Dec) using an astrometric FITS file.
+    Convert pixel coordinates in a photometric source catalog to sky coordinates
+    (RA/Dec) using an astrometric FITS file.
 
     Parameters
     ----------

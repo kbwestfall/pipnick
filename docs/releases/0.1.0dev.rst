@@ -1,0 +1,75 @@
+Version 0.1.0dev
+================
+
+The first versioned development release of ``pipnick``, following the original
+pipeline developed for an Akamai 2024 internship project.
+
+Breaking Changes
+----------------
+
+- The command-line scripts have been reorganized.  ``pipnick_reduction`` is
+  replaced by ``pipnick_metadata`` (builds the raw-data metadata table) and
+  ``pipnick_reduce``.  All scripts now share the logging options ``-v
+  {0,1,2}``, ``--log_file``, and ``--log_level``, which replace the previous
+  ``-v``/``-vv``/``--verbosity`` options; a log file is only written when
+  requested.
+
+- The reduction and photometry pipelines no longer accept the ``--excl_files``,
+  ``--excl_objs``, and ``--excl_filts`` options; frames are instead selected
+  through the metadata table.
+
+- The package logger is now ``pipnick.log`` (previously ``pipnick.logger``),
+  and logging is no longer configured from JSON files.
+
+Dependency Changes
+------------------
+
+- Supports python 3.12, 3.13, and 3.14.
+
+- Requires ``photutils>=3.0``, for ``photutils.psf.MoffatPSF`` and the
+  photutils 3.x PSF-photometry interface.
+
+- Requires ``numpy>=2.0`` and ``astropy>=7.0``.
+
+Functionality/Performance Improvements and Additions
+----------------------------------------------------
+
+- The image PSF is now modeled as a 2D Moffat function fit to a stack of bright,
+  isolated sources, which is then used for the PSF photometry.
+
+- Added ``pipnick_version``, which reports the installed version of
+  ``pipnick`` and its key dependencies.
+
+- Added package-specific exceptions in ``pipnick.pkg.exceptions``.
+
+Under-the-hood Improvements
+---------------------------
+
+- Packaging now uses ``pyproject.toml`` only; ``setup.cfg``, ``setup.py``, and
+  ``requirements.txt`` are removed.  The version is set by ``setuptools_scm``
+  and written to ``pipnick/pkg/version.py``.
+
+- Added a ``tox`` configuration and GitHub Actions continuous-integration
+  tests, including a code-style check.
+
+- Line endings are normalized to LF by ``.gitattributes``.
+
+Documentation Updates
+---------------------
+
+- Docstrings are NumPy style and rendered by ``numpydoc``, with types
+  cross-referenced to the numpy, astropy, matplotlib, photutils, and ccdproc
+  documentation through ``intersphinx``.
+
+- Added ``LICENSE.rst`` (BSD 3-Clause), ``licenses/README.rst`` describing the
+  terms of adapted (PypeIt) and dependent (``loess``) third-party code, and
+  ``CITATION.cff``.
+
+Bug Fixes
+---------
+
+- ``pipnick/pipelines`` is now a proper package, so the pipelines are included
+  in built wheels.
+
+- Fixed an undefined logger in ``pipnick.utils.fits_class`` that raised a
+  ``NameError`` when reading a FITS file without a mask.

@@ -5,7 +5,8 @@ pipnick logging.
 
     Adapted from ``pypeit/pkg/logger.py`` in `PypeIt
     <https://github.com/pypeit/PypeIt>`__ (BSD 3-Clause), whose implementation
-    in turn references the loggers in ``astropy`` and ``sdsstools``.
+    in turn references the loggers in ``astropy`` and ``sdsstools``.  See
+    ``licenses/README.rst``.
 
     Relative to the PypeIt original, this drops the ``STEP`` logging level (used
     to broadcast pipeline milestones to the PypeIt Dashboard, which has no

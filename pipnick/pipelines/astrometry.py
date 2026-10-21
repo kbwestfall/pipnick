@@ -100,15 +100,18 @@ def astrometry_all(maindir, api_key, use_table=False, resolve=False,
         obj_dir = image_path.parent.name
         output_path = wcs_dir / obj_dir / f"{output_path_stem}_astro.fits"
         if not resolve and output_path.exists():
-            log.info(f"Returning local copy of {image_path.name}'s solution; astrometry.net not used")
+            log.info(f"Returning local copy of {image_path.name}'s solution; "
+                     "astrometry.net not used")
             calibrated_fits_paths.append(output_path)
             continue
         
-        log.info(f"Submitting image {image_path.name} to astrometry.net. This may take up to {timeout} seconds")
+        log.info(f"Submitting image {image_path.name} to astrometry.net. This may take up "
+                 f"to {timeout} seconds")
         try:
             wcs_header = ast.solve_from_image(image_path, fwhm=fwhm_approx,
                                               ra_key=ra_key, dec_key=dec_key,
-                                              radius=fov_size_approx/60,  # Max error of RA/Dec guess, in deg
+                                              # Max error of RA/Dec guess, in deg
+                                              radius=fov_size_approx/60,
                                               scale_units='arcminwidth',
                                               scale_type='ul',
                                               scale_lower=fov_size_approx*0.8,
@@ -119,7 +122,8 @@ def astrometry_all(maindir, api_key, use_table=False, resolve=False,
                                               verbose=False)
             check_wcs_header(wcs_header, output_path)
         except TimeoutError as e:
-            log.info(f"No solution found on first try; will revisit after all images are submitted")
+            log.info("No solution found on first try; will revisit after all images are "
+                     "submitted")
             unsolved_submission_ids.append(e.args[1])
         
     for submission_id in unsolved_submission_ids:

@@ -296,7 +296,8 @@ def create_exclusion_func(exclude_list):
     return excl_func
 
 
-def unzip_directories(path_list: list, output_format: str = 'Fits_Simple', allow_exceptions: bool = False) -> list:
+def unzip_directories(path_list: list, output_format: str = 'Fits_Simple',
+                      allow_exceptions: bool = False) -> list:
     """
     Extract all files in a list of directories or files (or their subdirectories) and
     return a list of image objects.

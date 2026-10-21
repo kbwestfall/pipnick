@@ -56,7 +56,8 @@ def aperture_analysis(image, x, y, aper_size=8.0):
     
     # Mark sources with masked pixels as NaN in the aperture flux
     all_data['flux_aper'][all_data['flags'] % 2 == 1] = np.nan
-    log.info("Aperture photometry cannot handle masked pixels--sources with masked pixels have flux_aper = nan")    
+    log.info("Aperture photometry cannot handle masked pixels--sources with masked pixels "
+             "have flux_aper = nan")
     
     # Calculate the ratio of PSF flux to aperture flux and add it to the table
     all_data.add_column(all_data['flux_psf'] / all_data['flux_aper'],

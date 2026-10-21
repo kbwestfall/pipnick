@@ -3,9 +3,13 @@ prune .github
 prune build
 prune dist
 prune docs
+prune examples
 
 # Remove file types
 global-exclude *.pyc *.o *.so *.DS_Store *.ipynb
 
 # Remove individual files
+exclude .gitattributes
 exclude .gitignore
+exclude readthedocs.yml
+exclude tox.ini

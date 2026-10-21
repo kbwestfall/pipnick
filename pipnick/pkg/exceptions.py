@@ -4,7 +4,8 @@ Provides pipnick-specific exceptions.
 .. note::
 
     Adapted from ``pypeit/pkg/exceptions.py`` in `PypeIt
-    <https://github.com/pypeit/PypeIt>`__ (BSD 3-Clause).
+    <https://github.com/pypeit/PypeIt>`__ (BSD 3-Clause); see
+    ``licenses/README.rst``.
 """
 
 __all__ = [

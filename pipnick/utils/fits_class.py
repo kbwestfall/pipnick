@@ -147,7 +147,8 @@ class Fits_Simple:
             If the shape of the new mask does not match the shape of the data.
         """
         if new_mask.shape != self.shape:
-            raise ValueError(f"new_mask must have same shape as data {self.data.shape}. new_mask.shape = {new_mask.shape}")
+            raise ValueError(f"new_mask must have same shape as data {self.data.shape}. "
+                             f"new_mask.shape = {new_mask.shape}")
         self._mask = new_mask
 
     @property

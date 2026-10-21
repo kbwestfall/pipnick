@@ -109,11 +109,13 @@ def plot_stamps(stamps, pdf_file, vmin=None, vmax=None):
 #        # Source detection
 #        mean, median, std = sigma_clipped_stats(masked_images[index], sigma=3.)
 #        starfind = DAOStarFinder(fwhm=default_fwhm, threshold=thresh*std)
-#        sources = starfind(masked_images[index].filled(0.0) - median, mask=np.ma.getmaskarray(masked_images[index]))
+#        sources = starfind(masked_images[index].filled(0.0) - median,
+#                           mask=np.ma.getmaskarray(masked_images[index]))
 #        if sources is None:
 #            continue
 #        nsources = len(sources)
-#        ap_centers = np.column_stack((sources['xcentroid'], sources['ycentroid']))  # Source positions
+#        # Source positions
+#        ap_centers = np.column_stack((sources['xcentroid'], sources['ycentroid']))
 #
 #        # Stamp setup
 #            # Scikit-Image uses the bottom left corner to define the coordinate system.  
@@ -129,7 +131,8 @@ def plot_stamps(stamps, pdf_file, vmin=None, vmax=None):
 #        # Process each detected source and add to stamp
 #        for i in range(nsources):
 #            t = transform.EuclideanTransform(translation=-ap_centers[i][::-1] - 0.5 + center)
-#            stamps[i] = transform.warp(masked_images[index].filled(0.0).T, t.inverse, output_shape=stamp_shape, cval=0, order=0).T
+#            stamps[i] = transform.warp(masked_images[index].filled(0.0).T, t.inverse,
+#                                       output_shape=stamp_shape, cval=0, order=0).T
 #            stamps[i, stamps[i] == 0.] = np.ma.masked  # Mask the background
 #            if np.all(np.ma.getmaskarray(stamps[i, r > 3 * default_fwhm])):
 #                continue

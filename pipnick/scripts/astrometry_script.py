@@ -8,21 +8,28 @@ class AstrometryPipeline(scriptbase.ScriptBase):
 
     @classmethod
     def get_parser(cls, width=None):
-        parser = super().get_parser(description='Performs astrometric calibration on reduced images', width=width)
+        parser = super().get_parser(
+            description='Performs astrometric calibration on reduced images', width=width
+        )
         parser.add_argument('maindir', type=str,
-                            help='Path to the main directory containing the reduced directory with the FITS files to be astrometrically calibrated.')
+                            help='Path to the main directory containing the reduced directory '
+                                 'with the FITS files to be astrometrically calibrated.')
         parser.add_argument('apikey', type=str,
                             help='API key from https://nova.astrometry.net account')
         parser.add_argument('-t', '--use_table', action='store_true',
-                            help='Whether to use the table file to automatically exclude files that have been commented-out')
+                            help='Whether to use the table file to automatically exclude '
+                                 'files that have been commented-out')
         parser.add_argument('-r', '--resolve', action='store_true', 
                             help="re-solves images with previously generated local solves")
         parser.add_argument('--excl_files', default=[], type=list,
-                            help='List of file stems substrings to exclude (exact match not necessary).')
+                            help='List of file stems substrings to exclude (exact match not '
+                                 'necessary).')
         parser.add_argument('--excl_objs', default=[], type=list,
-                            help='List of object substrings to exclude (exact match not necessary).')
+                            help='List of object substrings to exclude (exact match not '
+                                 'necessary).')
         parser.add_argument('--excl_filts', default=[], type=list,
-                            help='List of filter substrings to exclude (exact match not necessary).')
+                            help='List of filter substrings to exclude (exact match not '
+                                 'necessary).')
         return parser
 
     @classmethod

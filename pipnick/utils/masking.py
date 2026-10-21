@@ -168,7 +168,8 @@ def create_mask(shape, bad_cols=None, bad_slices=None, bad_regions=None):
 #        - 'mask': Returns the standard nickel mask.
 #        - 'fov_mask': Returns the standard nickel mask with overscan columns.
 #        - 'mask_cols_only': Returns the nickel mask with only bad columns masked.
-#        - 'fov_mask_cols_only': Returns the nickel mask with overscan columns and only bad columns masked.
+#        - 'fov_mask_cols_only': Returns the nickel mask with overscan columns and only bad
+#          columns masked.
 #
 #    Returns
 #    -------
@@ -191,7 +192,8 @@ def create_mask(shape, bad_cols=None, bad_slices=None, bad_regions=None):
 #    elif mode == 'fov_mask_cols_only':
 #        return loaded_masks['nickel_fov_mask_cols_only']
 #    else:
-#        raise ValueError("Invalid mode. Expected one of: 'mask', 'fov_mask', 'mask_cols_only', 'fov_mask_cols_only'.")
+#        raise ValueError("Invalid mode. Expected one of: 'mask', 'fov_mask', 'mask_cols_only', "
+#                         "'fov_mask_cols_only'.")
  
  
 #def generate_masks() -> tuple:
@@ -205,8 +207,10 @@ def create_mask(shape, bad_cols=None, bad_slices=None, bad_regions=None):
 #        A tuple containing four masks:
 #        - nickel_mask_cols_only: Mask for Nickel images with only bad columns masked.
 #        - nickel_mask: Mask for Nickel images with bad columns and blind corners masked.
-#        - nickel_fov_mask_cols_only: Mask for Nickel images with FOV padding and only bad columns masked.
-#        - nickel_fov_mask: Mask for Nickel images with FOV padding, bad columns, and blind corners masked.
+#        - nickel_fov_mask_cols_only: Mask for Nickel images with FOV padding and only bad
+#          columns masked.
+#        - nickel_fov_mask: Mask for Nickel images with FOV padding, bad columns, and blind
+#          corners masked.
 #    """
 #    # Mask for Nickel images (masking bad columns and blind corners)
 #    nickel_mask_cols_only = add_mask(np.zeros(ccd_shape), bad_columns, [], []).mask
@@ -216,8 +220,10 @@ def create_mask(shape, bad_cols=None, bad_slices=None, bad_regions=None):
 #    pad_height = fov_shape[0] - ccd_shape[0]
 #    pad_width = fov_shape[1] - ccd_shape[1]
 #    # Apply padding
-#    nickel_fov_mask_cols_only = np.pad(nickel_mask_cols_only, ((0, pad_height), (0, pad_width)), mode='constant', constant_values=0)
-#    nickel_fov_mask = np.pad(nickel_mask, ((0, pad_height), (0, pad_width)), mode='constant', constant_values=0)
+#    nickel_fov_mask_cols_only = np.pad(nickel_mask_cols_only, ((0, pad_height), (0, pad_width)),
+#                                       mode='constant', constant_values=0)
+#    nickel_fov_mask = np.pad(nickel_mask, ((0, pad_height), (0, pad_width)), mode='constant',
+#                             constant_values=0)
 #    
 #    np.savez(mask_file, nickel_mask_cols_only=nickel_mask_cols_only,
 #                        nickel_mask=nickel_mask,
@@ -227,7 +233,8 @@ def create_mask(shape, bad_cols=None, bad_slices=None, bad_regions=None):
 #    return nickel_mask_cols_only, nickel_mask, nickel_fov_mask_cols_only, nickel_fov_mask
 
 
-#def add_mask(data: np.ndarray, cols_to_mask: list, tris_to_mask: list, rects_to_mask: list) -> np.ma.MaskedArray:
+#def add_mask(data: np.ndarray, cols_to_mask: list, tris_to_mask: list,
+#             rects_to_mask: list) -> np.ma.MaskedArray:
 #    """
 #    Apply masks to an image by masking specified columns, triangles, and rectangles.
 #
@@ -240,7 +247,8 @@ def create_mask(shape, bad_cols=None, bad_slices=None, bad_regions=None):
 #    tris_to_mask : list
 #        A list of tuples, where each tuple contains 3 coordinates representing a triangle to mask.
 #    rects_to_mask : list
-#        A list of tuples, where each tuple contains 4 coordinates representing a rectangle to mask.
+#        A list of tuples, where each tuple contains 4 coordinates representing a rectangle to
+#        mask.
 #
 #    Returns
 #    -------

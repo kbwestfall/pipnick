@@ -1,0 +1,24 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "pipnick: Photometric Pipeline for the Nickel Telescope"
+abstract: >-
+  A Python pipeline for basic image processing and photometric analysis of
+  imaging data obtained with the 1-meter Nickel Telescope at Lick Observatory.
+  Originally developed for an Akamai 2024 internship project.
+type: software
+authors:
+  - family-names: Eto
+    given-names: Allison K.
+    email: allisonketo@gmail.com
+  - family-names: Westfall
+    given-names: Kyle B.
+    email: westfall@ucolick.org
+    affiliation: "University of California Observatories"
+repository-code: "https://github.com/allisoneto/pipnick"
+license: BSD-3-Clause
+keywords:
+  - astronomy
+  - photometry
+  - astrometry
+  - Nickel Telescope
+  - Lick Observatory

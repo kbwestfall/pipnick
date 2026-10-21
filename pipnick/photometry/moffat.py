@@ -476,7 +476,8 @@ class FitEllipticalMoffat2D:
         """
         if par is not None:
             self._set_par(par)
-        return self._eval_moffat(self.par, self.x if x is None else x, self.y if y is None else y) \
+        return self._eval_moffat(self.par, self.x if x is None else x,
+                                 self.y if y is None else y) \
                     + self.par[7]
 
     def resid(self, par):
@@ -604,7 +605,8 @@ class FitEllipticalMoffat2D:
             Original phi in radians.
         """
         if gamma1 < gamma2:
-            if nice_phi >= -89.999:  # This accounts for the previous condition nice_phi - 90 > 0.001
+            # This accounts for the previous condition nice_phi - 90 > 0.001
+            if nice_phi >= -89.999:
                 original_phi = nice_phi + 90
             else:
                 original_phi = nice_phi - 90
@@ -687,8 +689,12 @@ class EllipticalMoffat2DModel(Fittable2DModel):
     y_0 = Parameter(
         default=0, description="Y position of the maximum of the Moffat model"
     )
-    gamma1 = Parameter(default=1, description="Core width in 1st arbitrary(?) direction of the Moffat model")
-    gamma2 = Parameter(default=1, description="Core width in 1st arbitrary(?) direction of the Moffat model")
+    gamma1 = Parameter(
+        default=1, description="Core width in 1st arbitrary(?) direction of the Moffat model"
+    )
+    gamma2 = Parameter(
+        default=1, description="Core width in 1st arbitrary(?) direction of the Moffat model"
+    )
     phi = Parameter(default=0, description="Rotation angle of the Moffat model (rad)")
     alpha = Parameter(default=1, description="Power index of the Moffat model")
 

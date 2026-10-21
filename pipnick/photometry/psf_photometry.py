@@ -132,7 +132,8 @@ def psf_analysis(image, thresh=10.0, guess_fwhm=7., mode='all', fittype='circ', 
     bkgrms = MADStdBackgroundRMS()
     std = bkgrms(_image)
 
-    iraffind = IRAFStarFinder(fwhm=fit_fwhm, threshold=thresh * std, minsep_fwhm=0.1)  # Source finder
+    # Source finder
+    iraffind = IRAFStarFinder(fwhm=fit_fwhm, threshold=thresh * std, minsep_fwhm=0.1)
     # TODO: Make this a parameter
     grouper = SourceGrouper(min_separation=2 * fit_fwhm)  # Grouping algorithm
     mmm_bkg = MMMBackground()  # Background estimator
@@ -341,7 +342,8 @@ def consolidate_groups(phot_data, preserve=[]):
     log.info(f"Consolidating groups {group_ids}")
     log.info(f"Preserving groups {preserve}")
 
-    new_data = phot_data.copy()[~np.isin(phot_data['group_id'], group_ids)]  # Start with non-group data
+    # Start with non-group data
+    new_data = phot_data.copy()[~np.isin(phot_data['group_id'], group_ids)]
     
     # Consolidate data for each group
     for id in group_ids:

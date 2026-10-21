@@ -1,5 +1,11 @@
 """
 Implements base classes for use with scripts.
+
+.. note::
+
+    Adapted from ``pypeit/scripts/scriptbase.py`` in `PypeIt
+    <https://github.com/pypeit/PypeIt>`__ (BSD 3-Clause); see
+    ``licenses/README.rst``.
 """
 
 import argparse

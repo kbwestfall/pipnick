@@ -234,7 +234,8 @@ def fit_psf_generic(mode, input_base, num_images, fittype='ellip',
                 clipped_coords = clipped_coords[~masked_fwhm2.mask]
                 clipped_source_images = clipped_source_images[~masked_fwhm2.mask]
             
-            log.info(f"Number of sources removed in sigma clipping = {len(fit_pars) - len(clipped_fit_objs)}")
+            log.info("Number of sources removed in sigma clipping = "
+                     f"{len(fit_pars) - len(clipped_fit_objs)}")
             log.info(f"Number of sources remaining = {len(clipped_fit_objs)}")
             
             return clipped_coords, clipped_fit_objs, clipped_source_images
@@ -414,7 +415,7 @@ def psf_plot(plot_file, fit, fittype='ellip', show=False, plot_fit=True):
     ----------
     plot_file : :class:`pathlib.Path`
         Output PDF file path.
-    fit : :class:`~pipnick.photometry.moffat.FitMoffat2D`, :class:`~pipnick.photometry.moffat.FitEllipticalMoffat2D`
+    fit : :class:`~.FitMoffat2D`, :class:`~.FitEllipticalMoffat2D`
         Fitting results.
     fittype : str, optional
         Type of model fit.  Currently only 'ellip' is implemented.
@@ -554,7 +555,8 @@ def plot_sources(image, phot_data, fwhm, flux_name='flux_fit',
     y_name : str, optional
         Name of the y-coordinate column in phot_data (default is 'y_fit').
     label_name : str, optional
-        Name of the label column in phot_data to use for annotating sources (default is 'group_id').
+        Name of the label column in phot_data to use for annotating sources
+        (default is 'group_id').
     scale : float, optional
         Scaling factor for the aperture sizes and annotation text (default is 1).
     """

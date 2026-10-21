@@ -22,7 +22,12 @@ an issue on our GitHub page, if you have any problems.
    example
    issues
 
+.. toctree::
+   :caption: Reference
+   :maxdepth: 1
+
    API <api/pipnick>
+   whatsnew
 
 
 

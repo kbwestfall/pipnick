@@ -162,7 +162,8 @@ def plot_sources(phot_data, given_fwhm, image=None, flux_name='flux_fit',
     y_name : str, optional
         Name of the y-coordinate column in phot_data (default is 'y_fit').
     label_name : str, optional
-        Name of the label column in phot_data to use for annotating sources (default is 'group_id').
+        Name of the label column in phot_data to use for annotating sources
+        (default is 'group_id').
     scale : float, optional
         Scaling factor for the aperture sizes and annotation text (default is 1).
 
