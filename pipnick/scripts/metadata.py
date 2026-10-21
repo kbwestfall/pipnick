@@ -17,9 +17,6 @@ class MetaData(scriptbase.ScriptBase):
                             help='Path to parent directory with the raw data to be reduced.')
         parser.add_argument('-t', '--raw_table', default=None,
                             help='File for the metadata')
-        parser.add_argument('-v', '--verbose', action='count', default=0,
-                            help='Level of verbosity to display (5=highest; "-vv" sets level=2)')
-        parser.add_argument('-l', '--log', type=str, default=None, help='Log file')
         parser.add_argument('-o', '--overwrite', default=False, action='store_true',
                             help='Overwrite any existing files')
         parser.add_argument('-a', '--append', default=False, action='store_true',
@@ -29,14 +26,12 @@ class MetaData(scriptbase.ScriptBase):
                                  'entire script again from scratch.')
         return parser
 
-    @staticmethod
-    def main(args):
-        from pipnick.utils.log import adjust_global_logger
+    @classmethod
+    def main(cls, args):
         from pipnick.utils.dir_nav import build_metadata
 
         # Initialize logger
-        adjust_global_logger(log_level='INFO' if args.verbose < 1 else args.verbose,
-                             log_file=args.log)
+        cls.init_log(args)
 
         # Organize raw files based on input directory or table
         build_metadata(

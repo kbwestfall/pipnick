@@ -6,6 +6,7 @@ from astropy.visualization import ZScaleInterval
 from pathlib import Path
 from typing import Union
 
+from pipnick import log
 from pipnick.utils.nickel_data import (ccd_shape, fov_shape)
 #from pipnick.utils.nickel_masks import get_masks_from_file
 
@@ -123,7 +124,7 @@ class Fits_Simple:
                 try:
                     self._mask = hdul['MASK'].data
                 except KeyError:
-                    logger.debug(f'No mask in FITS file {self.path.name}; returning default mask')
+                    log.debug(f'No mask in FITS file {self.path.name}; returning default mask')
                     if all(self.shape == ccd_shape):
                         self._mask = get_masks_from_file('mask')
                     elif all(self.shape == fov_shape):

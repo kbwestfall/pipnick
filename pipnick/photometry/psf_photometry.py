@@ -14,7 +14,7 @@ from photutils.psf import IterativePSFPhotometry, make_psf_model, MoffatPSF
 from photutils.background import MMMBackground, MADStdBackgroundRMS, LocalBackground
 from photutils.psf import SourceGrouper
 
-from pipnick import logger
+from pipnick import log
 from pipnick.utils.fits_class import Fits_Simple
 from pipnick.utils.nickel_data import bad_columns
 from pipnick.utils.log import log_astropy_table
@@ -55,14 +55,14 @@ def build_moffat_psf_model(image, thresh=15.0, fwhm=7., fittype='circ', pdf_file
     # Read the image if necessary
     _image = image if isinstance(image, CCDData) else CCDData.read(image)
     source_data = starfind.detect_sources(_image, thresh=thresh, fwhm=fwhm)
-    logger.info(f'Found {len(source_data)} well-separated sources with well-detected fluxes.')
+    log.info(f'Found {len(source_data)} well-separated sources with well-detected fluxes.')
 
-    logger.info('Extracting image stamps.')
+    log.info('Extracting image stamps.')
     bkg, stamps = starfind.extract_stamps(_image, source_data)
     npix_stamp = np.prod(stamps.shape[1:])
     mask_fraction = np.sum(np.ma.getmaskarray(stamps), axis=(1,2)) / npix_stamp
     indx = source_data['good'].data & (mask_fraction < 0.01)
-    logger.info(f'Found {np.sum(indx)} good sources to stack for the PSF measurement.')
+    log.info(f'Found {np.sum(indx)} good sources to stack for the PSF measurement.')
 
     if pdf_file is not None:
         starfind.plot_stamps(stamps[indx], pdf_file, vmin=None, vmax=None)
@@ -75,7 +75,7 @@ def build_moffat_psf_model(image, thresh=15.0, fwhm=7., fittype='circ', pdf_file
     elif fittype == 'ellip':
         fitter = FitEllipticalMoffat2D(stack)
     else:
-        logger.error(f'Unknown fit type {fittype}')
+        log.error(f'Unknown fit type {fittype}')
 
     fitter.fit()
     return stack, fitter.par, fitter.model()
@@ -115,7 +115,7 @@ def psf_analysis(image, thresh=10.0, guess_fwhm=7., mode='all', fittype='circ', 
         _image, thresh=thresh, fwhm=guess_fwhm, fittype=fittype
     )
     fit_fwhm = process_par(moffat_par, fittype=fittype)
-    logger.info(f'Measured Moffat PSF FWHM = {fit_fwhm:.1f} pixels')
+    log.info(f'Measured Moffat PSF FWHM = {fit_fwhm:.1f} pixels')
 
     # ----------------------------------------------------------------------
     # Attempt to improve the source detection by improving the FWHM estimate
@@ -186,7 +186,7 @@ def psf_analysis(image, thresh=10.0, guess_fwhm=7., mode='all', fittype='circ', 
 # 
 #     # Show plots for each group ID
 #     for id in group_ids:
-#         logger.warning(f"Group {id} has multiple fitted PSFs: displaying original source")
+#         log.warning(f"Group {id} has multiple fitted PSFs: displaying original source")
 #         group = phot_data[phot_data['group_id'] == id]
 #         
 #         # Match coordinates of the group center to original source coordinates
@@ -196,9 +196,9 @@ def psf_analysis(image, thresh=10.0, guess_fwhm=7., mode='all', fittype='circ', 
 #         if len(matching_indices) == 0:
 #             matching_indices = match_coords((group_x, group_y), source_coords, 4.0)
 #             if len(matching_indices) == 0:
-#                 logger.warning("No nearby source found to display")
+#                 log.warning("No nearby source found to display")
 #         if len(matching_indices) > 1:
-#             logger.info(f"Multiple nearby sources that could match this group; displaying all")
+#             log.info(f"Multiple nearby sources that could match this group; displaying all")
 #         
 #         # Display plots for all potential matching sources
 #         for index in matching_indices:
@@ -227,7 +227,7 @@ def psf_analysis(image, thresh=10.0, guess_fwhm=7., mode='all', fittype='circ', 
 #     """
 #     search_tree = KDTree(search_space)  # Create KDTree for fast searching
 #     indices = search_tree.query_ball_point(target, max_dist)  # Find nearby points
-#     logger.debug(f"Search found indices {indices} within {max_dist} of {target}")
+#     log.debug(f"Search found indices {indices} within {max_dist} of {target}")
 #     return indices
 
 
@@ -308,7 +308,7 @@ def process_par(par, fittype):
         return gamma_to_fwhm(par[3], par[4])
     if fittype == 'ellip':
         return (gamma_to_fwhm(par[3], par[6]) + gamma_to_fwhm(par[4], par[6])) / 2
-    logger.error(f'Unknown fit type {fittype}')
+    log.error(f'Unknown fit type {fittype}')
 
 
 def consolidate_groups(phot_data, preserve=[]):
@@ -336,8 +336,8 @@ def consolidate_groups(phot_data, preserve=[]):
     group_data = group_data.copy()[np.logical_not(np.isin(group_data['group_id'], preserve))]
 
     group_ids = list(sorted(set(group_data['group_id'])))  # Unique group IDs
-    logger.info(f"Consolidating groups {group_ids}")
-    logger.info(f"Preserving groups {preserve}")
+    log.info(f"Consolidating groups {group_ids}")
+    log.info(f"Preserving groups {preserve}")
 
     new_data = phot_data.copy()[~np.isin(phot_data['group_id'], group_ids)]  # Start with non-group data
     
@@ -369,5 +369,5 @@ def consolidate_groups(phot_data, preserve=[]):
     
     new_data.sort('group_id')  # Sort consolidated data by group ID
 #    table_str = log_astropy_table(new_data)  # Log consolidated data
-#    logger.debug(f"Consolidated sources: \n{table_str}")
+#    log.debug(f"Consolidated sources: \n{table_str}")
     return new_data  # Return consolidated data

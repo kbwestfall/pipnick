@@ -3,7 +3,6 @@ Perform photometric calibration on reduced images
 """
 
 from pipnick.scripts import scriptbase
-from pipnick.utils import log
 
 class PhotometryPipeline(scriptbase.ScriptBase):
 
@@ -55,22 +54,17 @@ class PhotometryPipeline(scriptbase.ScriptBase):
 #                            help="Displays images with sources & flux labelled")
 #        parser.add_argument('-pi', '--plot_inters', action='store_true', 
 #                            help="Displays images with initial sources & source groups for inspection")
-        parser.add_argument('-l', '--log', type=str, default=log.default_log_name(__name__),
-                            help='Log file')
-        parser.add_argument('--verbose', '-v', action='count', default=0,
-                            help='Level of verbosity to display (5=highest; "-vv" sets level=2)')
         parser.add_argument('--overwrite', '-o', default=False, action='store_true',
                             help='Overwrite any existing files')
         return parser
 
-    @staticmethod
-    def main(args):
-        
+    @classmethod
+    def main(cls, args):
+
         from pipnick.pipelines.photometry import photometry_all
 
         # Initialize logger
-        log.adjust_global_logger(log_level='INFO' if args.verbose < 1 else args.verbose,
-                                 log_file=args.log)
+        cls.init_log(args)
         
         src_catalogs = photometry_all(rdxdir=args.rdxdir, raw_table=args.raw_table,
                                       phot_table=args.phot_table,

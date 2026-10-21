@@ -8,7 +8,6 @@ from matplotlib import pyplot as plt
 from matplotlib import ticker
 from matplotlib.backends.backend_pdf import PdfPages
 from pathlib import Path
-import logging
 
 from astropy.io import fits
 from astropy.modeling.functional_models import Moffat1D
@@ -17,13 +16,12 @@ from astropy.stats import SigmaClip
 from astropy.nddata import CCDData
 from photutils.aperture import CircularAperture
 
+from pipnick import log
 from pipnick.utils.fits_class import Fits_Simple
 from pipnick.photometry.moffat import FitEllipticalMoffat2D, FitMoffat2D, make_ellipse
 #from pipnick.photometry.starfind import generate_stamps
 from pipnick.utils.dir_nav import unzip_directories
 from pipnick.utils.nickel_data import plate_scale_approx
-
-logger = logging.getLogger(__name__)
 
 
 def fit_psf_stack(input_base, num_images, fittype='ellip', ofile=None):
@@ -213,8 +211,8 @@ def fit_psf_generic(mode, input_base, num_images, fittype='ellip',
                 clipped_coords = clipped_coords[~masked_fwhm2.mask]
                 clipped_source_images = clipped_source_images[~masked_fwhm2.mask]
             
-            logger.info(f"Number of sources removed in sigma clipping = {len(fit_pars) - len(clipped_fit_objs)}")
-            logger.info(f"Number of sources remaining = {len(clipped_fit_objs)}")
+            log.info(f"Number of sources removed in sigma clipping = {len(fit_pars) - len(clipped_fit_objs)}")
+            log.info(f"Number of sources remaining = {len(clipped_fit_objs)}")
             
             return clipped_coords, clipped_fit_objs, clipped_source_images
 

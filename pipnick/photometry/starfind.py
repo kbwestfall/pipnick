@@ -17,7 +17,7 @@ from photutils.detection import DAOStarFinder
 from skimage import transform
 
 from pipnick.utils.fits_class import Fits_Simple
-from pipnick import logger
+from pipnick import log
 
 
 def plot_stamps(stamps, pdf_file, vmin=None, vmax=None):
@@ -183,7 +183,7 @@ def plot_stamps(stamps, pdf_file, vmin=None, vmax=None):
 #                                                    np.ones(nkeep, dtype=float))),
 #                                axis=0)
 #        
-#        logger.info(f'Working on image {images[index]} ({len(stamps[keep])} stamps)')
+#        log.info(f'Working on image {images[index]} ({len(stamps[keep])} stamps)')
 #
 #        # Plot and save the stamps to a PDF file
 #        pdf_file = output_base.with_suffix(f".{images[index].path.stem.split('_')[0]}.stamps.pdf")
@@ -280,13 +280,13 @@ def detect_sources(image, thresh=15., fwhm=7., inner_bkg=3., outer_bkg=5., min_d
     # NOTE: sigma_clipped_stats can work directly on _image (at least for
     # astropy 7.0.1)
     mean, median, std = sigma_clipped_stats(_image, sigma=3.)
-    logger.info(f'Median and standard deviation: {median:.1f} {std:.2f}')
+    log.info(f'Median and standard deviation: {median:.1f} {std:.2f}')
 
     # Source detection
     starfind = DAOStarFinder(fwhm=fwhm, threshold=thresh*std)
     sources = starfind((_image - median).filled(0.0), mask=np.ma.getmaskarray(_image))
     nsources = len(sources)
-    logger.info(f'Detected {nsources} sources.')
+    log.info(f'Detected {nsources} sources.')
 
     # Get the size and flux of each source via Kron measurements
     ap_centers = np.column_stack((sources['xcentroid'], sources['ycentroid']))  # Source positions
@@ -294,7 +294,7 @@ def detect_sources(image, thresh=15., fwhm=7., inner_bkg=3., outer_bkg=5., min_d
             = kron_stats(x, y, np.asanyarray(_image), ap_centers, fwhm, inner_bkg=inner_bkg,
                          outer_bkg=outer_bkg)
     mean_kron_radius = sigma_clipped_stats(kron_radius, sigma=3., maxiters=None)[0]
-    logger.info(f'Mean Kron radius of sources: {mean_kron_radius:.1f}')
+    log.info(f'Mean Kron radius of sources: {mean_kron_radius:.1f}')
     kron_bkg, _, kron_flux = kron_stats(x, y, np.asanyarray(_image), ap_centers, fwhm,
                                         inner_bkg=inner_bkg, outer_bkg=outer_bkg,
                                         source_radius=mean_kron_radius)
@@ -314,7 +314,7 @@ def detect_sources(image, thresh=15., fwhm=7., inner_bkg=3., outer_bkg=5., min_d
     good = (np.ma.argmax(_kflux, axis=1) == np.arange(nsources)) \
             & (kron_flux.data > min_flux) \
             & np.logical_not(np.ma.getmaskarray(kron_flux))
-    logger.info(f'Selected {np.sum(good)} well-separated sources with good flux')
+    log.info(f'Selected {np.sum(good)} well-separated sources with good flux')
 
     meta = {'thresh': thresh, 'fwhm': fwhm, 'inner_bkg': inner_bkg, 'outer_bkg': outer_bkg,
             'min_dist_fwhm': min_dist_fwhm, 'min_flux': min_flux,

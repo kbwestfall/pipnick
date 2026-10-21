@@ -1,17 +1,15 @@
-import logging
 from pathlib import Path
 from astropy.io import ascii, fits
 from astropy.wcs import WCS
 from astropy.coordinates import SkyCoord
 import astropy.units as u
 
+from pipnick import log
 from pipnick.utils.log import log_astropy_table
 
 #################################################
 ####  This pipeline is currently incomplete  ####
 #################################################
-
-logger = logging.getLogger(__name__)
 
 def final_calib_all(maindir, use_table=False,
                     excl_files=[], excl_objs=[], excl_filts=[]):
@@ -103,7 +101,7 @@ def convert_coords_all(photo_dir, astro_dir, final_calib_dir):
         Path.mkdir(astrophot_dir, exist_ok=True)
         Path.mkdir(output_dir, exist_ok=True)
         
-        logger.info(f"Saving photometric source catalogs with sky coordinates (RA/Dec) to {output_dir}")
+        log.info(f"Saving photometric source catalogs with sky coordinates (RA/Dec) to {output_dir}")
 
         result_datas = {}
         
@@ -114,7 +112,7 @@ def convert_coords_all(photo_dir, astro_dir, final_calib_dir):
                 result_datas[key] = convert_coords(phot_data, output_path, astro_calibs[key]) 
                 result_datas[key].meta['image_path'] = photo_dir.parent.parent / 'reduced' / obj_dir.name / (key + '_red.fits')
             else:
-                logger.warning(f"No astrometric solution found for image {key}; skipping")
+                log.warning(f"No astrometric solution found for image {key}; skipping")
         
         astrophot_datas[obj_dir.name] = result_datas
     return astrophot_datas
@@ -179,6 +177,6 @@ def convert_coords(phot_data_inpath, phot_data_outpath, astrometric_img_path):
     # Save the updated catalog to the specified output path
     phot_data.write(phot_data_outpath, format='csv', overwrite=True)
     
-    logger.debug(f"Source Catalog with Sky Coordinates: \n{log_astropy_table(phot_data)}")
-    logger.info(f"Saving source catalog with RA/Dec coordinates to {phot_data_outpath}")
+    log.debug(f"Source Catalog with Sky Coordinates: \n{log_astropy_table(phot_data)}")
+    log.info(f"Saving source catalog with RA/Dec coordinates to {phot_data_outpath}")
     return phot_data

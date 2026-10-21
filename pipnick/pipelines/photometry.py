@@ -9,7 +9,7 @@ from astropy.table import Table
 from pipnick.photometry.psf_photometry import psf_analysis, consolidate_groups
 from pipnick.photometry.aperture_photometry import aperture_analysis
 from pipnick.utils import dir_nav
-from pipnick import logger
+from pipnick import log
 
 
 def photometry_all(rdxdir=None, raw_table=None, phot_table=None, thresh=8.0, group=False,
@@ -105,8 +105,8 @@ def photometry_all(rdxdir=None, raw_table=None, phot_table=None, thresh=8.0, gro
     if _phot_table.is_file() and not overwrite:
         raise ValueError(f'{_phot_table} exists and overwrite=False!')
 
-    logger.info(f'Performing photometry on data:')
-    logger.info(f'    Reduction directory: {_rdxdir}')
+    log.info(f'Performing photometry on data:')
+    log.info(f'    Reduction directory: {_rdxdir}')
 
     source_catalog_paths = []  # List to hold paths to source catalogs
 
@@ -114,7 +114,7 @@ def photometry_all(rdxdir=None, raw_table=None, phot_table=None, thresh=8.0, gro
     
     for frame in rdx_frames:
         # Perform PSF photometry on the file
-        logger.info(f'Performing PSF analysis for {frame}.')
+        log.info(f'Performing PSF analysis for {frame}.')
         psf_par, psf_data = psf_analysis(frame, thresh=thresh, mode=mode, fittype=fittype)
         
         embed()
@@ -131,6 +131,6 @@ def photometry_all(rdxdir=None, raw_table=None, phot_table=None, thresh=8.0, gro
         all_data.write(output_file, format='csv', overwrite=True)
         source_catalog_paths.append(output_file)
     
-    logger.info('---- photometry_all() call ended')
+    log.info('---- photometry_all() call ended')
     # Return the list of paths to the source catalogs
     return source_catalog_paths

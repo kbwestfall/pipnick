@@ -1,5 +1,4 @@
 import numpy as np
-import logging
 from matplotlib import pyplot as plt
 from matplotlib import cm
 from matplotlib.colors import ListedColormap
@@ -8,10 +7,9 @@ from loess.loess_2d import loess_2d
 from photutils.aperture import CircularAperture
 from astropy.visualization import ZScaleInterval
 
+from pipnick import log
 from pipnick.utils.nickel_data import ccd_shape
 from pipnick.utils.fits_class import Fits_Simple
-
-logger = logging.getLogger(__name__)
 
 def smooth_contour(data_x, data_y, data_vals, color_range, backgrd_ax=None, 
                    frac=0.3, title=None, category_str=None):
@@ -65,8 +63,8 @@ def smooth_contour(data_x, data_y, data_vals, color_range, backgrd_ax=None,
         param_list, _ = loess_2d(data_x, data_y, data_vals, xnew=grid_x.flatten(),
                                  ynew=grid_y.flatten(), frac=frac)
     except np.linalg.LinAlgError:
-        logger.warning("LinAlgError: SVD did not converge in Linear Least Squares")
-        logger.warning("Skipping this contour plot")
+        log.warning("LinAlgError: SVD did not converge in Linear Least Squares")
+        log.warning("Skipping this contour plot")
         return ax, None
     
     # Reshape the smoothed parameters to match the grid shape
@@ -176,7 +174,7 @@ def plot_sources(phot_data, given_fwhm, image=None, flux_name='flux_fit',
     if image is None:
         # Load the image from the metadata if not provided
         image = Fits_Simple(phot_data.meta['image_path'])
-    logger.info(f'Plotting image {image}')
+    log.info(f'Plotting image {image}')
     
     if flux_name == 'flux_fit' and 'flux_fit' not in phot_data.colnames:
         flux_name = 'flux_psf'

@@ -4,7 +4,7 @@ from astropy.nddata import CCDData
 from photutils.aperture import CircularAperture
 from photutils.aperture import ApertureStats
 
-from pipnick import logger
+from pipnick import log
 from pipnick.utils.fits_class import Fits_Simple
 from pipnick.utils.log import log_astropy_table
 
@@ -56,7 +56,7 @@ def aperture_analysis(image, x, y, aper_size=8.0):
     
     # Mark sources with masked pixels as NaN in the aperture flux
     all_data['flux_aper'][all_data['flags'] % 2 == 1] = np.nan
-    logger.info("Aperture photometry cannot handle masked pixels--sources with masked pixels have flux_aper = nan")    
+    log.info("Aperture photometry cannot handle masked pixels--sources with masked pixels have flux_aper = nan")    
     
     # Calculate the ratio of PSF flux to aperture flux and add it to the table
     all_data.add_column(all_data['flux_psf'] / all_data['flux_aper'],
@@ -64,7 +64,7 @@ def aperture_analysis(image, x, y, aper_size=8.0):
     all_data['ratio_flux'].info.format = '.3f'
     
     # Log the results of the photometry
-    logger.debug(f"PSF & Aperture Photometry Results: \n{log_astropy_table(all_data)}")
+    log.debug(f"PSF & Aperture Photometry Results: \n{log_astropy_table(all_data)}")
 
     return format_table(all_data)
 

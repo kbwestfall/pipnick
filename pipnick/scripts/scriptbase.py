@@ -3,8 +3,11 @@ Implements base classes for use with scripts.
 """
 
 import argparse
+import datetime
 import textwrap
 from functools import reduce
+
+from .. import log
 
 class SmartFormatter(argparse.HelpFormatter):
     r"""
@@ -144,7 +147,7 @@ class ScriptBase:
     # the relevant parser arguments
     @classmethod
     def get_parser(cls, description=None, width=None,
-                   formatter=argparse.ArgumentDefaultsHelpFormatter):
+                   formatter=argparse.ArgumentDefaultsHelpFormatter, include_log_options=True):
         """
         Construct the command-line argument parser.
 
@@ -158,11 +161,66 @@ class ScriptBase:
                 width.
             formatter (`argparse.HelpFormatter`):
                 Class used to format the help output.
+            include_log_options (:obj:`bool`, optional):
+                Include the options controlling logging.
 
         Returns:
             `argparse.ArgumentParser`: Command-line interpreter.
         """
-        return argparse.ArgumentParser(description=description,
-                                       formatter_class=lambda prog: formatter(prog, width=width))
+        parser = argparse.ArgumentParser(description=description,
+                                         formatter_class=lambda prog: formatter(prog, width=width))
+        if not include_log_options:
+            return parser
+        parser.add_argument(
+            '-v', '--verbosity', type=int, default=1,
+            help='Verbosity level, which must be 0, 1, or 2.  Level 0 includes warning and '
+                 'error messages, level 1 adds informational messages, and level 2 adds '
+                 'debugging messages and the calling sequence.'
+        )
+        parser.add_argument(
+            '--log_file', type=str, default=None,
+            help='Name for the log file.  If set to "default", a name is generated from the '
+                 'script name and the current time.  If not set, no log file is written.'
+        )
+        parser.add_argument(
+            '--log_level', type=int, default=None,
+            help='Verbosity level for the log file.  If a log file is written and this is not '
+                 'set, it matches the console verbosity.'
+        )
+        return parser
+
+    @classmethod
+    def init_log(cls, args):
+        """
+        Initialize the logger from the parsed command-line arguments.
+
+        Args:
+            args (`argparse.Namespace`):
+                The parsed arguments, carrying ``verbosity``, ``log_file`` and
+                ``log_level``.
+        """
+        level = log.convert_verbosity_to_logging_level(args.verbosity)
+        log_file_level = (
+            None if args.log_level is None
+            else log.convert_verbosity_to_logging_level(args.log_level)
+        )
+        if args.log_file == 'default':
+            _log_file = cls.default_log_file()
+        elif args.log_file in ['None', None]:
+            _log_file = None
+        else:
+            _log_file = args.log_file
+        log.init(level=level, log_file=_log_file, log_file_level=log_file_level)
+
+    @classmethod
+    def default_log_file(cls):
+        """
+        Return the default name for the log file.
+
+        Returns:
+            :obj:`str`: The script name and a UT timestamp, to the minute.
+        """
+        timestamp = datetime.datetime.now(datetime.UTC).strftime('%Y%m%d-%H%M')
+        return f'{cls.name()}_{timestamp}.log'
 
 

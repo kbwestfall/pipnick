@@ -3,8 +3,6 @@ Perform astrometric calibration on reduced images
 """ 
 
 from pipnick.scripts import scriptbase
-from pipnick.utils.log import adjust_global_logger
-import logging
 
 class AstrometryPipeline(scriptbase.ScriptBase):
 
@@ -25,24 +23,16 @@ class AstrometryPipeline(scriptbase.ScriptBase):
                             help='List of object substrings to exclude (exact match not necessary).')
         parser.add_argument('--excl_filts', default=[], type=list,
                             help='List of filter substrings to exclude (exact match not necessary).')
-        parser.add_argument('-vv', '--very_verbose', action='store_true', 
-                            help="Display most detailed logs (use --verbosity for finer control)")
-        parser.add_argument('--verbosity', default=4, type=str,
-                            help='Level of verbosity to display (5=highest); overrides --verbose', 
-                            choices=[1,2,3,4,5])
         return parser
 
-    @staticmethod
-    def main(args):
-        
+    @classmethod
+    def main(cls, args):
+
         from pipnick.pipelines.astrometry import astrometry_all
-        
-        if args.very_verbose:
-            args.verbosity = 5
-        log_levels = {1:'CRITICAL', 2:'ERROR', 3:'WARNING', 4:'INFO', 5:'DEBUG'}
-        adjust_global_logger(log_levels[args.verbosity], __name__)
-        logger = logging.getLogger(__name__)
-        
+
+        # Initialize logger
+        cls.init_log(args)
+
         calib_files = astrometry_all(args.maindir, args.apikey, args.use_table, 
                                      args.resolve, args.excl_files, args.excl_objs, 
                                      args.excl_filts)

@@ -1,12 +1,120 @@
-[build-system]
-
-requires = [
-    "setuptools",
-    "setuptools_scm",
-    "wheel",
-    "extension-helpers",
-    "oldest-supported-numpy",
-    "cython>=0.29.14"
+[project]
+name = "pipnick"
+dynamic = ["version"]
+authors = [
+    { name = "Allison K. Eto", email = "allisonketo@gmail.com" },
+    { name = "Kyle B. Westfall", email = "westfall@ucolick.org" },
+]
+license = "BSD-3-Clause"
+description = "Photometric Pipeline for the Nickel Telescope"
+keywords = [
+    "photometry",
+    "astrometry",
+    "astronomy",
+    "Nickel",
+    "Lick",
+    "UCO",
+    "instrumentation",
+]
+readme = "README.md"
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering :: Astronomy",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+    "Topic :: Software Development :: User Interfaces",
+    "Natural Language :: English",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+]
+requires-python = ">=3.11"
+dependencies = [
+    "astropy>=7.0",
+    "astroquery>=0.4",
+    "ccdproc>=2.4",
+    "IPython>=8.0.0",
+    "loess>=2.1",
+    "matplotlib>=3.9",
+    "numpy>=2.0",
+    "pandas>=2.2",
+    "photutils>=1.12",
+    "requests>=2.32",
+    "scikit-image>=0.24",
+    "scipy>=1.13",
 ]
 
+[project.optional-dependencies]
+test = [
+    "coverage",
+    "pytest>=7.0.0",
+    "pytest-astropy",
+    "pytest-cov",
+    "tox",
+]
+docs = [
+    "sphinx",
+    "sphinx-automodapi",
+    "sphinx_rtd_theme",
+]
+dev = [
+    "pipnick[test,docs]",
+    "setuptools_scm",
+]
+
+[project.urls]
+Repository = "https://github.com/allisoneto/pipnick"
+
+[project.scripts]
+pipnick_version = "pipnick.scripts.version:Version.entry_point"
+pipnick_metadata = "pipnick.scripts.metadata:MetaData.entry_point"
+pipnick_reduce = "pipnick.scripts.reduce:Reduce.entry_point"
+pipnick_astrometry = "pipnick.scripts.astrometry_script:AstrometryPipeline.entry_point"
+pipnick_photometry = "pipnick.scripts.photometry_script:PhotometryPipeline.entry_point"
+
+[build-system]
+requires = [
+    "setuptools>=77",
+    "setuptools_scm>=8",
+]
 build-backend = 'setuptools.build_meta'
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages]
+find = {}
+
+[tool.setuptools_scm]
+version_file = "pipnick/pkg/version.py"
+
+[tool.pytest.ini_options]
+minversion = 7.0
+testpaths = [
+    "pipnick",
+]
+
+[tool.coverage]
+
+    [tool.coverage.run]
+        omit = [
+            "pipnick/conftest.py",
+            "pipnick/tests/*",
+            "pipnick/pkg/version*",
+            "*/pipnick/conftest.py",
+            "*/pipnick/tests/*",
+            "*/pipnick/pkg/version*",
+        ]
+
+    [tool.coverage.report]
+        exclude_lines = [
+            "pragma: no cover",
+            "except ImportError",
+            "raise AssertionError",
+            "raise NotImplementedError",
+            "'def main(.*):'",
+            "pragma: py{ignore_python_version}",
+            "def _ipython_key_completions_",
+        ]

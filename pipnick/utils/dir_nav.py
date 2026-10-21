@@ -12,7 +12,7 @@ from astropy.table import Table
 from pipnick.utils.fits_class import Fits_Simple
 from pipnick.utils.nickel_data import focus_label
 from pipnick import cameras
-from pipnick import logger
+from pipnick import log
 
 
 def build_camera_datatable(root, ext='.fits', path_key='path'):
@@ -51,12 +51,12 @@ def build_camera_datatable(root, ext='.fits', path_key='path'):
     # Get the list of files
     files = sorted(_root.glob(f'*{ext}'))
     nfiles = len(files)
-    logger.info(f'Found {nfiles} data files.')
+    log.info(f'Found {nfiles} data files.')
 
     # Use the first file to identify the camera
-    logger.info(f'Using {files[0].name} to identify the camera.')
+    log.info(f'Using {files[0].name} to identify the camera.')
     camera_name = cameras.identify_camera(files[0])
-    logger.info(f'Camera identified as: {camera_name}')
+    log.info(f'Camera identified as: {camera_name}')
     camera = eval(f'cameras.{camera_name}')
 
     # Parse the metadata into a table and write the file
@@ -130,17 +130,17 @@ def build_metadata(rawdir=None, filename=None, ext='.fits', overwrite=False, rdx
         if _rdxdir is not None:
             metadata.meta['rdxdir'] = _rdxdir
         # Write it
-        logger.info(f'Saving metadata to {_filename}')
+        log.info(f'Saving metadata to {_filename}')
         metadata.write(_filename, format='ascii.ecsv', overwrite=True)
         # Return the table
         return _filename, metadata
 
     # Read and return the metadata.  This will raise an error if _filename does
     # not exist
-    logger.info(f'Loading metadata from {_filename}')
+    log.info(f'Loading metadata from {_filename}')
     metadata = Table.read(_filename, format='ascii.ecsv')
     if 'rdxdir' in metadata.meta and _rdxdir is not None and metadata.meta['rdxdir'] != _rdxdir:
-        logger.warning(f"Overwriting output path for reductions.  Changing from "
+        log.warning(f"Overwriting output path for reductions.  Changing from "
                        f"\n\t{metadata.meta['rdxdir']} \n to \n\t{_rdxdir}")
         metadata.meta['rdxdir'] = _rdxdir
         metadata.write(_filename, format='ascii.ecsv', overwrite=True)
@@ -333,7 +333,7 @@ def unzip_directories(path_list: list, output_format: str = 'Fits_Simple', allow
                 try:
                     images.append(output(elem_path))
                 except (KeyError, OSError):
-                    logger.debug(f"unzip_directories() threw KeyError or OSError on {elem_path}")
+                    log.debug(f"unzip_directories() threw KeyError or OSError on {elem_path}")
             else:
                 images.append(output(elem_path))
     return images
