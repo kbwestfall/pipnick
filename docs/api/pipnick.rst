@@ -7,6 +7,7 @@ Subpackages
 .. toctree::
    :maxdepth: 4
 
+   pipnick.astrometry
    pipnick.cameras
    pipnick.photometry
    pipnick.pipelines

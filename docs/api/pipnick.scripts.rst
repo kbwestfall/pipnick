@@ -7,7 +7,7 @@ Submodules
 .. toctree::
    :maxdepth: 4
 
-   pipnick.scripts.astrometry_script
+   pipnick.scripts.astrometry
    pipnick.scripts.metadata
    pipnick.scripts.photometry_script
    pipnick.scripts.reduce

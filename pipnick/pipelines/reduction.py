@@ -112,27 +112,9 @@ def reduce_all(table, rdxdir=None, overwrite=False):
         invalid combination groups, or if the reduction directory includes
         products from a different setup.
     """
-    _table = Path(table).absolute()
-    if not _table.is_file():
-        raise PipnickPathError(f'{_table} does not exist.')
     # NOTE: overwrite applies to the reduction products, not the metadata table;
     # rebuilding an existing table would discard any user edits to it.
-    metafile, metadata = build_metadata(filename=_table, rdxdir=rdxdir)
-    check_single_setup(metadata, metafile)
-    if len(metadata) == 0:
-        raise PipnickDataModelError(f'{metafile} has no frames to reduce.')
-    check_comb_groups(metadata, metafile)
-    tag = setup_tag(metadata.meta['setups'][metadata['setup'][0]])
-    camera = cameras.get_camera(metadata.meta['camera'])
-
-    # Get the output directory
-    if 'rdxdir' in metadata.meta:
-        _rdxdir = Path(metadata.meta['rdxdir'])
-    else:
-        _rdxdir = Path(metadata.meta['rawdir']).absolute().parent
-        metadata.meta['rdxdir'] = str(_rdxdir)
-        # Update the file to include the reduction directory
-        update_metadata_meta(metafile, rdxdir=str(_rdxdir))
+    metafile, metadata, _rdxdir, tag, camera = load_setup(table, rdxdir=rdxdir)
     if not _rdxdir.is_dir():
         _rdxdir.mkdir(parents=True)
 
@@ -143,7 +125,7 @@ def reduce_all(table, rdxdir=None, overwrite=False):
 
     # Set the output files and check that the directory does not include
     # products from another setup
-    products = _plan_products(metadata, _rdxdir)
+    products = plan_products(metadata, _rdxdir)
     existing = _find_products(_rdxdir)
     other = [s for s in existing.values() if s != tag]
     if len(other) > 0:
@@ -196,6 +178,61 @@ def reduce_all(table, rdxdir=None, overwrite=False):
         )
 
     return science
+
+
+def load_setup(table, rdxdir=None):
+    """
+    Read and check a per-setup metadata file for processing.
+
+    Parameters
+    ----------
+    table : str, :class:`pathlib.Path`
+        A per-setup metadata file, written by ``pipnick_metadata --split``.
+    rdxdir : str, :class:`pathlib.Path`, optional
+        Directory for the reduced data.  If None, the directory saved in the
+        metadata file is used or, if there is none, the parent directory of the
+        raw data directory, which is then saved to the metadata file.
+
+    Returns
+    -------
+    metafile : :class:`pathlib.Path`
+        The metadata file.
+    metadata : :class:`astropy.table.Table`
+        The metadata table, excluding commented-out rows.
+    rdxdir : :class:`pathlib.Path`
+        The reduction directory, which may not yet exist.
+    tag : str
+        The setup tag; see :func:`~pipnick.metadata.setup_tag`.
+    camera : :class:`~pipnick.cameras.cameras.NickelCamera`
+        The camera used to obtain the data.
+
+    Raises
+    ------
+    :exc:`~pipnick.pkg.exceptions.PipnickPathError`
+        Raised if the metadata file does not exist.
+    :exc:`~pipnick.pkg.exceptions.PipnickDataModelError`
+        Raised if the table includes more than one setup, has no frames, or
+        has invalid combination groups.
+    """
+    _table = Path(table).absolute()
+    if not _table.is_file():
+        raise PipnickPathError(f'{_table} does not exist.')
+    metafile, metadata = build_metadata(filename=_table, rdxdir=rdxdir)
+    check_single_setup(metadata, metafile)
+    if len(metadata) == 0:
+        raise PipnickDataModelError(f'{metafile} has no frames to reduce.')
+    check_comb_groups(metadata, metafile)
+    tag = setup_tag(metadata.meta['setups'][metadata['setup'][0]])
+    camera = cameras.get_camera(metadata.meta['camera'])
+
+    if 'rdxdir' in metadata.meta:
+        _rdxdir = Path(metadata.meta['rdxdir'])
+    else:
+        _rdxdir = Path(metadata.meta['rawdir']).absolute().parent
+        metadata.meta['rdxdir'] = str(_rdxdir)
+        # Update the file to include the reduction directory
+        update_metadata_meta(metafile, rdxdir=str(_rdxdir))
+    return metafile, metadata, _rdxdir, tag, camera
 
 
 def check_single_setup(metadata, metafile):
@@ -581,7 +618,7 @@ def _science_name(metadata, indx, comb_id):
     return f'{"unknown" if len(obj) == 0 else obj}_{filt}_C{comb_id:03d}_{date}.fits'
 
 
-def _plan_products(metadata, rdxdir):
+def plan_products(metadata, rdxdir):
     """
     Set the output file for each combination group to be reduced.
 
@@ -1162,7 +1199,7 @@ def _reduce_calibration(product, metadata, raw, tag, overwrite, camera, bias=Non
     Parameters
     ----------
     product : dict
-        The combination group; see :func:`_plan_products`.
+        The combination group; see :func:`plan_products`.
     metadata : :class:`astropy.table.Table`
         The metadata table.
     raw : list
@@ -1236,7 +1273,7 @@ def _reduce_science(product, metadata, raw, tag, overwrite, camera, bias=None, f
     Parameters
     ----------
     product : dict
-        The combination group; see :func:`_plan_products`.
+        The combination group; see :func:`plan_products`.
     metadata : :class:`astropy.table.Table`
         The metadata table.
     raw : list

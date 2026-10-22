@@ -1,182 +1,212 @@
 Astrometric Solution
 ====================
 
-This tutorial demonstrates how to use the `astrometry_all()` function
-from the `pipnick` package to astrometrically calibrate images
-using astrometry.net.
+``pipnick_astrometry`` finds the astrometric solution (WCS) of each reduced
+science image and writes it to the image header.  It uses the
+`astrometry.net <https://nova.astrometry.net>`__ web service, but submits as
+few images as possible: most images are solved locally, by matching their
+sources to an image that is already solved or to the Gaia catalog.
 
 Overview
 --------
 
-The `astrometry_all()` function performs astrometric calibration on
-images that have undergone basic reduction. The function saves the
-results as a FITS image (with a WCS file for coordinate conversion) and
-a `.corr` table with detected source data and errors. It returns the
-paths to one file type, based on the user's specifications.
+The images are those produced by ``pipnick_reduce`` from a per-setup metadata
+file (see ``pipnick_metadata --split``).  For each run:
 
-Note that astrometry.net may take a significant amount of time to
-process images. If too few stars are present, the service may not be
-able to solve the image. If a solution is not found in 60 seconds,
-the function will recheck solution progress after all other images have
-been calibrated. If a solution still has not been found, you may
-manually check your submitted images in astrometry.net.
+1. **Existing solutions are kept.**  Solutions that were lost because an image
+   was rewritten (e.g., by rerunning ``pipnick_reduce``) are restored from the
+   cache of earlier astrometry.net results, or from solutions you provided
+   (see `Providing a solution`_), without submitting anything.
 
-The astrometry and photometry pipelines are independent and can usually
-run simultaneously. However, occasional conflicts may arise if both
-pipelines attempt to access the same file concurrently.
+2. **Images are grouped by pointing.**  Images whose telescope pointings are
+   within ``--group_radius`` (default 1 arcmin) form a group.  One image per
+   group, the reference, is solved, and the others are solved by matching
+   their detected sources to those of the reference (*bootstrapping*).
 
+3. **Groups without a solved image** are solved from an overlapping solved
+   image, or by matching their sources to the Gaia DR3 catalog.  The match
+   starts from the solution predicted from a solved image in the same setup
+   and the telescope pointing offset measured from the solved images.
 
-Using the Command-Line Script
+4. **Images that still cannot be solved are matched to Gaia with a wide
+   search**, which allows for an incorrect telescope pointing in the
+   metadata table (see `Incorrect telescope pointings`_).
+
+5. **Only images that cannot be solved this way are submitted** to
+   astrometry.net, starting with the image with the most detected sources.
+   Typically, one submission is enough for a night.
+
+A solution found by bootstrapping or from Gaia is accepted only if at least
+``--min_matches`` sources (default 4) are matched and the RMS residual is at
+most ``--max_rms`` (default 0.3 arcsec).  Images are bootstrapped from the
+solved image that overlaps them best, preferring images that were not
+themselves bootstrapped.
+
+By default, a submission sends only a list of sources detected locally (the
+positions of up to 100 of the brightest sources), not the image.  The
+solutions are not publicly visible on astrometry.net.
+
+The astrometry.net API key
+--------------------------
+
+Register at https://nova.astrometry.net and copy your API key from your
+profile.  ``pipnick`` reads it from the ``ASTROMETRY_NET_API_KEY`` environment
+variable (e.g., set in your shell startup file) or, if that is not set, from
+the ``api_key`` entry in the ``[astrometry_net]`` section of your
+``astroquery`` configuration file.  The key is never a command-line argument
+and is never logged.
+
+Using the command-line script
 -----------------------------
 
-For command-line usage, you can run the `pipnick_astrometry`
-script, which provides flexible options for obtaining an astrometric solution.
+.. code-block:: console
 
-**Basic Use**
+   pipnick_astrometry -t n1_2x2_slow_full.ecsv
 
-To execute the script, use the following command:
+The options are:
 
-.. code::
+- ``-t``, ``--raw_table``: The per-setup metadata file used to reduce the
+  images (required).
+- ``-r``, ``--rdxdir``: The reduction directory.  If not provided, the
+  directory saved in the metadata file is used.
+- ``--dry_run``: Detect the sources, group the images, and report what would
+  be submitted, without solving or submitting anything.  The source lists
+  that would be submitted are written to ``astrometry/dry_run``.
+- ``--max_submissions``: The maximum number of submissions to astrometry.net.
+- ``--resolve``: Ignore the existing and cached solutions and solve every image
+  again.  This can submit images that were solved before.
+- ``--upload_image``: Upload the images (with masked pixels set to 0) instead
+  of source lists, so that astrometry.net detects the sources.
+- ``--group_radius``, ``--min_matches``, ``--max_rms``: See `Overview`_.
+- ``--wide_search``, ``--wide_min_matches``: The maximum pointing error in
+  arcmin allowed by the wide search (default 10; 0 disables it), and the
+  minimum number of matched sources it requires (default 10).  See
+  `Incorrect telescope pointings`_.
 
-   pipnick_astrometry <maindir> <apikey> [options]
+A good first step for a new night is a dry run, followed by a run limited to
+one submission:
 
-Replace `<maindir>` with the path to the directory containing the
-raw & reduced directories. The reduced directory contains images to be
-calibrated, and must be at /maindir/reduced/. Replace `<apikey>` with your
-astrometry.net API key.
+.. code-block:: console
 
-Once you have run this script the first time, an ASCII Astropy table of
-all files in /maindir/reduced/ will be saved for reference at 
-/maindir/astrometry_files.tbl. You may 'comment out' files to be
-ignored in future runs with a `#`.
+   pipnick_astrometry -t n1_2x2_slow_full.ecsv --dry_run
+   pipnick_astrometry -t n1_2x2_slow_full.ecsv --max_submissions 1
 
-.. code::
+Rerunning the script is safe: solved images are not changed, and nothing is
+submitted unless an image cannot be solved otherwise.
 
-  pipnick_astrometry <maindir> <api_key> -t [options]
+Outputs
+-------
 
-Toggle on use_table with `-t` to ignore all 'commented-out' files in the table.
+The solution is written to the primary header of each reduced image,
+replacing any existing WCS, with these keywords recording how it was found:
 
-**Using Optional Arguments**
+- ``PNASTMTH``: The method: ``astrometry.net``, ``bootstrap`` (from another
+  image), ``gaia``, or ``points`` (provided by you).
+- ``PNASTWH``: A hash of the solution.
+- ``PNASTNPT`` and ``PNASTRMS``: The number of matched sources and the RMS
+  residual in arcsec (for bootstrapped, Gaia, and provided solutions).
+- ``PNASTREF`` and ``PNASTRH``: The reference image (or ``Gaia DR3``) and the
+  hash of its solution.  If the solution of a reference image changes, the
+  images bootstrapped from it are solved again on the next run.
+- ``PNASTIN`` and ``PNASTSUB``: The hash of the submitted input and the
+  astrometry.net submission ID.
+- ``PNASTPOE``: For images solved by the wide search, the distance in arcmin
+  between the image center and the pointing in the metadata table.
 
-The script also accepts the following command-line arguments:
+The ``astrometry`` subdirectory of the reduction directory holds the cached
+astrometry.net results (``anet_<hash>.fits``, including failed and pending
+submissions, which are not resubmitted), the cached Gaia queries
+(``gaia_*.ecsv``), and the solutions you provided (``<image>_points.fits``).
+Do not delete it unless you want to submit the images again.
 
-- `-t` or `--use_table` (flag, optional)
-  Whether to use the table file to automatically exclude files that have been commented-out.
+Incorrect telescope pointings
+-----------------------------
 
-- `-r` or `--resolve` (flag, optional)
-  If specified, re-solves images with previously generated local solves.
+The pointing (RA and Dec) of each image is taken from the metadata table,
+which takes it from the raw header.  Occasionally, the raw header is wrong;
+e.g., the telescope coordinates may not have been updated after a slew, so
+that a series of images carry the pointing of an earlier field.  The images
+are then not where ``pipnick_astrometry`` expects them, and the usual
+matching fails.
 
-- `--excl_files` (list, optional):
-  List of file stem substrings to exclude (exact match not necessary).
+There are two ways to solve such images, neither of which requires a
+submission to astrometry.net:
 
-- `--excl_objs` (list, optional):
-  List of object substrings to exclude (exact match not necessary).
+- **Automatically, with the wide search.**  An image that cannot be solved
+  otherwise is matched to Gaia allowing for a pointing error of up to
+  ``--wide_search`` arcmin (default 10), as long as another image in the
+  same setup is solved.  Because chance matches are more likely over a wide
+  area, at least ``--wide_min_matches`` sources (default 10) must match.  The
+  pointing error is recorded in the header (``PNASTPOE``) and reported with a
+  warning that gives the true image center.  Other images with the same
+  (stale) pointing then use the measured error, so they are solved by the
+  usual matching, even if they have too few sources for the wide search.
 
-- `--excl_filts` (list, optional):
-  List of filter substrings to exclude (exact match not necessary).
+- **By correcting the metadata table.**  Edit the ``ra`` and ``dec`` of the
+  affected frames in the metadata file (e.g., using the image centers
+  reported by the wide search, or the coordinates in the observing log), and
+  rerun the reduction and the astrometry:
 
-- `-vv` or `--very_verbose` (flag, optional)
-  Enables the most detailed logging. Overrides verbosity settings provided
-  via `--verbosity`.
+  .. code-block:: console
 
-- `--verbosity` (int, optional)
-  Sets the level of verbosity for logging. Acceptable values are 1 (CRITICAL),
-  2 (ERROR), 3 (WARNING), 4 (INFO, default), and 5 (DEBUG). Overrides `--verbose`.
+     pipnick_reduce -t n1_2x2_slow_full.ecsv
+     pipnick_astrometry -t n1_2x2_slow_full.ecsv
 
-For example:
+  ``pipnick_reduce`` reprocesses only the images whose table values changed
+  (see the reduction documentation), writing the corrected coordinates to
+  their headers, and ``pipnick_astrometry`` then solves them with the usual
+  matching.  This is the better choice if the reduced images will be used
+  elsewhere, because it also corrects the coordinates in their headers.
 
-.. code::
+Coordinate frames
+-----------------
 
-   pipnick_astrometry '/path/to/maindir/ your_api_key' -t -r --excl_files d1113
+All solutions are in the ICRS, the frame of the Gaia catalog.
 
+astrometry.net writes its solutions with ``EQUINOX = 2000.0`` and no
+``RADESYS`` keyword, which by the FITS WCS standard means the FK5 (J2000)
+frame, and its web API has no setting to request a different frame.
+However, astrometry.net fits its solutions to reference catalogs (Tycho-2,
+2MASS, and Gaia) whose positions are on the ICRS, so the solutions are
+effectively in the ICRS; FK5 J2000 and the ICRS differ by at most a few tens
+of milliarcseconds, far below the accuracy needed for Nickel data.
+``pipnick`` therefore relabels astrometry.net solutions as ICRS
+(``RADESYS = 'ICRS'``, without ``EQUINOX``) before applying them, which keeps
+every solution in one frame.
 
+Providing a solution
+--------------------
 
-Using Functions in Python File / Jupyter Notebook
--------------------------------------------------
+If you know the pixel and celestial coordinates of a set of sources in an
+image (at least 3), you can fit and apply a solution yourself.  Pixel
+coordinates are 0-based (the numpy convention, as returned by ``photutils``).
 
-To begin using the `astrometry_all()` function, follow these steps:
+.. code-block:: python
 
-1. **Import the Function**
+   from astropy.coordinates import SkyCoord
+   from pipnick.astrometry.fit import fit_wcs
+   from pipnick.pipelines.astrometry import apply_wcs
 
-   First, import the `astrometry_all()` function from the
-   `pipnick` package.
+   coords = SkyCoord(ra, dec, unit='deg')
+   wcs, stats = fit_wcs(x, y, coords)
+   print(f'{stats["npts"]} sources used; RMS residual {stats["rms"]:.2f} arcsec')
+   apply_wcs('rdx/M11_V_C006_2026-08-20.fits', wcs, stats=stats)
 
-   .. code:: python
+``fit_wcs`` fits a gnomonic (TAN) projection, optionally with SIP distortion
+(``sip_degree``), and iteratively rejects outliers.  The applied solution is
+marked ``PNASTMTH = 'points'``, is saved to the ``astrometry`` directory so
+that it is restored if the image is rewritten, and is only replaced by
+``pipnick_astrometry --resolve``.  Coordinates in the ICRS (e.g., from Gaia)
+are preferred, but other frames are handled correctly.
 
-      from pipnick.pipelines.astrometry import astrometry_all
+Using the pipeline in Python
+----------------------------
 
-2. **Initialize Logging**
+.. code-block:: python
 
-   Set up a logger to capture output from the functions. You can
-   configure the verbosity level to 'DEBUG', 'INFO', 'WARNING',
-   'ERROR', or 'CRITICAL'. Logs are displayed in the terminal or
-   console and are always saved to a `.log` file at the 'DEBUG' level.
+   from pipnick.pipelines.astrometry import astrometry_all
 
-   .. code:: python
+   solved = astrometry_all('n1_2x2_slow_full.ecsv', max_submissions=1)
 
-      import logging
-      from pipnick.convenience.log import adjust_global_logger
-
-      adjust_global_logger('INFO', __name__)
-      logger = logging.getLogger(__name__)
-
-3. **Specify the Image Directory**
-
-   Define the main directory containing all data. The reduced
-   directory contains images to be calibrated, and must be at
-   /maindir/reduced/, and the results will be saved in a directory named
-   `/data/astrometric/`.
-
-   .. code:: python
-
-      reddir = 'path/to/data/reduced/'
-
-4. **Obtain an API Key**
-
-   To use the astrometry.net service, you need an API key. Register an
-   account at https://nova.astrometry.net/ and obtain your key from
-   the "My Profile" section of the dashboard.
-
-   .. code:: python
-
-      api_key = "exampleapikey"
-
-5. **Run the Astrometry Pipeline**
-
-   Use the `astrometry_all()` function to process the images. This
-   call This call saves astrometric solutions as WCS header to
-   maindir/astrometric/, outputs the paths to these headers, and
-   skips any images with pre-existing solutions to save time.
-
-   As with the reduction pipeline, this call also creates an ascii
-   Astropy table, but of all files in /maindir/reduced/ at
-   /maindir/astrometry_files.tbl, commenting out any files that
-   were excluded.
-
-   .. code:: python
-
-      calib_files = astrometry_all(reddir, api_key)
-
-6. **Manual Exclusion of Files**
-
-   As in the reduction pipeline, in the table created at
-   /maindir/astrometry_files.tbl, you can comment out files
-   (such as an unsolveable image) with a ``'#'`` to be ignored in
-   a future call to ``astrometry_all``. Manual exclusions can be
-   provided here as well, and will be propagated to the Astropy file table.
-
-   In this second call, parameters can be changed to rely on this table
-   for exclusion information, additionally exclude any image taken with the
-   ``'B'`` filter, and to re-solve all images, regardless of whether
-   previously solved.
-
-   .. code:: python
-
-      calib_files = astrometry_all(maindir, api_key, use_table=True,
-                                   resolve=True, excl_filts=['B'])
-
-Viewing Results
----------------
-
-The header saved by this function contains information about the WCS
-solution, which can be viewed in most text-viewing software.
+See :func:`~pipnick.pipelines.astrometry.astrometry_all` for the full set of
+parameters.
