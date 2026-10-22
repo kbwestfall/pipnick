@@ -16,8 +16,9 @@ from pipnick.metadata import organize_files
 ####  ASTROMETRY.NET CALIBRATION  ####
 ######################################
 
-def astrometry_all(maindir, api_key, use_table=False, resolve=False,
-                   excl_files=[], excl_objs=[], excl_filts=[]):
+def astrometry_all(
+    maindir, api_key, use_table=False, resolve=False, excl_files=[], excl_objs=[], excl_filts=[]
+):
     """
     Run astrometry.net calibration on all images in the specified directory.
 
@@ -58,8 +59,9 @@ def astrometry_all(maindir, api_key, use_table=False, resolve=False,
     reddir = maindir / 'reduced'
     
     # Organize files based on exclusion criteria and directory structure
-    file_df = organize_files(reddir, use_table, 'astrometry',
-                             excl_files, excl_objs, excl_filts)
+    file_df = organize_files(
+        reddir, use_table, 'astrometry', excl_files, excl_objs, excl_filts
+    )
     image_paths = file_df.paths
     
     # Prepare directories for processing
@@ -87,22 +89,16 @@ def astrometry_all(maindir, api_key, use_table=False, resolve=False,
     calibrated_fits_paths = []
     unsolved_submission_ids = []
     
-    def check_wcs_header(wcs_header, output_path):
-        if wcs_header:
-            log.info(f"Solution successful, saving WCS header to {output_path}")
-            wcs_header.tofile(output_path, overwrite=True)
-            calibrated_fits_paths.append(output_path)
-        else:
-            log.warning(f"Solution failed; skipping this image")
-    
     for image_path in mod_paths:
         
         output_path_stem = image_path.stem.split('_')[0]
         obj_dir = image_path.parent.name
         output_path = wcs_dir / obj_dir / f"{output_path_stem}_astro.fits"
         if not resolve and output_path.exists():
-            log.info(f"Returning local copy of {image_path.name}'s solution; "
-                     "astrometry.net not used")
+            log.info(
+                f"Returning local copy of {image_path.name}'s solution; "
+                "astrometry.net not used"
+            )
             calibrated_fits_paths.append(output_path)
             continue
         
@@ -114,38 +110,64 @@ def astrometry_all(maindir, api_key, use_table=False, resolve=False,
         fov_size = hdr['NAXIS1'] * pixel_scale / 60     # image width in arcmin
         fwhm = camera.fwhm_guess / pixel_scale          # binned pixels
 
-        log.info(f"Submitting image {image_path.name} to astrometry.net. This may take up "
-                 f"to {timeout} seconds")
+        log.info(
+            f"Submitting image {image_path.name} to astrometry.net. This may take up "
+            f"to {timeout} seconds"
+        )
         try:
-            wcs_header = ast.solve_from_image(image_path, fwhm=fwhm,
-                                              ra_key=camera.header_keyword(hdr, 'ra'),
-                                              dec_key=camera.header_keyword(hdr, 'dec'),
-                                              # Max error of RA/Dec guess, in deg
-                                              radius=fov_size/60,
-                                              scale_units='arcminwidth',
-                                              scale_type='ul',
-                                              scale_lower=fov_size*0.8,
-                                              scale_upper=fov_size*1.2,
-                                              solve_timeout=timeout,
-                                              detect_threshold=8.0,
-                                              publicly_visible='n',
-                                              verbose=False)
-            check_wcs_header(wcs_header, output_path)
+            wcs_header = ast.solve_from_image(
+                image_path, fwhm=fwhm, ra_key=camera.header_keyword(hdr, 'ra'),
+                dec_key=camera.header_keyword(hdr, 'dec'),
+                # Max error of RA/Dec guess, in deg
+                radius=fov_size/60, scale_units='arcminwidth', scale_type='ul',
+                scale_lower=fov_size*0.8, scale_upper=fov_size*1.2, solve_timeout=timeout,
+                detect_threshold=8.0, publicly_visible='n', verbose=False
+            )
+            if _save_wcs_header(wcs_header, output_path):
+                calibrated_fits_paths.append(output_path)
         except TimeoutError as e:
-            log.info("No solution found on first try; will revisit after all images are "
-                     "submitted")
+            log.info(
+                "No solution found on first try; will revisit after all images are "
+                "submitted"
+            )
             unsolved_submission_ids.append(e.args[1])
         
     for submission_id in unsolved_submission_ids:
         try:
-            wcs_header = ast.monitor_submission(submission_id,
-                                                solve_timeout=120)
-            check_wcs_header(wcs_header, output_path)
+            wcs_header = ast.monitor_submission(
+                submission_id, solve_timeout=120
+            )
+            if _save_wcs_header(wcs_header, output_path):
+                calibrated_fits_paths.append(output_path)
         except TimeoutError:
             log.warning(f"No solution found on second try; skipping.")
     
     log.info('---- astrometry_all() call ended')
     return calibrated_fits_paths
+
+
+def _save_wcs_header(wcs_header, output_path):
+    """
+    Save an astrometric solution, if one was found.
+
+    Parameters
+    ----------
+    wcs_header : :class:`astropy.io.fits.Header`, dict
+        The solution returned by astrometry.net; empty if the solution failed.
+    output_path : :class:`pathlib.Path`
+        File for the solution.
+
+    Returns
+    -------
+    bool
+        True if the solution was saved.
+    """
+    if len(wcs_header) == 0:
+        log.warning("Solution failed; skipping this image")
+        return False
+    log.info(f"Solution successful, saving WCS header to {output_path}")
+    wcs_header.tofile(output_path, overwrite=True)
+    return True
 
 
 def make_cleaned_inputs(image_paths, mod_dir):

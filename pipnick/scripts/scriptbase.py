@@ -10,7 +10,7 @@ Implements base classes for use with scripts.
 
 import argparse
 import datetime
-from functools import reduce
+from functools import partial, reduce
 
 from .. import log
 
@@ -63,8 +63,10 @@ class ScriptBase:
     # base-class method to intantiate the ArgumentParser object and then fill in
     # the relevant parser arguments
     @classmethod
-    def get_parser(cls, description=None, width=None,
-                   formatter=argparse.ArgumentDefaultsHelpFormatter, include_log_options=True):
+    def get_parser(
+        cls, description=None, width=None, formatter=argparse.ArgumentDefaultsHelpFormatter,
+        include_log_options=True
+    ):
         """
         Construct the command-line argument parser.
 
@@ -86,8 +88,9 @@ class ScriptBase:
         :class:`argparse.ArgumentParser`
             Command-line interpreter.
         """
-        parser = argparse.ArgumentParser(description=description,
-                                         formatter_class=lambda prog: formatter(prog, width=width))
+        parser = argparse.ArgumentParser(
+            description=description, formatter_class=partial(formatter, width=width)
+        )
         if not include_log_options:
             return parser
         parser.add_argument(

@@ -152,10 +152,10 @@ def psf_analysis(image, thresh=10.0, guess_fwhm=7., mode='all', fittype='circ', 
         moffat_psf = make_psf_model(moffat_psf)
 
     # Create the photometry object
-    phot = IterativePSFPhotometry(finder=iraffind, grouper=grouper,
-                                  localbkg_estimator=local_bkg, psf_model=moffat_psf,
-                                  fitter=fitter, fit_shape=win,
-                                  aperture_radius=aper_size, mode=mode)
+    phot = IterativePSFPhotometry(
+        finder=iraffind, grouper=grouper, localbkg_estimator=local_bkg, psf_model=moffat_psf,
+        fitter=fitter, fit_shape=win, aperture_radius=aper_size, mode=mode
+    )
     
     # Perform the fitting and collect photometric data
     phot_data = phot(data=_image.data, mask=_image.mask)

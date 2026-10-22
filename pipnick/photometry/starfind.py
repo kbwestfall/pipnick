@@ -54,18 +54,25 @@ def plot_stamps(stamps, pdf_file, vmin=None, vmax=None):
                 for k in range(dim):
                     if i < nstamps:
                         # Add a subplot for each stamp
-                        ax = fig.add_axes([start+k*(dw+buff), start+(dim-j-1)*dw+(dim-j-1)*buff,
-                                           dw, dw])
+                        ax = fig.add_axes(
+                            [start+k*(dw+buff), start+(dim-j-1)*dw+(dim-j-1)*buff, dw, dw]
+                        )
                         ax.xaxis.set_major_formatter(ticker.NullFormatter())
                         ax.xaxis.set_visible(False)
                         ax.yaxis.set_major_formatter(ticker.NullFormatter())
                         ax.yaxis.set_visible(False)
-                        ax.imshow(stamps[i], origin='lower', interpolation='nearest',
-                                  vmin=_vmin, vmax=_vmax)
-                        ax.text(0.1, 0.9, str(i), ha='center', va='center', 
-                                transform=ax.transAxes, color='C1')
-                        ax.scatter([stamps.shape[1]//2], [stamps.shape[2]//2], 
-                                   marker='+', s=50, color='C3', zorder=10, lw=0.5)
+                        ax.imshow(
+                            stamps[i], origin='lower', interpolation='nearest', vmin=_vmin,
+                            vmax=_vmax
+                        )
+                        ax.text(
+                            0.1, 0.9, str(i), ha='center', va='center', transform=ax.transAxes,
+                            color='C1'
+                        )
+                        ax.scatter(
+                            [stamps.shape[1]//2], [stamps.shape[2]//2], marker='+', s=50,
+                            color='C3', zorder=10, lw=0.5
+                        )
                         i += 1
             pdf.savefig()  # Save the figure to the PDF file
             fig.clear()
@@ -220,8 +227,9 @@ def plot_stamps(stamps, pdf_file, vmin=None, vmax=None):
 
 # TODO: We might want to instead use photutils.segmentation:
 # https://photutils.readthedocs.io/en/latest/reference/segmentation_api.html
-def detect_sources(image, thresh=15., fwhm=7., inner_bkg=3., outer_bkg=5., min_dist_fwhm=5.,
-                   min_flux=1e3):
+def detect_sources(
+    image, thresh=15., fwhm=7., inner_bkg=3., outer_bkg=5., min_dist_fwhm=5., min_flux=1e3
+):
     """
     Perform point-source detection on the provided image.
 
@@ -293,19 +301,22 @@ def detect_sources(image, thresh=15., fwhm=7., inner_bkg=3., outer_bkg=5., min_d
 
     # Get the size and flux of each source via Kron measurements
     ap_centers = np.column_stack((sources['xcentroid'], sources['ycentroid']))  # Source positions
-    kron_bkg_raw, kron_radius, kron_flux_raw \
-            = kron_stats(x, y, np.asanyarray(_image), ap_centers, fwhm, inner_bkg=inner_bkg,
-                         outer_bkg=outer_bkg)
+    kron_bkg_raw, kron_radius, kron_flux_raw = kron_stats(
+        x, y, np.asanyarray(_image), ap_centers, fwhm, inner_bkg=inner_bkg, outer_bkg=outer_bkg
+    )
     mean_kron_radius = sigma_clipped_stats(kron_radius, sigma=3., maxiters=None)[0]
     log.info(f'Mean Kron radius of sources: {mean_kron_radius:.1f}')
-    kron_bkg, _, kron_flux = kron_stats(x, y, np.asanyarray(_image), ap_centers, fwhm,
-                                        inner_bkg=inner_bkg, outer_bkg=outer_bkg,
-                                        source_radius=mean_kron_radius)
+    kron_bkg, _, kron_flux = kron_stats(
+        x, y, np.asanyarray(_image), ap_centers, fwhm, inner_bkg=inner_bkg, outer_bkg=outer_bkg,
+        source_radius=mean_kron_radius
+    )
 
     # Remove sources that are too close to each other
     i, j = np.triu_indices(nsources, k=1)
-    dist = np.sqrt((sources['xcentroid'][j] - sources['xcentroid'][i])**2 + 
-                    (sources['ycentroid'][j] - sources['ycentroid'][i])**2)
+    dist = np.sqrt(
+        (sources['xcentroid'][j] - sources['xcentroid'][i])**2
+        + (sources['ycentroid'][j] - sources['ycentroid'][i])**2
+    )
     too_close = np.identity(nsources).astype(bool)
     too_close[i,j] = dist < min_dist_fwhm * fwhm
 #    too_close[j, i] = dist < min_dist_fwhm * fwhm
@@ -314,37 +325,44 @@ def detect_sources(image, thresh=15., fwhm=7., inner_bkg=3., outer_bkg=5., min_d
     # Remove sources with low flux
     _kflux = np.tile(kron_flux, (nsources, 1))
     _kflux[np.logical_not(too_close)] = np.ma.masked
-    good = (np.ma.argmax(_kflux, axis=1) == np.arange(nsources)) \
-            & (kron_flux.data > min_flux) \
-            & np.logical_not(np.ma.getmaskarray(kron_flux))
+    good = (
+        (np.ma.argmax(_kflux, axis=1) == np.arange(nsources))
+        & (kron_flux.data > min_flux)
+        & np.logical_not(np.ma.getmaskarray(kron_flux))
+    )
     log.info(f'Selected {np.sum(good)} well-separated sources with good flux')
 
-    meta = {'thresh': thresh, 'fwhm': fwhm, 'inner_bkg': inner_bkg, 'outer_bkg': outer_bkg,
-            'min_dist_fwhm': min_dist_fwhm, 'min_flux': min_flux,
-            'mean_kron_radius': mean_kron_radius}
+    meta = {
+        'thresh': thresh, 'fwhm': fwhm, 'inner_bkg': inner_bkg, 'outer_bkg': outer_bkg,
+        'min_dist_fwhm': min_dist_fwhm, 'min_flux': min_flux, 'mean_kron_radius': mean_kron_radius
+    }
 
     # Construct and return the table
-    return table.Table([
-        table.Column(name='id', data=np.arange(nsources, dtype=int)),
-        table.Column(name='xcen', data=sources['xcentroid']),
-        table.Column(name='ycen', data=sources['ycentroid']),
-        table.MaskedColumn(name='kron_bkg_raw',
-                           data=kron_bkg_raw.data,
-                           mask=np.ma.getmaskarray(kron_bkg_raw)),
-        table.MaskedColumn(name='kron_radius',
-                           data=kron_radius.data,
-                           mask=np.ma.getmaskarray(kron_radius)),
-        table.MaskedColumn(name='kron_flux_raw',
-                           data=kron_flux_raw.data,
-                           mask=np.ma.getmaskarray(kron_flux_raw)),
-        table.MaskedColumn(name='kron_bkg',
-                           data=kron_bkg.data,
-                           mask=np.ma.getmaskarray(kron_bkg)),
-        table.MaskedColumn(name='kron_flux',
-                           data=kron_flux.data,
-                           mask=np.ma.getmaskarray(kron_flux)),
-        table.Column(name='good', data=good)
-    ], meta=meta)
+    return table.Table(
+        [
+            table.Column(name='id', data=np.arange(nsources, dtype=int)),
+            table.Column(name='xcen', data=sources['xcentroid']),
+            table.Column(name='ycen', data=sources['ycentroid']),
+            table.MaskedColumn(
+                name='kron_bkg_raw', data=kron_bkg_raw.data, mask=np.ma.getmaskarray(kron_bkg_raw)
+            ),
+            table.MaskedColumn(
+                name='kron_radius', data=kron_radius.data, mask=np.ma.getmaskarray(kron_radius)
+            ),
+            table.MaskedColumn(
+                name='kron_flux_raw', data=kron_flux_raw.data,
+                mask=np.ma.getmaskarray(kron_flux_raw)
+            ),
+            table.MaskedColumn(
+                name='kron_bkg', data=kron_bkg.data, mask=np.ma.getmaskarray(kron_bkg)
+            ),
+            table.MaskedColumn(
+                name='kron_flux', data=kron_flux.data, mask=np.ma.getmaskarray(kron_flux)
+            ),
+            table.Column(name='good', data=good)
+        ],
+        meta=meta
+    )
 
 
 def kron_stats(x, y, img, cen, fwhm, inner_bkg=3., outer_bkg=5., source_radius=None):
@@ -442,8 +460,10 @@ def extract_stamps(image, source_data, inner_bkg=5., window=10., radius_unit='kr
     """
     if radius_unit == 'kron':
         if 'mean_kron_radius' not in source_data.meta:
-            raise ValueError('Provided source data table does not provide mean_kron_radius.  '
-                             'Unit for stamp width cannot be "kron".')
+            raise ValueError(
+                'Provided source data table does not provide mean_kron_radius.  '
+                'Unit for stamp width cannot be "kron".'
+            )
         stamp_width = int(np.ceil(window * source_data.meta['mean_kron_radius']))
         bkg_radius = inner_bkg * source_data.meta['mean_kron_radius']
     elif radius_unit == 'pixel':
@@ -459,8 +479,10 @@ def extract_stamps(image, source_data, inner_bkg=5., window=10., radius_unit='kr
     stamp_shape = (stamp_width, stamp_width)
 
     # Radius image
-    x, y = np.meshgrid(np.arange(stamp_width, dtype=float) - stamp_width // 2, 
-                       np.arange(stamp_width, dtype=float) - stamp_width // 2)
+    x, y = np.meshgrid(
+        np.arange(stamp_width, dtype=float) - stamp_width // 2,
+        np.arange(stamp_width, dtype=float) - stamp_width // 2
+    )
     is_bkg = np.sqrt(x**2 + y**2) > bkg_radius
 
     # Read the image
@@ -483,8 +505,9 @@ def extract_stamps(image, source_data, inner_bkg=5., window=10., radius_unit='kr
     # Process each detected source and add to stamp
     for i in range(nsources):
         t = transform.EuclideanTransform(translation=-ap_centers[i][::-1] - 0.5 + center)
-        stamps[i] = transform.warp(_img_sub.T, t.inverse, output_shape=stamp_shape,
-                                   cval=0, order=0).T
+        stamps[i] = transform.warp(
+            _img_sub.T, t.inverse, output_shape=stamp_shape, cval=0, order=0
+        ).T
         stamps[i, stamps[i] == 0.] = np.ma.masked  # Mask the background
         if np.all(np.ma.getmaskarray(stamps[i, is_bkg])):
             stamps[i] = np.ma.masked

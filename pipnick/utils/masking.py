@@ -118,7 +118,7 @@ def mask_polygons(shape, polygons):
         raise TypeError('Entered polygons object must be a list.  It can be a list of one array.')
     # Build the array coordinates
     m, n = shape
-    coo = np.array(list(map(lambda x : x.ravel(), np.meshgrid(np.arange(n), np.arange(m))))).T
+    coo = np.array([c.ravel() for c in np.meshgrid(np.arange(n), np.arange(m))]).T
     # Iteratively mask each polygon
     mask = np.zeros(shape, dtype=bool)
     for p in polygons:
@@ -147,8 +147,10 @@ def create_mask(shape, bad_cols=None, bad_slices=None, bad_regions=None):
     mask : :class:`numpy.ndarray`
         Boolean mask (masked=True, unmasked=False)
     """
-    mask = np.zeros(shape, dtype=bool) if bad_regions is None \
-            else mask_polygons(shape, bad_regions)
+    mask = (
+        np.zeros(shape, dtype=bool) if bad_regions is None
+        else mask_polygons(shape, bad_regions)
+    )
     if bad_slices is not None:
         for s in bad_slices:
             mask[s] = True

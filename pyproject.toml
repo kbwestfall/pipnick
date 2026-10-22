@@ -6,7 +6,7 @@ authors = [
     { name = "Kyle B. Westfall", email = "westfall@ucolick.org" },
 ]
 license = "BSD-3-Clause"
-license-files = ["LICENSE.rst", "licenses/PYPEIT_LICENSE.rst"]
+license-files = ["LICENSE.rst", "licenses/PYPEIT_LICENSE.rst", "licenses/ASTROPY_LICENSE.rst"]
 description = "Photometric Pipeline for the Nickel Telescope"
 keywords = [
     "photometry",

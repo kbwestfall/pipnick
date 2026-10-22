@@ -33,6 +33,7 @@ table; see :func:`build_metadata`.
 import csv
 import datetime
 import io
+import operator
 from pathlib import Path
 
 import numpy as np
@@ -44,10 +45,11 @@ from pipnick import cameras
 from pipnick import log
 from pipnick.pkg.exceptions import PipnickDataModelError, PipnickPathError
 
-__all__ = ['metadata_columns', 'setup_keys', 'classify_modes', 'build_camera_datatable',
-           'assign_setups', 'write_metadata', 'read_metadata', 'update_metadata_meta',
-           'summarize', 'build_metadata', 'frame_path', 'default_table_name',
-           'default_reduced_file_name']
+__all__ = [
+    'metadata_columns', 'setup_keys', 'build_camera_datatable', 'assign_setups', 'write_metadata',
+    'read_metadata', 'update_metadata_meta', 'summarize', 'build_metadata', 'frame_path',
+    'default_table_name', 'default_reduced_file_name'
+]
 
 metadata_columns = {
     'file': str,
@@ -77,15 +79,6 @@ setup_keys = ['xbin', 'ybin', 'readmode', 'window']
 """
 The metadata columns that, with the camera, define an instrument setup.
 """
-
-classify_modes = ['header', 'stats']
-"""
-How frames are classified and checked.  ``'header'`` uses only the file
-headers; ``'stats'`` also uses statistics of the image data, which is slower
-but catches more problems; see
-:func:`~pipnick.cameras.cameras.NickelCamera.assess`.
-"""
-
 
 def _split_ecsv_line(line):
     """
@@ -162,12 +155,15 @@ def assign_setups(tbl, camera_name, setups=None):
             labels[key] = _setup_label(len(labels))
         assigned.append(labels[key])
     tbl['setup'] = assigned
-    tbl.meta['setups'] = {label: {'camera': camera_name, **dict(zip(setup_keys, key))}
-                          for key, label in sorted(labels.items(), key=lambda x: x[1])}
+    tbl.meta['setups'] = {
+        label: {'camera': camera_name, **dict(zip(setup_keys, key))} for key,
+        label in sorted(labels.items(), key=operator.itemgetter(1))
+    }
 
 
-def build_camera_datatable(root, ext='.fits', path_key='path', camera=None, classify='header',
-                           skip_files=None):
+def build_camera_datatable(
+    root, ext='.fits', path_key='path', camera=None, classify='header', skip_files=None
+):
     """
     Find data files in a directory and construct a table with their metadata.
 
@@ -185,7 +181,10 @@ def build_camera_datatable(root, ext='.fits', path_key='path', camera=None, clas
         camera is identified from each file header, and all files must be from
         the same camera.  If provided, files from other cameras are skipped.
     classify : str, optional
-        How the frames are classified and checked; see :data:`classify_modes`.
+        How the frames are classified and checked.  ``'header'`` uses only the
+        file headers; ``'stats'`` also uses statistics of the image data, which
+        is slower but catches more problems; see
+        :func:`~pipnick.cameras.cameras.NickelCamera.assess`.
     skip_files : list, optional
         Names of files in ``root`` to skip.
 
@@ -214,8 +213,8 @@ def build_camera_datatable(root, ext='.fits', path_key='path', camera=None, clas
     _root = Path(root).absolute()
     if not _root.is_dir():
         raise PipnickPathError(f'{_root} does not exist!')
-    if classify not in classify_modes:
-        raise ValueError(f'Classification mode must be one of {classify_modes}, not {classify}.')
+    if classify not in ['header', 'stats']:
+        raise ValueError(f"Classification mode must be 'header' or 'stats', not {classify}.")
     _camera = None if camera is None else cameras.get_camera(camera)
 
     # Get the list of files
@@ -256,10 +255,13 @@ def build_camera_datatable(root, ext='.fits', path_key='path', camera=None, clas
     if len(found) == 0:
         raise PipnickPathError(f'No files from the {_camera.name} camera found in {_root}.')
     if len(found) > 1:
-        summary = '; '.join(f'{name}: {len(names)} files (e.g., {names[0]})'
-                            for name, names in found.items())
-        raise PipnickDataModelError(f'Files in {_root} are from more than one camera '
-                                    f'({summary}).  Select one camera, or separate the files.')
+        summary = '; '.join(
+            f'{name}: {len(names)} files (e.g., {names[0]})' for name, names in found.items()
+        )
+        raise PipnickDataModelError(
+            f'Files in {_root} are from more than one camera '
+            f'({summary}).  Select one camera, or separate the files.'
+        )
     camera_name = list(found.keys())[0]
     log.info(f'Camera identified as: {camera_name}')
 
@@ -268,8 +270,11 @@ def build_camera_datatable(root, ext='.fits', path_key='path', camera=None, clas
         row['mjd'] = _date_to_mjd(row['date'])
 
     # Construct the typed table
-    tbl = Table([_column(name, [row.get(name) for row in rows])
-                 for name in metadata_columns.keys() if name != 'setup'])
+    columns = [
+        _column(name, [row.get(name) for row in rows])
+        for name in metadata_columns.keys() if name != 'setup'
+    ]
+    tbl = Table(columns)
     assign_setups(tbl, camera_name)
     tbl = tbl[list(metadata_columns.keys())]
     tbl.meta['camera'] = camera_name
@@ -398,9 +403,11 @@ def summarize(tbl, commented=None):
     lines += ['    ' + 'setup'.ljust(6) + ' '.join(t.rjust(width) for t in frametypes)]
     for label in tbl.meta.get('setups', {}).keys():
         in_setup = use['setup'] == label
-        lines += ['    ' + label.ljust(6)
-                  + ' '.join(str(np.sum(in_setup & (use['frametype'] == t))).rjust(width)
-                             for t in frametypes)]
+        lines += [
+            '    ' + label.ljust(6) + ' '.join(
+                str(np.sum(in_setup & (use['frametype'] == t))).rjust(width) for t in frametypes
+            )
+        ]
 
     nexcl = np.sum(_commented)
     lines += [f'Commented rows: {nexcl}']
@@ -426,8 +433,10 @@ def summarize(tbl, commented=None):
     return '\n'.join(lines)
 
 
-def build_metadata(rawdir=None, filename=None, ext='.fits', overwrite=False, append=False,
-                   rdxdir=None, camera=None, classify='header'):
+def build_metadata(
+    rawdir=None, filename=None, ext='.fits', overwrite=False, append=False, rdxdir=None,
+    camera=None, classify='header'
+):
     """
     Construct a table with metadata needed for the data processing.
 
@@ -469,7 +478,8 @@ def build_metadata(rawdir=None, filename=None, ext='.fits', overwrite=False, app
         The name of the camera used to obtain the data.  If None, the camera is
         identified from the file headers; see :func:`build_camera_datatable`.
     classify : str, optional
-        How the frames are classified and checked; see :data:`classify_modes`.
+        How the frames are classified and checked; see
+        :func:`build_camera_datatable`.
 
     Returns
     -------
@@ -490,30 +500,39 @@ def build_metadata(rawdir=None, filename=None, ext='.fits', overwrite=False, app
         metadata = read_metadata(_filename)
         if _rdxdir is not None and metadata.meta.get('rdxdir') != _rdxdir:
             if 'rdxdir' in metadata.meta:
-                log.warning(f"Overwriting output path for reductions.  Changing from "
-                            f"\n\t{metadata.meta['rdxdir']} \n to \n\t{_rdxdir}")
+                log.warning(
+                    f"Overwriting output path for reductions.  Changing from "
+                    f"\n\t{metadata.meta['rdxdir']} \n to \n\t{_rdxdir}"
+                )
             update_metadata_meta(_filename, rdxdir=_rdxdir)
             metadata.meta['rdxdir'] = _rdxdir
         return _filename, metadata
 
     if rawdir is None:
-        raise ValueError('Must provide a directory with the raw data if a metadata table is '
-                         'not provided, it does not exist, or you wish to overwrite or append to '
-                         'the file.')
+        raise ValueError(
+            'Must provide a directory with the raw data if a metadata table is '
+            'not provided, it does not exist, or you wish to overwrite or append to '
+            'the file.'
+        )
 
     if exists and append:
         # Add new files to the existing table
         metadata, commented = read_metadata(_filename, include_commented=True)
         _rawdir = str(Path(rawdir).absolute())
         if metadata.meta.get('rawdir') != _rawdir:
-            raise ValueError(f'Cannot append files from {_rawdir} to a table of files in '
-                             f'{metadata.meta.get("rawdir")}.')
+            raise ValueError(
+                f'Cannot append files from {_rawdir} to a table of files in '
+                f'{metadata.meta.get("rawdir")}.'
+            )
         if metadata.meta.get('classify') != classify:
-            log.warning(f'Appending files classified using {classify}, but existing table used '
-                        f'{metadata.meta.get("classify")}.')
-        new, rejected = build_camera_datatable(rawdir, ext=ext, path_key='rawdir',
-                                               camera=metadata.meta['camera'], classify=classify,
-                                               skip_files=list(metadata['file']))
+            log.warning(
+                f'Appending files classified using {classify}, but existing table used '
+                f'{metadata.meta.get("classify")}.'
+            )
+        new, rejected = build_camera_datatable(
+            rawdir, ext=ext, path_key='rawdir', camera=metadata.meta['camera'], classify=classify,
+            skip_files=list(metadata['file'])
+        )
         if new is None:
             log.info(f'No new files to add to {_filename}.')
             return _filename, metadata[np.logical_not(commented)]
@@ -529,8 +548,9 @@ def build_metadata(rawdir=None, filename=None, ext='.fits', overwrite=False, app
         metadata = combined
     else:
         # Construct the metadata table
-        metadata, commented = build_camera_datatable(rawdir, ext=ext, path_key='rawdir',
-                                                     camera=camera, classify=classify)
+        metadata, commented = build_camera_datatable(
+            rawdir, ext=ext, path_key='rawdir', camera=camera, classify=classify
+        )
         if _filename is None:
             _filename = Path(default_table_name(metadata.meta['camera'], 'raw')).absolute()
 

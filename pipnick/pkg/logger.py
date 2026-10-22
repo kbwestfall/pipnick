@@ -242,7 +242,7 @@ class PipnickLogger(logging.Logger):
             self.fh.setLevel(log_file_level)
             self.addHandler(self.fh)
 
-            if self.warnings_logger:
+            if self.warnings_logger is not None:
                 self.warnings_logger.addHandler(self.fh)
 
     def _excepthook(self, etype, value, trace):
@@ -255,7 +255,7 @@ class PipnickLogger(logging.Logger):
         else:
             # If the traceback is available, jump to the calling frame, which
             # gets passed to makeRecord
-            while tb.tb_next:
+            while tb.tb_next is not None:
                 tb = tb.tb_next
             exc_info = (etype, value, tb)
 

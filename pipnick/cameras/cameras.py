@@ -83,8 +83,9 @@ from astropy.io import fits
 from pipnick.pkg.exceptions import PipnickDataModelError, PipnickParameterError
 from pipnick.utils import masking
 
-__all__ = ['NickelCamera', 'Readout', 'available_cameras', 'get_camera', 'identify_camera',
-           'get_header']
+__all__ = [
+    'NickelCamera', 'Readout', 'available_cameras', 'get_camera', 'identify_camera', 'get_header'
+]
 
 
 @dataclass(frozen=True)
@@ -183,11 +184,15 @@ class NickelCamera:
                 raise PipnickParameterError(f'Camera configuration{src} has no [{section}].')
             missing = [e for e in entries if e not in self.config[section]]
             if len(missing) > 0:
-                raise PipnickParameterError(f'Camera configuration{src} is missing {missing} '
-                                            f'from [{section}].')
+                raise PipnickParameterError(
+                    f'Camera configuration{src} is missing {missing} '
+                    f'from [{section}].'
+                )
         if len(self.config['identify']) == 0:
-            raise PipnickParameterError(f'Camera configuration{src} must define at least one '
-                                        'keyword in [identify].')
+            raise PipnickParameterError(
+                f'Camera configuration{src} must define at least one '
+                'keyword in [identify].'
+            )
 
     def __repr__(self):
         return f'{self.__class__.__name__}({self.name})'
@@ -256,8 +261,10 @@ class NickelCamera:
             True if all of the ``[identify]`` keywords are present in the
             header and match.
         """
-        return all(key in hdr and re.search(pattern, str(hdr[key])) is not None
-                   for key, pattern in self.config['identify'].items())
+        return all(
+            key in hdr and re.search(pattern, str(hdr[key])) is not None for key,
+            pattern in self.config['identify'].items()
+        )
 
     def header_keyword(self, hdr, quantity):
         """
@@ -400,12 +407,15 @@ class NickelCamera:
         gain = self.header_value(hdr, 'gain', default=entry.get('gain'))
         readnoise = self.header_value(hdr, 'readnoise', default=entry.get('readnoise'))
         # The values are only placeholders if they come from the configuration
-        placeholder = entry.get('placeholder', False) \
-                        and self.header_keyword(hdr, 'gain') is None \
-                        and self.header_keyword(hdr, 'readnoise') is None
-        return Readout(mode=entry.get('mode', 'unknown'), gain=gain, readnoise=readnoise,
-                       saturation=entry.get('saturation', self.saturation),
-                       placeholder=placeholder)
+        placeholder = (
+            entry.get('placeholder', False)
+            and self.header_keyword(hdr, 'gain') is None
+            and self.header_keyword(hdr, 'readnoise') is None
+        )
+        return Readout(
+            mode=entry.get('mode', 'unknown'), gain=gain, readnoise=readnoise,
+            saturation=entry.get('saturation', self.saturation), placeholder=placeholder
+        )
 
     @staticmethod
     def _binned_range(rng, start, nbin, npix):
@@ -537,19 +547,23 @@ class NickelCamera:
         bpm = self.config.get('bpm', {})
         # Convert from 1-based to 0-based pixel coordinates
         regions = [np.asarray(r, dtype=float) - 1 for r in bpm.get('regions', [])]
-        mask = masking.create_mask(self.shape,
-                                   bad_cols=self._range_indices(bpm.get('columns', [])),
-                                   bad_regions=regions if len(regions) > 0 else None)
+        mask = masking.create_mask(
+            self.shape, bad_cols=self._range_indices(bpm.get('columns', [])),
+            bad_regions=regions if len(regions) > 0 else None
+        )
         rows = self._range_indices(bpm.get('rows', []))
         if rows is not None:
             mask[rows] = True
         if bpm.get('file', '') != '':
-            mask_file = (self.source.parent if self.source is not None else Path('.')) \
-                            / bpm['file']
+            mask_file = (
+                (self.source.parent if self.source is not None else Path('.')) / bpm['file']
+            )
             file_mask = fits.getdata(mask_file).astype(bool)
             if file_mask.shape != self.shape:
-                raise PipnickParameterError(f'Bad-pixel mask in {mask_file} has shape '
-                                            f'{file_mask.shape}; expected {self.shape}.')
+                raise PipnickParameterError(
+                    f'Bad-pixel mask in {mask_file} has shape '
+                    f'{file_mask.shape}; expected {self.shape}.'
+                )
             mask |= file_mask
         return mask
 
@@ -606,11 +620,15 @@ class NickelCamera:
         obj = self.header_value(hdr, 'object')
         exptime = self.header_value(hdr, 'exptime')
         for rule in frametypes.get('rule', []):
-            if 'obstype' in rule and (obstype is None or re.search(
-                    rule['obstype'], str(obstype).strip(), flags=re.IGNORECASE) is None):
+            if 'obstype' in rule and (
+                obstype is None
+                or re.search(rule['obstype'], str(obstype).strip(), flags=re.IGNORECASE) is None
+            ):
                 continue
-            if 'object' in rule and (obj is None or re.search(
-                    rule['object'], str(obj).strip(), flags=re.IGNORECASE) is None):
+            if 'object' in rule and (
+                obj is None
+                or re.search(rule['object'], str(obj).strip(), flags=re.IGNORECASE) is None
+            ):
                 continue
             if 'exptime_min' in rule and (exptime is None or exptime < rule['exptime_min']):
                 continue
@@ -665,8 +683,10 @@ class NickelCamera:
         reject = False
 
         temperature = self._to_float(self.header_value(hdr, 'temperature'))
-        if 'max_temperature' in quality and temperature is not None \
-                and temperature > quality['max_temperature']:
+        if (
+            'max_temperature' in quality and temperature is not None
+            and temperature > quality['max_temperature']
+        ):
             reject = True
             notes.append(f'detector temperature {temperature:.1f} C is too warm')
 
@@ -695,15 +715,19 @@ class NickelCamera:
             return frametype, reject, notes
         bias_lo, bias_hi = quality['bias_level']
         exptime = self._to_float(self.header_value(hdr, 'exptime'))
-        if frametype == 'unknown' and bias_lo <= level <= bias_hi and exptime is not None \
-                and exptime <= quality.get('bias_exptime_max', 0.):
+        if (
+            frametype == 'unknown' and bias_lo <= level <= bias_hi and exptime is not None
+            and exptime <= quality.get('bias_exptime_max', 0.)
+        ):
             frametype = 'bias'
             notes.append(f'reclassified as bias (level {level:.0f} ADU)')
         if frametype in ['bias', 'dark'] and level > bias_hi:
             reject = True
             notes.append(f'level {level:.0f} ADU is too high for a {frametype}')
-        if frametype in ['domeflat', 'skyflat'] \
-                and level < bias_hi + quality.get('min_illumination', 0.):
+        if (
+            frametype in ['domeflat', 'skyflat']
+            and level < bias_hi + quality.get('min_illumination', 0.)
+        ):
             reject = True
             notes.append(f'level {level:.0f} ADU is too low for a flat')
         return frametype, reject, notes
@@ -838,8 +862,10 @@ def get_camera(name):
     """
     registry = _registry()
     if name not in registry:
-        raise PipnickParameterError(f'Unknown camera {name}.  Available cameras are: '
-                                    f'{", ".join(registry.keys())}.')
+        raise PipnickParameterError(
+            f'Unknown camera {name}.  Available cameras are: '
+            f'{", ".join(registry.keys())}.'
+        )
     return registry[name]
 
 
@@ -868,8 +894,10 @@ def identify_camera(inp):
         return matched[0]
     if len(matched) == 0:
         raise PipnickDataModelError('Unable to determine the camera used to obtain the data.')
-    raise PipnickDataModelError('Header matches more than one camera: '
-                                f'{", ".join(c.name for c in matched)}.')
+    raise PipnickDataModelError(
+        'Header matches more than one camera: '
+        f'{", ".join(c.name for c in matched)}.'
+    )
 
 
 def get_header(inp):

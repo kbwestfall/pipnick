@@ -14,7 +14,9 @@ import ccdproc
 
 from pipnick import cameras
 from pipnick.pkg.exceptions import PipnickDataModelError
-from pipnick import metadata as rawmeta
+from pipnick.metadata import (
+    build_metadata, default_reduced_file_name, frame_path, update_metadata_meta
+)
 from pipnick import log
 
 
@@ -62,24 +64,29 @@ def reduce_all(rawdir=None, table=None, rdxdir=None, overwrite=False, append=Fal
     # Organize raw files based on input directory or table
     # NOTE: overwrite applies to the reduction products, not the metadata table;
     # rebuilding an existing table would discard any user edits to it.
-    metafile, metadata = rawmeta.build_metadata(
+    metafile, metadata = build_metadata(
         rawdir=rawdir, filename=table, append=append, rdxdir=rdxdir
     )
 
     # TODO: Match the calibrations to the science frames by setup, so that
     # data from more than one setup can be reduced together.
     if 'setup' not in metadata.colnames:
-        raise PipnickDataModelError(f'{metafile} has no setup column; it was likely built by an '
-                                    'older version of pipnick.  Rebuild it using '
-                                    'pipnick_metadata.')
+        raise PipnickDataModelError(
+            f'{metafile} has no setup column; it was likely built by an '
+            'older version of pipnick.  Rebuild it using '
+            'pipnick_metadata.'
+        )
     setups, counts = np.unique(metadata['setup'], return_counts=True)
     if len(setups) > 1:
         definitions = metadata.meta.get('setups', {})
-        summary = '\n'.join(f'    {s} ({n} frames): {definitions.get(s)}'
-                            for s, n in zip(setups, counts))
-        raise PipnickDataModelError(f'{metafile} includes frames from more than one setup:\n'
-                                    f'{summary}\nData from only one setup can be reduced at a '
-                                    'time.  Comment out the rows for the other setups.')
+        summary = '\n'.join(
+            f'    {s} ({n} frames): {definitions.get(s)}' for s, n in zip(setups, counts)
+        )
+        raise PipnickDataModelError(
+            f'{metafile} includes frames from more than one setup:\n'
+            f'{summary}\nData from only one setup can be reduced at a '
+            'time.  Comment out the rows for the other setups.'
+        )
 
     # Get the output directory
     if 'rdxdir' in metadata.meta:
@@ -88,7 +95,7 @@ def reduce_all(rawdir=None, table=None, rdxdir=None, overwrite=False, append=Fal
         _rdxdir = Path(metadata.meta['rawdir']).absolute().parent
         metadata.meta['rdxdir'] = str(_rdxdir)
         # Update the file to include the reduction directory
-        rawmeta.update_metadata_meta(metafile, rdxdir=str(_rdxdir))
+        update_metadata_meta(metafile, rdxdir=str(_rdxdir))
     if not _rdxdir.is_dir():
         _rdxdir.mkdir(parents=True)
 
@@ -102,12 +109,16 @@ def reduce_all(rawdir=None, table=None, rdxdir=None, overwrite=False, append=Fal
         log.warning('No bias frames available. Attempting to continue anyway...')
 
     # Get the super flat.  Try to get sky flats first:
-    super_flat = get_super_flats(metadata, rdxdir=metadata.meta['rdxdir'],
-                                 flattype='skyflat', bias=super_bias, overwrite=overwrite)
+    super_flat = get_super_flats(
+        metadata, rdxdir=metadata.meta['rdxdir'], flattype='skyflat', bias=super_bias,
+        overwrite=overwrite
+    )
     # If there were no sky flats, try finding some dome flats
     if super_flat is None:
-        super_flat = get_super_flats(metadata, rdxdir=metadata.meta['rdxdir'],
-                                     flattype='domeflat', bias=super_bias, overwrite=overwrite)
+        super_flat = get_super_flats(
+            metadata, rdxdir=metadata.meta['rdxdir'], flattype='domeflat', bias=super_bias,
+            overwrite=overwrite
+        )
     # Still no flats.  Warn the user and keep going
     if super_flat is None:
         log.warning('No flat frames available.  Attempting to continue anyway...')
@@ -120,7 +131,7 @@ def reduce_all(rawdir=None, table=None, rdxdir=None, overwrite=False, append=Fal
     
     # Perform the basic processing of all science frames
     rdx_file = np.empty(len(metadata), dtype=object)
-    frame = rawmeta.frame_path(metadata, path_key='rawdir')
+    frame = frame_path(metadata, path_key='rawdir')
     nfiles = len(metadata)
     for i in range(nfiles):
         if not is_science[i]:
@@ -132,7 +143,7 @@ def reduce_all(rawdir=None, table=None, rdxdir=None, overwrite=False, append=Fal
             flat = super_flat[metadata['filter'][i]]
 
         # Trim and overscan correct it
-        rdx_file[i] = _rdxdir / rawmeta.default_reduced_file_name(frame[i])
+        rdx_file[i] = _rdxdir / default_reduced_file_name(frame[i])
         if rdx_file[i].is_file() and not overwrite:
             log.info(f'{rdx_file[i]} exists and overwrite is False.  Continuing...')
             continue
@@ -188,8 +199,10 @@ def init_ccddata(frame, bpm=None, saturation=None, gain=None, readnoise=None):
         ccd.meta['camera'] = camera.name
         readout = camera.readout(ccd.header)
         if readout.placeholder:
-            log.warning(f'The {camera.name} gain and read noise for the {readout.mode} readout '
-                        'are placeholders.')
+            log.warning(
+                f'The {camera.name} gain and read noise for the {readout.mode} readout '
+                'are placeholders.'
+            )
 
     # Mask bad pixels
     _bpm = camera.bpm(ccd.header) if bpm is None and camera is not None else bpm
@@ -205,8 +218,9 @@ def init_ccddata(frame, bpm=None, saturation=None, gain=None, readnoise=None):
 
     # Get and save the RN (in electrons) and gain (in electrons/ADU)
     ccd.meta['PROCGAIN'] = readout.gain if gain is None and readout is not None else gain
-    ccd.meta['PROCRN'] = readout.readnoise if readnoise is None and readout is not None \
-                            else readnoise
+    ccd.meta['PROCRN'] = (
+        readout.readnoise if readnoise is None and readout is not None else readnoise
+    )
 
     # Apply gain if available
     if ccd.meta['PROCGAIN'] is not None:
@@ -261,8 +275,9 @@ def process_frame(raw_frame, bias=None, flat=None, flag_cosmics=True):
         ccd = ccdproc.flat_correct(ccd, flat)
     if flag_cosmics:
         log.info(f'Removing cosmic rays from {raw_frame}')
-        ccd = ccdproc.cosmicray_lacosmic(ccd, gain_apply=False, gain=1.0,
-                                         readnoise=ccd.meta['PROCRN'], verbose=True)
+        ccd = ccdproc.cosmicray_lacosmic(
+            ccd, gain_apply=False, gain=1.0, readnoise=ccd.meta['PROCRN'], verbose=True
+        )
     return ccd
 
 
@@ -283,8 +298,10 @@ def stack_frames(raw_frames, scale=False, bias=None, flat=None, flag_cosmics=Tru
         Combined CCDData object.
     """
     # TODO: For *many* images, this may be too memory intensive.
-    rdx_frames = [process_frame(frame, bias=bias, flat=flat, flag_cosmics=flag_cosmics) 
-                    for frame in raw_frames]
+    rdx_frames = [
+        process_frame(frame, bias=bias, flat=flat, flag_cosmics=flag_cosmics)
+        for frame in raw_frames
+    ]
 
     # TODO: Need to figure out how to handle the scaling; i.e., how is this
     # passed to the combiner?
@@ -303,9 +320,10 @@ def stack_frames(raw_frames, scale=False, bias=None, flat=None, flag_cosmics=Tru
         # TODO:
         #   - does ccdproc provide an iterative sigma clipper?
         #   - allow user to change the clipping parameters
-        combiner.data_arr = sigma_clip(combiner.data_arr, sigma=5., maxiters=1,
-                                       cenfunc=np.ma.mean, stdfunc=np.ma.std,
-                                       axis=0, masked=True, copy=False)
+        combiner.data_arr = sigma_clip(
+            combiner.data_arr, sigma=5., maxiters=1, cenfunc=np.ma.mean, stdfunc=np.ma.std, axis=0,
+            masked=True, copy=False
+        )
         old_n_masked = new_n_masked
         new_n_masked = combiner.data_arr.mask.sum()
 
@@ -352,7 +370,7 @@ def get_super_bias(metadata, rdxdir=None, overwrite=False):
 
     log.info(f'Found {nbias} bias frames to process and combine.')
 
-    frames = rawmeta.frame_path(metadata, select=indx, path_key='rawdir')
+    frames = frame_path(metadata, select=indx, path_key='rawdir')
     super_bias = stack_frames(frames, flag_cosmics=False)
 
     if rdxdir is None:
@@ -364,8 +382,9 @@ def get_super_bias(metadata, rdxdir=None, overwrite=False):
     return super_bias
 
 
-def get_super_flats(metadata, rdxdir=None, flattype='skyflat', bias=None, filter=None,
-                    overwrite=False):
+def get_super_flats(
+    metadata, rdxdir=None, flattype='skyflat', bias=None, filter=None, overwrite=False
+):
     """
     Create combined (super) flat frames (one per filter) from individual flat
     frames.
@@ -417,7 +436,7 @@ def get_super_flats(metadata, rdxdir=None, flattype='skyflat', bias=None, filter
                 continue
     
         log.info(f'Processing and combining {np.sum(_indx)} {f} flats')
-        frames = rawmeta.frame_path(metadata, select=_indx, path_key='rawdir')
+        frames = frame_path(metadata, select=_indx, path_key='rawdir')
         super_flat[f] = stack_frames(frames, scale=True, bias=bias, flag_cosmics=False)
         if _rdxdir is None:
             continue

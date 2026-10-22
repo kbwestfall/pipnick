@@ -1,7 +1,13 @@
+"""
+Fit objects to model PSFs.
 
-#############################################
-########  Fit objects to model PSFs  ########
-#############################################
+.. note::
+
+    :class:`EllipticalMoffat2DModel` is adapted from
+    :class:`~astropy.modeling.functional_models.Moffat2D` in
+    ``astropy/modeling/functional_models.py`` from `astropy
+    <https://www.astropy.org>`__ (BSD 3-Clause); see ``licenses/README.rst``.
+"""
 
 from IPython import embed
 
@@ -34,8 +40,9 @@ class FitMoffat2D:
     def __init__(self, c):
         self.c = c
         self.shape = self.c.shape
-        self.x, self.y = np.meshgrid(np.arange(self.shape[0]).astype(float),
-                                        np.arange(self.shape[1]).astype(float))
+        self.x, self.y = np.meshgrid(
+            np.arange(self.shape[0]).astype(float), np.arange(self.shape[1]).astype(float)
+        )
         self.moff = Moffat2D()
         self.par = self.guess_par()
         self.npar = self.par.size
@@ -142,8 +149,9 @@ class FitMoffat2D:
         """
         if par is not None:
             self._set_par(par)
-        return self.moff.evaluate(self.x, self.y, self.par[2], self.par[0], self.par[1],
-                                  self.par[3], self.par[4]) + self.par[5]
+        return self.moff.evaluate(
+            self.x, self.y, self.par[2], self.par[0], self.par[1], self.par[3], self.par[4]
+        ) + self.par[5]
 
     def resid(self, par):
         """
@@ -156,10 +164,13 @@ class FitMoffat2D:
         Calculate the derivative of the residuals with respect to the parameters.
         """
         self._set_par(par)
-        dmoff = self.moff.fit_deriv(self.x.ravel(), self.y.ravel(), self.par[2], self.par[0],
-                                    self.par[1], self.par[3], self.par[4])
-        return np.array([-d for d in dmoff]
-                            + [np.full(np.prod(self.shape), -1., dtype=float)]).T
+        dmoff = self.moff.fit_deriv(
+            self.x.ravel(), self.y.ravel(), self.par[2], self.par[0], self.par[1], self.par[3],
+            self.par[4]
+        )
+        return np.array(
+            [-d for d in dmoff] + [np.full(np.prod(self.shape), -1., dtype=float)]
+        ).T
 
     def fit(self, p0=None, fix=None, lb=None, ub=None):
         """
@@ -199,9 +210,10 @@ class FitMoffat2D:
             raise ValueError('Length of one or both of the bounds vectors is incorrect.')
 
         p = self.par[self.free]
-        result = optimize.least_squares(self.resid, p, method='trf', xtol=1e-12,
-                                        bounds=(lb[self.free], ub[self.free]),
-                                        verbose=0) #, jac=self.deriv_resid)
+        result = optimize.least_squares(
+            self.resid, p, method='trf', xtol=1e-12, bounds=(lb[self.free], ub[self.free]),
+            verbose=0
+        ) #, jac=self.deriv_resid)
         self._set_par(result.x)
 
     @staticmethod
@@ -243,8 +255,9 @@ class FitEllipticalMoffat2D:
     def __init__(self, c):
         self.c = c
         self.shape = self.c.shape
-        self.x, self.y = np.meshgrid(np.arange(self.shape[0]).astype(float),
-                                        np.arange(self.shape[1]).astype(float))
+        self.x, self.y = np.meshgrid(
+            np.arange(self.shape[0]).astype(float), np.arange(self.shape[1]).astype(float)
+        )
         self.par = self.guess_par()
         self.npar = self.par.size
         self.nfree = self.npar
@@ -446,13 +459,10 @@ class FitEllipticalMoffat2D:
         I = par[2] / D**par[6]
         f = -par[6] / D
 
-        return [f * I * dD_dx0,
-                f * I * dD_dy0,
-                I/par[2],
-                f * I * dD_dg1,
-                f * I * dD_dg2,
-                f * I * dD_dphi,
-                -I * np.log(D)]
+        return [
+            f * I * dD_dx0, f * I * dD_dy0, I/par[2], f * I * dD_dg1, f * I * dD_dg2,
+            f * I * dD_dphi, -I * np.log(D)
+        ]
 
     def model(self, par=None, x=None, y=None):
         """
@@ -476,9 +486,10 @@ class FitEllipticalMoffat2D:
         """
         if par is not None:
             self._set_par(par)
-        return self._eval_moffat(self.par, self.x if x is None else x,
-                                 self.y if y is None else y) \
-                    + self.par[7]
+        model = self._eval_moffat(
+            self.par, self.x if x is None else x, self.y if y is None else y
+        )
+        return model + self.par[7]
 
     def resid(self, par):
         """
@@ -492,8 +503,9 @@ class FitEllipticalMoffat2D:
         """
         self._set_par(par)
         dmoff = self._eval_moffat_deriv(self.par, self.x, self.y)
-        return np.array([-d for d in dmoff]
-                            + [np.full(np.prod(self.shape), -1., dtype=float)]).T
+        return np.array(
+            [-d for d in dmoff] + [np.full(np.prod(self.shape), -1., dtype=float)]
+        ).T
 
     def fit(self, p0=None, fix=None, lb=None, ub=None):
         """
@@ -538,8 +550,9 @@ class FitEllipticalMoffat2D:
 
         # Perform fit
         p = self.par[self.free]
-        result = optimize.least_squares(self.resid, p, method='trf', xtol=1e-12,
-                                        bounds=(lb[self.free], ub[self.free]))
+        result = optimize.least_squares(
+            self.resid, p, method='trf', xtol=1e-12, bounds=(lb[self.free], ub[self.free])
+        )
         # Sets phi to 0 if fit is too circular for phi to be accurate
         new_par = result.x
         if 0.93 < new_par[3]/new_par[4] < 1.07:
@@ -648,8 +661,8 @@ def make_ellipse(a, b, phi, n=500):
 
 
 class EllipticalMoffat2DModel(Fittable2DModel):
-    """
-    Two dimensional Moffat model.
+    r"""
+    Two dimensional elliptical Moffat model.
 
     Parameters
     ----------
@@ -670,7 +683,7 @@ class EllipticalMoffat2DModel(Fittable2DModel):
 
     See Also
     --------
-    Gaussian2D, Box2D
+    :class:`astropy.modeling.functional_models.Moffat2D`
 
     Notes
     -----
@@ -678,8 +691,16 @@ class EllipticalMoffat2DModel(Fittable2DModel):
 
     .. math::
 
-        f(x, y) = A \\left(1 + \\frac{\\left(x - x_{0}\\right)^{2} +
-        \\left(y - y_{0}\\right)^{2}}{\\gamma^{2}}\\right)^{- \\alpha}
+        f(x, y) = A \left(1 + a\,\Delta x^2 + b\,\Delta y^2
+                  + c\,\Delta x\,\Delta y\right)^{-\alpha}
+
+    where :math:`\Delta x = x - x_0`, :math:`\Delta y = y - y_0`, and
+
+    .. math::
+
+        a = \frac{\cos^2\phi}{\gamma_1^2} + \frac{\sin^2\phi}{\gamma_2^2}, \quad
+        b = \frac{\sin^2\phi}{\gamma_1^2} + \frac{\cos^2\phi}{\gamma_2^2}, \quad
+        c = 2 \sin\phi \cos\phi \left(\gamma_1^{-2} - \gamma_2^{-2}\right).
     """
 
     amplitude = Parameter(default=1, description="Amplitude (peak value) of the model")
@@ -760,13 +781,10 @@ class EllipticalMoffat2DModel(Fittable2DModel):
         I = amplitude / D**alpha
         f = -alpha / D
 
-        return [f * I * dD_dx0,
-                f * I * dD_dy0,
-                I/amplitude,
-                f * I * dD_dg1,
-                f * I * dD_dg2,
-                f * I * dD_dphi,
-                -I * np.log(D)]
+        return [
+            f * I * dD_dx0, f * I * dD_dy0, I/amplitude, f * I * dD_dg1, f * I * dD_dg2,
+            f * I * dD_dphi, -I * np.log(D)
+        ]
 
     @property
     def input_units(self):

@@ -45,7 +45,7 @@ class Fits_Simple:
         :class:`~pipnick.utils.fits_class.Fits_Simple`
             An instance of the Fits_Simple class.
         """
-        if args and isinstance(args[0], cls):
+        if len(args) > 0 and isinstance(args[0], cls):
             return args[0]
         return super(Fits_Simple, cls).__new__(cls)
 
@@ -124,8 +124,10 @@ class Fits_Simple:
                 try:
                     self._mask = hdul['MASK'].data
                 except KeyError:
-                    log.debug(f'No mask in FITS file {self.path.name}; returning the camera '
-                              'bad-pixel mask')
+                    log.debug(
+                        f'No mask in FITS file {self.path.name}; returning the camera '
+                        'bad-pixel mask'
+                    )
                     self._mask = self.camera_bpm()
         return self._mask
 
@@ -188,8 +190,10 @@ class Fits_Simple:
             If the shape of the new mask does not match the shape of the data.
         """
         if new_mask.shape != self.shape:
-            raise ValueError(f"new_mask must have same shape as data {self.data.shape}. "
-                             f"new_mask.shape = {new_mask.shape}")
+            raise ValueError(
+                f"new_mask must have same shape as data {self.data.shape}. "
+                f"new_mask.shape = {new_mask.shape}"
+            )
         self._mask = new_mask
 
     @property
@@ -320,8 +324,9 @@ class Fits_Simple:
             plt.show()
 
 
-def unzip_directories(path_list: list, output_format: str = 'Fits_Simple',
-                      allow_exceptions: bool = False) -> list:
+def unzip_directories(
+    path_list: list, output_format: str = 'Fits_Simple', allow_exceptions: bool = False
+) -> list:
     """
     Extract all files in a list of directories or files (or their subdirectories) and
     return a list of image objects.

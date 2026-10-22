@@ -32,6 +32,28 @@
       'max_temperature' in quality and temperature > quality['max_temperature']
   ):
   ```
+
+  Pack as many arguments or elements onto each line as fit within the line
+  limit; do not put one per line. Implicitly concatenated strings continue on
+  the following lines, aligned under the first string. Do not add a trailing
+  comma after the last element:
+
+  ```python
+  coeff[i] = photometric_calibration_coefficients(
+      mag_c[:,i], color, mag_i[:,i], airmass[:,i], order=order, weights=weights,
+      gpm=gpm_i
+  )
+
+  parser.add_argument(
+      '-r', '--rdxdir', type=str,
+      help='Path for the reduced data.  If not provided, set to the parent '
+           'directory of rawdir.'
+  )
+  ```
+- **Do not reformat code with `black`** or a similar tool. Formatting changes
+  are limited to line breaks and indentation; keep the existing spacing and
+  literals, e.g., compact slices like `[:,i]` (no space after the comma) and
+  floats like `3.` (not `3.0`).
 - **Lines are at most 99 characters.** Enforced by `tox -e codestyle`, which
   configures `pycodestyle` from `tox.ini` to check `E9` (syntax/runtime errors)
   and `E501` (line length) and nothing else.
