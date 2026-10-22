@@ -23,8 +23,16 @@ class MetaData(scriptbase.ScriptBase):
         )
         parser.add_argument(
             '-t', '--raw_table', default=None,
-            help='File for the metadata.  If not provided, a default name is '
-                 'used.'
+            help='File for the metadata, or the base name for the per-setup files if --split '
+                 'is set.  If not provided, a default name is used.'
+        )
+        parser.add_argument(
+            '--split', default=False, action='store_true',
+            help='Write one metadata file per instrument setup (read speed, binning, and '
+                 'readout window), named <base>_<xbin>x<ybin>_<readmode>_<window>, where the '
+                 'window is "full" for the full readout or win00, win01, etc. for custom '
+                 'windows.  Per-setup files also have a comb_id column that groups the frames '
+                 'to combine, and pointing and focus frames are commented out by default.'
         )
         parser.add_argument(
             '--camera', default=None,
@@ -62,7 +70,7 @@ class MetaData(scriptbase.ScriptBase):
         from pathlib import Path
         from pipnick import log
         from pipnick.cameras import available_cameras
-        from pipnick.metadata import build_metadata
+        from pipnick.metadata import build_metadata, find_setup_files
 
         # Initialize logger
         cls.init_log(args)
@@ -76,22 +84,21 @@ class MetaData(scriptbase.ScriptBase):
                 f'{", ".join(available_cameras())}.'
             )
             return
-        if (
-            args.raw_table is not None and Path(args.raw_table).is_file()
-            and not args.overwrite and not args.append
-        ):
-            log.error(
-                f'{args.raw_table} already exists.  Use --append to add new files to it, '
-                'or --overwrite to rebuild it.'
-            )
-            return
+        if args.raw_table is not None and not args.overwrite and not args.append:
+            if args.split and len(find_setup_files(args.raw_table)) > 0:
+                log.error(
+                    f'Per-setup files for {args.raw_table} already exist.  Use --append to add '
+                    'new files to them, or --overwrite to rebuild them.'
+                )
+                return
+            if not args.split and Path(args.raw_table).is_file():
+                log.error(
+                    f'{args.raw_table} already exists.  Use --append to add new files to it, '
+                    'or --overwrite to rebuild it.'
+                )
+                return
 
         build_metadata(
-            rawdir=args.rawdir,
-            filename=args.raw_table,
-            ext=args.ext,
-            overwrite=args.overwrite,
-            append=args.append,
-            camera=args.camera,
-            classify=args.classify,
+            rawdir=args.rawdir, filename=args.raw_table, ext=args.ext, overwrite=args.overwrite,
+            append=args.append, camera=args.camera, classify=args.classify, split=args.split
         )

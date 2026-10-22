@@ -62,6 +62,17 @@ Functionality/Performance Improvements and Additions
   preserving user edits and commented-out rows.  A summary of each night is
   logged.
 
+- ``pipnick_metadata --split`` writes one metadata file per instrument setup,
+  named ``<base>_<xbin>x<ybin>_<readmode>_<window>``, where the window is
+  ``full`` or ``win00``, ``win01``, etc. for custom readout windows.  The setup
+  values and image size are stored in each file's metadata instead of as
+  columns, and are restored as columns when the file is read.  Per-setup
+  files can be appended to, and can be reduced directly with
+  ``pipnick_reduce``.  They also have a ``comb_id`` column identifying the
+  frames to combine (by default: all biases; flats by type and filter; darks
+  by exposure time; everything else individually), and pointing and focus
+  frames are commented out by default.
+
 - ``pipnick_reduce`` takes the overscan and data sections, bad-pixel mask,
   saturation level, gain, and read noise from the camera configuration, for the
   binning and read mode of each frame.  For now, it reduces data from only one

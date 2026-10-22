@@ -17,6 +17,29 @@ darks, and flats) can only be applied to frames with the same setup.  The
 definition of each setup is stored in the ``setups`` entry of the table
 ``meta`` dictionary.
 
+Per-setup files
+---------------
+
+The metadata can instead be written to one file per setup (see
+``pipnick_metadata --split`` and :func:`build_metadata`), named
+``<base>_<xbin>x<ybin>_<readmode>_<window>.ecsv``, where the window is
+``full`` for the full readout or ``win00``, ``win01``, etc. for custom readout
+windows.  Because the setup values and the image size are the same for every
+frame in the file (see :data:`setup_file_keys`), they are stored in the
+``setup`` entry of the file ``meta`` dictionary instead of as columns.
+:func:`read_metadata` restores them as columns, so a per-setup file can be
+used anywhere a table with all setups can.
+
+Per-setup files also differ from a table with all setups in two ways:
+
+- They have a ``comb_id`` column with integers that identify the frames to
+  combine; see :func:`assign_comb_ids`.  By default, biases are combined, flats
+  are combined by type and filter, darks are combined if their exposure times
+  agree to within 0.1 s, and all other frames, including science frames, are
+  processed independently.  Edit the column to change the groups.
+
+- Pointing and focus frames are commented out by default.
+
 Excluding frames
 ----------------
 
@@ -46,7 +69,8 @@ from pipnick import log
 from pipnick.pkg.exceptions import PipnickDataModelError, PipnickPathError
 
 __all__ = [
-    'metadata_columns', 'setup_keys', 'build_camera_datatable', 'assign_setups', 'write_metadata',
+    'metadata_columns', 'setup_keys', 'setup_file_keys', 'build_camera_datatable',
+    'assign_setups', 'setup_file_name', 'split_by_setup', 'find_setup_files', 'write_metadata',
     'read_metadata', 'update_metadata_meta', 'summarize', 'build_metadata', 'frame_path',
     'default_table_name', 'default_reduced_file_name'
 ]
@@ -78,6 +102,13 @@ The columns of the metadata table, in order, and their data types.
 setup_keys = ['xbin', 'ybin', 'readmode', 'window']
 """
 The metadata columns that, with the camera, define an instrument setup.
+"""
+
+setup_file_keys = setup_keys + ['naxis1', 'naxis2']
+"""
+The metadata columns that are identical for all frames in a setup, and so are
+moved from the table columns to the ``meta`` dictionary of a per-setup file;
+the image size is set by the binning and readout window.
 """
 
 def _split_ecsv_line(line):
@@ -125,12 +156,23 @@ def _column(name, values):
     return MaskedColumn(data, name=name, mask=mask) if np.any(mask) else Column(data, name=name)
 
 
+def _window_name(index):
+    """
+    Return the name of a custom readout window for a 0-based index: win00,
+    win01, ...
+    """
+    return f'win{index:02d}'
+
+
 def assign_setups(tbl, camera_name, setups=None):
     """
     Assign a setup label to each frame in a metadata table.
 
     The ``setup`` column is (re)set, and the definition of each setup is saved
-    to the ``setups`` entry of the table ``meta`` dictionary.
+    to the ``setups`` entry of the table ``meta`` dictionary.  Each definition
+    includes a ``window_name``: ``'full'`` for the full readout, or ``win00``,
+    ``win01``, etc. for each distinct readout window, in order of first
+    appearance.  Setups with the same window share its name.
 
     Parameters
     ----------
@@ -142,23 +184,240 @@ def assign_setups(tbl, camera_name, setups=None):
     setups : dict, optional
         Existing setup definitions, as stored in the ``setups`` entry of a
         metadata table ``meta`` dictionary.  Frames with these setups keep
-        their labels, and new setups are labeled after them.
+        their labels, windows keep their names, and new setups and windows are
+        labeled and named after them.
     """
     labels = {}
+    window_names = {'full': 'full'}
     if setups is not None:
         for label, definition in setups.items():
             labels[tuple(definition[k] for k in setup_keys)] = label
+            if 'window_name' in definition:
+                window_names[definition['window']] = definition['window_name']
     assigned = []
     for row in tbl:
         key = tuple(row[k].item() if hasattr(row[k], 'item') else row[k] for k in setup_keys)
         if key not in labels:
             labels[key] = _setup_label(len(labels))
+        window = key[setup_keys.index('window')]
+        if window not in window_names:
+            window_names[window] = _window_name(len(window_names) - 1)
         assigned.append(labels[key])
     tbl['setup'] = assigned
-    tbl.meta['setups'] = {
-        label: {'camera': camera_name, **dict(zip(setup_keys, key))} for key,
-        label in sorted(labels.items(), key=operator.itemgetter(1))
-    }
+    tbl.meta['setups'] = {}
+    for key, label in sorted(labels.items(), key=operator.itemgetter(1)):
+        definition = {'camera': camera_name, **dict(zip(setup_keys, key))}
+        definition['window_name'] = window_names[definition['window']]
+        tbl.meta['setups'][label] = definition
+
+
+def _comb_key(row):
+    """
+    Return the key used to group a frame with others by default, or None if the
+    frame is not combined with any other.
+
+    Biases are combined, flats are combined by type and filter, and darks are
+    combined if their exposure times agree to within 0.1 s; all within the same
+    setup.  All other frames are processed independently.
+    """
+    frametype = row['frametype']
+    if frametype == 'bias':
+        return (row['setup'], frametype)
+    if frametype in ['domeflat', 'skyflat']:
+        filt = '' if row['filter'] is np.ma.masked else str(row['filter'])
+        return (row['setup'], frametype, filt)
+    if frametype == 'dark' and row['exptime'] is not np.ma.masked:
+        return (row['setup'], frametype, round(float(row['exptime']), 1))
+    return None
+
+
+def assign_comb_ids(tbl, assign=None):
+    """
+    Assign the combination group of each frame in a metadata table.
+
+    Frames with the same ``comb_id`` are combined.  By default, biases are
+    combined, flats are combined by type and filter, darks are combined if
+    their exposure times agree to within 0.1 s, and all other frames, including
+    science frames, are processed independently; see :func:`_comb_key`.
+    Groups never span setups.
+
+    Parameters
+    ----------
+    tbl : :class:`astropy.table.Table`
+        The metadata table, with the ``setup`` column.  The ``comb_id`` column
+        is added after the ``frametype`` column if it does not exist.  Modified
+        in place.
+    assign : :class:`numpy.ndarray`, optional
+        Boolean array selecting the frames to assign, e.g., newly appended
+        frames.  The other frames keep their groups, and a new frame joins the
+        existing group with the same default key, if there is exactly one.  If
+        None, all frames are assigned.
+    """
+    _assign = np.ones(len(tbl), dtype=bool) if assign is None else assign
+    ids = np.zeros(len(tbl), dtype=int)
+    existing = {}
+    if 'comb_id' in tbl.colnames:
+        keep = np.logical_not(_assign)
+        ids[keep] = np.asarray(tbl['comb_id'])[keep]
+        for row, comb_id in zip(tbl[keep], ids[keep]):
+            key = _comb_key(row)
+            if key is not None:
+                existing.setdefault(key, set()).add(int(comb_id))
+    next_id = 1 if np.all(_assign) else int(np.max(ids[np.logical_not(_assign)])) + 1
+    assigned = {}
+    for i in np.where(_assign)[0]:
+        key = _comb_key(tbl[i])
+        if key is not None and key in assigned:
+            ids[i] = assigned[key]
+            continue
+        if key is not None and key in existing and len(existing[key]) == 1:
+            ids[i] = next(iter(existing[key]))
+        else:
+            ids[i] = next_id
+            next_id += 1
+        if key is not None:
+            assigned[key] = ids[i]
+    if 'comb_id' in tbl.colnames:
+        tbl['comb_id'] = ids
+    else:
+        tbl.add_column(Column(ids, name='comb_id'), index=tbl.colnames.index('frametype') + 1)
+
+
+def setup_file_name(base, definition):
+    """
+    Construct the name of the metadata file for one setup.
+
+    The name is ``<stem>_<xbin>x<ybin>_<readmode>_<window_name><suffix>``,
+    where ``stem`` and ``suffix`` are those of ``base``.
+
+    Parameters
+    ----------
+    base : str, :class:`pathlib.Path`
+        The base file name, e.g., ``n2.ecsv``.
+    definition : dict
+        The setup definition; see :func:`assign_setups`.
+
+    Returns
+    -------
+    :class:`pathlib.Path`
+        The file name, e.g., ``n2_2x2_fast_full.ecsv``.
+    """
+    _base = Path(base)
+    tag = (
+        f'{definition["xbin"]}x{definition["ybin"]}_{definition["readmode"]}_'
+        f'{definition["window_name"]}'
+    )
+    return _base.with_name(f'{_base.stem}_{tag}{_base.suffix}')
+
+
+def split_by_setup(tbl, commented):
+    """
+    Split a metadata table into one table per setup.
+
+    The values that are identical for all frames in a setup (see
+    :data:`setup_file_keys`) and the ``setup`` column are removed from each
+    table and stored in the ``setup`` entry of its ``meta`` dictionary, with the
+    setup label and definition.
+
+    Parameters
+    ----------
+    tbl : :class:`astropy.table.Table`
+        The metadata table, with the ``setup`` column and the ``setups`` entry
+        in its ``meta`` dictionary; see :func:`assign_setups`.
+    commented : :class:`numpy.ndarray`
+        Boolean array flagging the rows that are commented out.
+
+    Returns
+    -------
+    list
+        One ``(definition, table, commented)`` tuple for each setup with at
+        least one frame, where ``definition`` is the ``setup`` entry of the
+        table ``meta`` dictionary.
+
+    Raises
+    ------
+    :exc:`~pipnick.pkg.exceptions.PipnickDataModelError`
+        Raised if the image size is not the same for all frames in a setup.
+    """
+    meta = {k: v for k, v in tbl.meta.items() if k != 'setups'}
+    split = []
+    for label, setup in tbl.meta['setups'].items():
+        indx = tbl['setup'] == label
+        if not np.any(indx):
+            continue
+        sub = tbl[indx]
+        definition = {'label': label, **setup}
+        for key in ['naxis1', 'naxis2']:
+            values = np.unique(sub[key])
+            if len(values) != 1:
+                raise PipnickDataModelError(
+                    f'Frames in setup {label} have different {key} values: {list(values)}.'
+                )
+            definition[key] = int(values[0])
+        sub.remove_columns(['setup'] + setup_file_keys)
+        sub.meta = {**meta, 'setup': definition}
+        split.append((definition, sub, commented[indx]))
+    return split
+
+
+def _expand_setup(tbl):
+    """
+    Restore the setup columns of a table read from a per-setup file.
+
+    The values in the ``setup`` entry of the ``meta`` dictionary are added as
+    columns, in their usual positions; the entry is replaced by a ``setups``
+    entry with the single setup definition, as in a table with all setups.
+    Tables without a ``setup`` entry are returned unchanged.
+    """
+    if not isinstance(tbl.meta.get('setup'), dict):
+        return tbl
+    definition = tbl.meta.pop('setup')
+    values = {'setup': definition['label'], **{k: definition[k] for k in setup_file_keys}}
+    for name in metadata_columns.keys():
+        if name not in values or name in tbl.colnames:
+            continue
+        # Insert after the closest preceding column that is already present
+        preceding = list(metadata_columns.keys())[:list(metadata_columns.keys()).index(name)]
+        present = [c for c in preceding if c in tbl.colnames]
+        index = 0 if len(present) == 0 else tbl.colnames.index(present[-1]) + 1
+        dtype = metadata_columns[name]
+        # NOTE: Setting dtype=str would truncate the strings to one character, so
+        # the string length is instead inferred from the value
+        data = (
+            np.full(len(tbl), values[name]) if dtype is str
+            else np.full(len(tbl), values[name], dtype=dtype)
+        )
+        tbl.add_column(Column(data, name=name), index=index)
+    setup = {k: v for k, v in definition.items() if k not in ['label', 'naxis1', 'naxis2']}
+    tbl.meta['setups'] = {definition['label']: setup}
+    return tbl
+
+
+def find_setup_files(base):
+    """
+    Find the existing per-setup metadata files for a base file name.
+
+    Parameters
+    ----------
+    base : str, :class:`pathlib.Path`
+        The base file name, e.g., ``n2.ecsv``; see :func:`setup_file_name`.
+
+    Returns
+    -------
+    list
+        The paths to the per-setup files, sorted by name.  Files that match the
+        name pattern but are not per-setup metadata files are ignored.
+    """
+    _base = Path(base).absolute()
+    found = []
+    for f in sorted(_base.parent.glob(f'{_base.stem}_*{_base.suffix}')):
+        try:
+            meta = Table.read(f, format='ascii.ecsv').meta
+        except (ValueError, OSError):
+            continue
+        if isinstance(meta.get('setup'), dict):
+            found.append(f)
+    return found
 
 
 def build_camera_datatable(
@@ -314,17 +573,22 @@ def write_metadata(tbl, filename, commented=None, overwrite=True):
     _filename.write_text('\n'.join(lines) + '\n')
 
 
-def read_metadata(filename, include_commented=False):
+def read_metadata(filename, include_commented=False, expand=True):
     """
     Read a metadata table from an ECSV file.
 
     Parameters
     ----------
     filename : str, :class:`pathlib.Path`
-        The ECSV file.
+        The ECSV file, with either all setups or a single setup; see
+        :func:`split_by_setup`.
     include_commented : bool, optional
         Include the commented-out rows in the returned table.  Comment lines
         that are not table rows are ignored.
+    expand : bool, optional
+        For a per-setup file, restore the setup columns from its ``meta``
+        dictionary, so that the table has the same layout as a table with all
+        setups.  If False, the table is returned as it is in the file.
 
     Returns
     -------
@@ -337,7 +601,8 @@ def read_metadata(filename, include_commented=False):
     """
     _filename = Path(filename).absolute()
     if not include_commented:
-        return Table.read(_filename, format='ascii.ecsv')
+        tbl = Table.read(_filename, format='ascii.ecsv')
+        return _expand_setup(tbl) if expand else tbl
 
     lines = _filename.read_text().splitlines()
     start = next(i for i, line in enumerate(lines) if not line.startswith('#'))
@@ -352,14 +617,14 @@ def read_metadata(filename, include_commented=False):
             lines[i] = candidate
             commented.append(True)
     tbl = Table.read('\n'.join(lines), format='ascii.ecsv')
-    return tbl, np.array(commented, dtype=bool)
+    return _expand_setup(tbl) if expand else tbl, np.array(commented, dtype=bool)
 
 
 def update_metadata_meta(filename, **kwargs):
     """
     Update the ``meta`` dictionary of a metadata table file.
 
-    Commented-out rows are preserved.
+    Commented-out rows are preserved, as is the layout of a per-setup file.
 
     Parameters
     ----------
@@ -368,7 +633,7 @@ def update_metadata_meta(filename, **kwargs):
     **kwargs
         The ``meta`` entries to set.
     """
-    tbl, commented = read_metadata(filename, include_commented=True)
+    tbl, commented = read_metadata(filename, include_commented=True, expand=False)
     tbl.meta.update(kwargs)
     write_metadata(tbl, filename, commented=commented)
 
@@ -433,9 +698,80 @@ def summarize(tbl, commented=None):
     return '\n'.join(lines)
 
 
+def _exclude_by_default(tbl, commented, select):
+    """
+    Comment out the pointing and focus frames, noting why.
+
+    Parameters
+    ----------
+    tbl : :class:`astropy.table.Table`
+        The metadata table.  The ``note`` column is modified in place.
+    commented : :class:`numpy.ndarray`
+        Boolean array flagging the rows that are commented out.  Modified in
+        place.
+    select : :class:`numpy.ndarray`
+        Boolean array selecting the rows to consider, e.g., newly appended
+        frames, so that earlier user edits are preserved.
+    """
+    exclude = select & np.isin(tbl['frametype'], ['pointing', 'focus'])
+    notes = ['' if note is np.ma.masked else str(note) for note in tbl['note']]
+    for i in np.where(exclude)[0]:
+        reason = f'{tbl["frametype"][i]} frames are excluded by default'
+        notes[i] = reason if notes[i] == '' else f'{notes[i]}; {reason}'
+    tbl['note'] = notes
+    commented |= exclude
+
+
+def _read_setup_files(files):
+    """
+    Read a set of per-setup metadata files into a single table.
+
+    Parameters
+    ----------
+    files : list
+        The per-setup files; see :func:`find_setup_files`.
+
+    Returns
+    -------
+    tbl : :class:`astropy.table.Table`
+        The combined table, with the setup columns restored, ordered by file
+        name, and with the ``setups`` entry of the ``meta`` dictionary
+        including all setups.
+    commented : :class:`numpy.ndarray`
+        Boolean array flagging the rows that are commented out.
+
+    Raises
+    ------
+    :exc:`~pipnick.pkg.exceptions.PipnickDataModelError`
+        Raised if the files are for different cameras or raw data directories.
+    """
+    tables = []
+    commented = []
+    setups = {}
+    for f in files:
+        tbl, com = read_metadata(f, include_commented=True)
+        setups.update(tbl.meta['setups'])
+        tables.append(tbl)
+        commented.append(com)
+    for key in ['camera', 'rawdir']:
+        values = set(tbl.meta.get(key) for tbl in tables)
+        if len(values) > 1:
+            raise PipnickDataModelError(
+                f'Per-setup files have different {key} values: {sorted(values)}.'
+            )
+    meta = {k: v for k, v in tables[0].meta.items() if k != 'setups'}
+    combined = vstack(tables, metadata_conflicts='silent')
+    commented = np.concatenate(commented)
+    srt = np.argsort(combined['file'])
+    combined = combined[srt]
+    commented = commented[srt]
+    combined.meta = {**meta, 'setups': dict(sorted(setups.items()))}
+    return combined, commented
+
+
 def build_metadata(
     rawdir=None, filename=None, ext='.fits', overwrite=False, append=False, rdxdir=None,
-    camera=None, classify='header'
+    camera=None, classify='header', split=False
 ):
     """
     Construct a table with metadata needed for the data processing.
@@ -455,6 +791,13 @@ def build_metadata(
           ``rawdir``.  If ``filename`` is not provided, a default name is
           chosen.
 
+    If ``split`` is True, the metadata are written to one file per setup (see
+    :func:`split_by_setup` and :func:`setup_file_name`), and ``filename`` is
+    the base name for these files.  Existing per-setup files cannot be
+    reloaded; one of ``overwrite`` or ``append`` must be set.  When appending,
+    new frames are added to the file for their setup, and new setups are
+    written to new files.
+
     Parameters
     ----------
     rawdir : str, :class:`pathlib.Path`, optional
@@ -463,7 +806,8 @@ def build_metadata(
         with ``filename``, ``overwrite``, and ``append``.
     filename : str, optional
         The full path (if needed) and file name to either write or load with
-        metadata used during the data processing.
+        metadata used during the data processing, or the base name of the
+        per-setup files if ``split`` is True.
     ext : str, optional
         Extension of the files to include in the search string used to find
         files.
@@ -480,19 +824,31 @@ def build_metadata(
     classify : str, optional
         How the frames are classified and checked; see
         :func:`build_camera_datatable`.
+    split : bool, optional
+        Write one metadata file per setup.
 
     Returns
     -------
-    :class:`pathlib.Path`
-        Path to the file with the metadata.
+    :class:`pathlib.Path`, list
+        Path to the file with the metadata, or a list of the paths to the
+        per-setup files if ``split`` is True.
     :class:`astropy.table.Table`
-        Table containing file metadata, excluding commented-out rows.
+        Table containing file metadata for all setups, excluding commented-out
+        rows.
     """
     if overwrite and append:
         raise ValueError('Cannot both overwrite and append to the metadata table.')
     _rdxdir = None if rdxdir is None else str(Path(rdxdir).absolute())
     _filename = None if filename is None else Path(filename).absolute()
-    exists = _filename is not None and _filename.is_file()
+    if split:
+        setup_files = [] if _filename is None else find_setup_files(_filename)
+        exists = len(setup_files) > 0
+        if exists and not overwrite and not append:
+            raise ValueError(
+                f'Per-setup files for {_filename} already exist; set overwrite or append.'
+            )
+    else:
+        exists = _filename is not None and _filename.is_file()
 
     if exists and not overwrite and not append:
         # Read and return the metadata
@@ -517,7 +873,10 @@ def build_metadata(
 
     if exists and append:
         # Add new files to the existing table
-        metadata, commented = read_metadata(_filename, include_commented=True)
+        if split:
+            metadata, commented = _read_setup_files(setup_files)
+        else:
+            metadata, commented = read_metadata(_filename, include_commented=True)
         _rawdir = str(Path(rawdir).absolute())
         if metadata.meta.get('rawdir') != _rawdir:
             raise ValueError(
@@ -535,14 +894,18 @@ def build_metadata(
         )
         if new is None:
             log.info(f'No new files to add to {_filename}.')
-            return _filename, metadata[np.logical_not(commented)]
+            return setup_files if split else _filename, metadata[np.logical_not(commented)]
         log.info(f'Appending {len(new)} files to {_filename}.')
         meta = metadata.meta.copy()
         combined = vstack([metadata, new], metadata_conflicts='silent')
         commented = np.concatenate([commented, rejected])
+        is_new = np.concatenate(
+            [np.zeros(len(metadata), dtype=bool), np.ones(len(new), dtype=bool)]
+        )
         srt = np.argsort(combined['file'])
         combined = combined[srt]
         commented = commented[srt]
+        is_new = is_new[srt]
         combined.meta = meta
         assign_setups(combined, meta['camera'], setups=meta.get('setups'))
         metadata = combined
@@ -551,15 +914,45 @@ def build_metadata(
         metadata, commented = build_camera_datatable(
             rawdir, ext=ext, path_key='rawdir', camera=camera, classify=classify
         )
+        is_new = np.ones(len(metadata), dtype=bool)
         if _filename is None:
             _filename = Path(default_table_name(metadata.meta['camera'], 'raw')).absolute()
 
+    if split:
+        # Exclude pointing and focus frames by default, and assign the
+        # combination groups of the new frames
+        _exclude_by_default(metadata, commented, is_new)
+        assign_comb_ids(metadata, assign=is_new)
+
     if _rdxdir is not None:
         metadata.meta['rdxdir'] = _rdxdir
-    log.info(f'Saving metadata to {_filename}')
-    write_metadata(metadata, _filename, commented=commented)
-    log.info(f'Metadata summary:\n{summarize(metadata, commented)}')
-    return _filename, metadata[np.logical_not(commented)]
+    summary = summarize(metadata, commented)
+    if not split:
+        log.info(f'Saving metadata to {_filename}')
+        write_metadata(metadata, _filename, commented=commented)
+        log.info(f'Metadata summary:\n{summary}')
+        return _filename, metadata[np.logical_not(commented)]
+
+    # Write one file per setup
+    written = []
+    files_summary = ['Per-setup files:']
+    for definition, tbl, com in split_by_setup(metadata, commented):
+        ofile = setup_file_name(_filename, definition).absolute()
+        log.info(f'Saving metadata for setup {definition["label"]} to {ofile}')
+        write_metadata(tbl, ofile, commented=com)
+        written.append(ofile)
+        files_summary.append(
+            f'    {definition["label"]}: {ofile.name} ({len(tbl)} frames, {np.sum(com)} '
+            'commented)'
+        )
+    stale = sorted(set(setup_files) - set(written)) if exists else []
+    if len(stale) > 0:
+        log.warning(
+            'These existing per-setup files were not rewritten and may be out of date: '
+            + ', '.join(f.name for f in stale)
+        )
+    log.info('Metadata summary:\n' + '\n'.join([summary] + files_summary))
+    return written, metadata[np.logical_not(commented)]
 
 
 def frame_path(metadata, select=None, col_key='file', path_key='rawdir'):

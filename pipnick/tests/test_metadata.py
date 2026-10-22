@@ -110,15 +110,17 @@ def test_setups(tmp_path):
     )
     expected = {
         'A': {
-            'camera': 'NickelAndor', 'xbin': 1, 'ybin': 1, 'readmode': 'slow', 'window': 'full'
+            'camera': 'NickelAndor', 'xbin': 1, 'ybin': 1, 'readmode': 'slow', 'window': 'full',
+            'window_name': 'full'
         },
         'B': {
-            'camera': 'NickelAndor', 'xbin': 2, 'ybin': 2, 'readmode': 'fast', 'window': 'full'
+            'camera': 'NickelAndor', 'xbin': 2, 'ybin': 2, 'readmode': 'fast', 'window': 'full',
+            'window_name': 'full'
         },
         'C': {
             'camera': 'NickelAndor', 'xbin': 2, 'ybin': 2, 'readmode': 'fast',
-            'window': '[960:1205,840:1069]'
-        },
+            'window': '[960:1205,840:1069]', 'window_name': 'win00'
+        }
     }
     assert tbl.meta['setups'] == expected, 'Each setup definition should be recorded'
 
@@ -322,3 +324,296 @@ def test_summary(tmp_path):
         'Commented-out frames should not be checked for calibrations'
     )
     assert 'Commented rows: 1' in summary, 'The number of commented rows should be reported'
+
+
+def write_split_night(rawdir):
+    """
+    Write synthetic Andor files with five setups: two full-frame setups, two
+    setups that share a readout window, and one with a second window.
+    """
+    rawdir.mkdir()
+    write_andor(rawdir / 'n3001.fits', CDELT1U=1, CDELT2U=1, AMPCONF='0.05MHz')
+    write_andor(rawdir / 'n3002.fits')
+    write_andor(rawdir / 'n3003.fits', WINDOW='960 1205 840 1069')
+    write_andor(rawdir / 'n3004.fits', WINDOW='960 1205 840 1069', AMPCONF='0.05MHz')
+    write_andor(rawdir / 'n3005.fits', WINDOW='101 300 101 300')
+    write_andor(rawdir / 'n3006.fits')
+
+
+def test_split_files(tmp_path):
+    rawdir = tmp_path / 'raw'
+    write_split_night(rawdir)
+    files, used = metadata.build_metadata(rawdir=rawdir, filename=tmp_path / 'n3.ecsv', split=True)
+
+    names = sorted(f.name for f in files)
+    expected = [
+        'n3_1x1_slow_full.ecsv', 'n3_2x2_fast_full.ecsv', 'n3_2x2_fast_win00.ecsv',
+        'n3_2x2_fast_win01.ecsv', 'n3_2x2_slow_win00.ecsv'
+    ]
+    assert names == expected, (
+        'Each setup should be written to a file named by its binning, read mode, and window, '
+        'and setups with the same window should share its name'
+    )
+    assert len(used) == 6, 'The returned table should include all setups'
+    assert sorted(f.name for f in metadata.find_setup_files(tmp_path / 'n3.ecsv')) == expected, (
+        'The per-setup files should be found from the base name'
+    )
+
+    # The compact layout of a per-setup file
+    ofile = tmp_path / 'n3_2x2_fast_full.ecsv'
+    compact = metadata.read_metadata(ofile, expand=False)
+    moved = ['setup'] + metadata.setup_file_keys
+    expected = [c for c in metadata.metadata_columns if c not in moved]
+    expected.insert(expected.index('frametype') + 1, 'comb_id')
+    assert compact.colnames == expected, (
+        'The setup values and image size should not be columns of a per-setup file, which '
+        'should have the combination groups'
+    )
+    assert compact.meta['setup'] == {
+        'label': 'B', 'camera': 'NickelAndor', 'xbin': 2, 'ybin': 2, 'readmode': 'fast',
+        'window': 'full', 'window_name': 'full', 'naxis1': 4, 'naxis2': 4
+    }, 'The setup values and image size should be in the file meta dictionary'
+    assert 'setups' not in compact.meta, 'A per-setup file should not list all setups'
+    assert list(compact['file']) == ['n3002.fits', 'n3006.fits'], (
+        'The file should include all frames with its setup'
+    )
+
+    # Reading the file restores the columns
+    tbl = metadata.read_metadata(ofile)
+    expected = list(metadata.metadata_columns.keys())
+    expected.insert(expected.index('setup') + 1, 'comb_id')
+    assert tbl.colnames == expected, (
+        'Reading a per-setup file should restore the columns, in order'
+    )
+    assert tbl['xbin'].dtype.kind == 'i' and tbl['readmode'].dtype.kind == 'U', (
+        'The restored columns should have their usual types'
+    )
+    assert list(tbl['setup']) == ['B', 'B'] and list(tbl['naxis1']) == [4, 4], (
+        'The restored columns should have the values from the meta dictionary'
+    )
+    assert list(tbl.meta['setups'].keys()) == ['B'], (
+        'The restored meta dictionary should define the single setup'
+    )
+
+    # The split files have the same content as a single table
+    metadata.build_metadata(rawdir=rawdir, filename=tmp_path / 'all.ecsv')
+    single = metadata.read_metadata(tmp_path / 'all.ecsv')
+    combined, _ = metadata._read_setup_files(files)
+    for name in single.colnames:
+        assert list(combined[name]) == list(single[name]), (
+            f'The {name} column of the per-setup files should match the single table'
+        )
+    assert combined.meta['setups'] == single.meta['setups'], (
+        'The setups in the per-setup files should match the single table'
+    )
+
+    # Existing files are not overwritten unless requested
+    with pytest.raises(ValueError):
+        metadata.build_metadata(rawdir=rawdir, filename=tmp_path / 'n3.ecsv', split=True)
+
+
+def test_split_rejected_setup(tmp_path):
+    rawdir = tmp_path / 'raw'
+    rawdir.mkdir()
+    write_andor(rawdir / 'n1001.fits')
+    # The only frame in its setup, rejected because the detector is warm
+    write_andor(rawdir / 'n1002.fits', AMPCONF='0.05MHz', CURRTEMP=5.8)
+    files, used = metadata.build_metadata(rawdir=rawdir, filename=tmp_path / 'n1.ecsv', split=True)
+    assert sorted(f.name for f in files) == ['n1_2x2_fast_full.ecsv', 'n1_2x2_slow_full.ecsv'], (
+        'A setup with only rejected frames should still be written to a file'
+    )
+    assert list(used['file']) == ['n1001.fits'], 'The rejected frame should be excluded'
+    tbl, commented = metadata.read_metadata(
+        tmp_path / 'n1_2x2_slow_full.ecsv', include_commented=True
+    )
+    assert list(tbl['file']) == ['n1002.fits'] and list(commented) == [True], (
+        'The rejected frame should be commented out in its file'
+    )
+
+
+def test_split_append(tmp_path):
+    rawdir = tmp_path / 'raw'
+    rawdir.mkdir()
+    base = tmp_path / 'n2.ecsv'
+    write_andor(rawdir / 'n2001.fits')
+    write_andor(rawdir / 'n2002.fits', AMPCONF='0.05MHz')
+    write_andor(rawdir / 'n2003.fits')
+    metadata.build_metadata(rawdir=rawdir, filename=base, split=True)
+
+    # User edits: comment out one row and change a frame type
+    fast = tmp_path / 'n2_2x2_fast_full.ecsv'
+    slow = tmp_path / 'n2_2x2_slow_full.ecsv'
+    tbl, commented = metadata.read_metadata(fast, include_commented=True, expand=False)
+    commented[0] = True
+    tbl['frametype'][1] = 'test'
+    metadata.write_metadata(tbl, fast, commented=commented)
+    slow_before = slow.read_text()
+
+    # New files, including one with a new setup
+    write_andor(rawdir / 'n2004.fits')
+    write_andor(rawdir / 'n2005.fits', WINDOW='960 1205 840 1069')
+    files, used = metadata.build_metadata(rawdir=rawdir, filename=base, split=True, append=True)
+    assert sorted(f.name for f in files) == [
+        'n2_2x2_fast_full.ecsv', 'n2_2x2_fast_win00.ecsv', 'n2_2x2_slow_full.ecsv'
+    ], 'The new setup should be written to a new file'
+    assert list(used['file']) == ['n2002.fits', 'n2003.fits', 'n2004.fits', 'n2005.fits'], (
+        'The returned table should include all setups, excluding the commented rows'
+    )
+
+    tbl, commented = metadata.read_metadata(fast, include_commented=True)
+    assert list(tbl['file']) == ['n2001.fits', 'n2003.fits', 'n2004.fits'], (
+        'The new frame should be added to the file for its setup'
+    )
+    assert list(commented) == [True, False, False], 'The commented row should stay commented'
+    assert tbl['frametype'][1] == 'test', 'The edited frame type should be preserved'
+    assert slow.read_text() == slow_before, 'A file without new frames should be unchanged'
+    new = metadata.read_metadata(tmp_path / 'n2_2x2_fast_win00.ecsv', expand=False)
+    assert new.meta['setup']['label'] == 'C', 'The new setup should be labeled after the others'
+
+    # Appending again changes nothing
+    contents = {f: f.read_text() for f in files}
+    again, _ = metadata.build_metadata(rawdir=rawdir, filename=base, split=True, append=True)
+    assert sorted(again) == sorted(files), 'Appending again should find the same files'
+    assert all(f.read_text() == contents[f] for f in files), (
+        'Appending again, with no new files, should change nothing'
+    )
+
+
+def test_split_overwrite(tmp_path, caplog):
+    rawdir = tmp_path / 'raw'
+    rawdir.mkdir()
+    base = tmp_path / 'n2.ecsv'
+    write_andor(rawdir / 'n2001.fits')
+    write_andor(rawdir / 'n2002.fits', AMPCONF='0.05MHz')
+    metadata.build_metadata(rawdir=rawdir, filename=base, split=True)
+
+    # Remove the only frame from one setup and rebuild
+    (rawdir / 'n2002.fits').unlink()
+    files, _ = metadata.build_metadata(rawdir=rawdir, filename=base, split=True, overwrite=True)
+    assert [f.name for f in files] == ['n2_2x2_fast_full.ecsv'], (
+        'Only the remaining setup should be written'
+    )
+    stale = tmp_path / 'n2_2x2_slow_full.ecsv'
+    assert stale.is_file(), 'Existing per-setup files should not be deleted'
+    assert stale.name in caplog.text, 'Per-setup files that were not rewritten should be reported'
+
+
+def test_split_update_meta(tmp_path):
+    rawdir = tmp_path / 'raw'
+    rawdir.mkdir()
+    write_andor(rawdir / 'n2001.fits')
+    files, _ = metadata.build_metadata(rawdir=rawdir, filename=tmp_path / 'n2.ecsv', split=True)
+    metadata.update_metadata_meta(files[0], rdxdir='/tmp/rdx')
+    compact = metadata.read_metadata(files[0], expand=False)
+    assert compact.meta['rdxdir'] == '/tmp/rdx', 'The meta dictionary should be updated'
+    assert 'xbin' not in compact.colnames and 'setup' in compact.meta, (
+        'Updating the meta dictionary should preserve the per-setup layout'
+    )
+
+
+def write_grouping_night(rawdir):
+    """
+    Write synthetic Andor files with a mix of frame types in one setup.
+    """
+    rawdir.mkdir()
+    for i in range(1, 4):
+        write_andor(rawdir / f'n400{i}.fits', OBSTYPE='DARK', OBJECT='bias', XPOSURE=0.2)
+    write_andor(rawdir / 'n4004.fits', OBJECT='Dome flat V', FILTER='V', XPOSURE=3.0)
+    write_andor(rawdir / 'n4005.fits', OBJECT='Dome flat V', FILTER='V', XPOSURE=3.0)
+    write_andor(rawdir / 'n4006.fits', OBJECT='Dome flat R', FILTER='R', XPOSURE=3.0)
+    write_andor(rawdir / 'n4007.fits', OBJECT='twilight flat', FILTER='V', XPOSURE=10.0)
+    write_andor(rawdir / 'n4008.fits', OBSTYPE='DARK', OBJECT='Dark', XPOSURE=120.004)
+    write_andor(rawdir / 'n4009.fits', OBSTYPE='DARK', OBJECT='Dark', XPOSURE=120.006)
+    write_andor(rawdir / 'n4010.fits', OBSTYPE='DARK', OBJECT='Dark', XPOSURE=30.005)
+    write_andor(rawdir / 'n4011.fits', OBJECT='M11 V')
+    write_andor(rawdir / 'n4012.fits', OBJECT='M11 V')
+    write_andor(rawdir / 'n4013.fits', OBJECT='Pointing 18')
+    write_andor(rawdir / 'n4014.fits', OBJECT='Focus 18')
+
+
+def test_comb_ids(tmp_path):
+    rawdir = tmp_path / 'raw'
+    write_grouping_night(rawdir)
+    files, used = metadata.build_metadata(rawdir=rawdir, filename=tmp_path / 'n4.ecsv', split=True)
+    tbl, commented = metadata.read_metadata(files[0], include_commented=True)
+    ids = dict(zip(tbl['file'], tbl['comb_id']))
+
+    assert tbl['comb_id'].dtype.kind == 'i', 'The combination groups should be integers'
+    assert ids['n4001.fits'] == ids['n4002.fits'] == ids['n4003.fits'], (
+        'All biases should be combined'
+    )
+    assert ids['n4004.fits'] == ids['n4005.fits'] != ids['n4006.fits'], (
+        'Dome flats should be combined by filter'
+    )
+    assert ids['n4007.fits'] not in [ids['n4004.fits'], ids['n4006.fits']], (
+        'Sky flats should not be combined with dome flats'
+    )
+    assert ids['n4008.fits'] == ids['n4009.fits'] != ids['n4010.fits'], (
+        'Darks should be combined if their exposure times agree to within 0.1 s'
+    )
+    singles = ['n4011.fits', 'n4012.fits', 'n4013.fits', 'n4014.fits']
+    assert len(set(ids[f] for f in singles)) == 4, (
+        'Science, pointing, and focus frames should be processed independently'
+    )
+    assert len(set(tbl['comb_id'])) == 10, (
+        'There should be 10 combination groups: biases, V and R dome flats, the sky flat, two '
+        'dark exposure times, two science frames, and the pointing and focus frames'
+    )
+
+    excluded = list(tbl['file'][commented])
+    assert excluded == ['n4013.fits', 'n4014.fits'], (
+        'Pointing and focus frames should be commented out by default'
+    )
+    assert 'excluded by default' in tbl['note'][tbl['file'] == 'n4013.fits'][0], (
+        'The note should explain why the pointing frame is commented out'
+    )
+    assert 'n4013.fits' not in list(used['file']), (
+        'Pointing frames should be excluded from the returned table'
+    )
+
+    # Neither applies when writing a single table
+    _, single = metadata.build_metadata(rawdir=rawdir, filename=tmp_path / 'all.ecsv')
+    assert 'comb_id' not in single.colnames, 'A single table should not have combination groups'
+    assert 'n4013.fits' in list(single['file']), (
+        'Pointing frames should not be excluded from a single table'
+    )
+
+
+def test_comb_ids_append(tmp_path):
+    rawdir = tmp_path / 'raw'
+    rawdir.mkdir()
+    base = tmp_path / 'n4.ecsv'
+    write_andor(rawdir / 'n4001.fits', OBSTYPE='DARK', OBJECT='bias', XPOSURE=0.2)
+    write_andor(rawdir / 'n4002.fits', OBSTYPE='DARK', OBJECT='bias', XPOSURE=0.2)
+    write_andor(rawdir / 'n4003.fits', OBJECT='Dome flat V', FILTER='V', XPOSURE=3.0)
+    write_andor(rawdir / 'n4004.fits', OBJECT='Dome flat V', FILTER='V', XPOSURE=3.0)
+    write_andor(rawdir / 'n4005.fits', OBJECT='Pointing 18')
+    files, _ = metadata.build_metadata(rawdir=rawdir, filename=base, split=True)
+
+    # User edits: split the V flats into two groups, and restore the pointing frame
+    tbl, commented = metadata.read_metadata(files[0], include_commented=True, expand=False)
+    tbl['comb_id'][tbl['file'] == 'n4004.fits'] = 99
+    commented[tbl['file'] == 'n4005.fits'] = False
+    metadata.write_metadata(tbl, files[0], commented=commented)
+
+    # New frames
+    write_andor(rawdir / 'n4006.fits', OBSTYPE='DARK', OBJECT='bias', XPOSURE=0.2)
+    write_andor(rawdir / 'n4007.fits', OBJECT='Dome flat V', FILTER='V', XPOSURE=3.0)
+    write_andor(rawdir / 'n4008.fits', OBJECT='Dome flat R', FILTER='R', XPOSURE=3.0)
+    write_andor(rawdir / 'n4009.fits', OBJECT='Focus 18')
+    metadata.build_metadata(rawdir=rawdir, filename=base, split=True, append=True)
+
+    tbl, commented = metadata.read_metadata(files[0], include_commented=True)
+    ids = dict(zip(tbl['file'], tbl['comb_id']))
+    flags = dict(zip(tbl['file'], commented))
+    assert ids['n4006.fits'] == ids['n4001.fits'], 'A new bias should join the bias group'
+    assert ids['n4004.fits'] == 99, 'The edited combination group should be preserved'
+    assert ids['n4007.fits'] not in [ids['n4003.fits'], 99], (
+        'A new flat should not join a default group that the user split'
+    )
+    assert ids['n4008.fits'] not in [ids[f] for f in ['n4001.fits', 'n4003.fits', 'n4007.fits']], (
+        'A flat with a new filter should get a new group'
+    )
+    assert not np.ma.is_masked(tbl['comb_id']), 'Every frame should have a group'
+    assert not flags['n4005.fits'], 'The restored pointing frame should stay restored'
+    assert flags['n4009.fits'], 'A new focus frame should be commented out by default'
