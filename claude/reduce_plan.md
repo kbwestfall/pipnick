@@ -245,3 +245,11 @@ Use synthetic 4x4-binned Andor frames (512×522) written with
     issued, and four stale outputs were reported.
   - Reducing an Andor setup into the same directory raised the one-setup error
     and wrote nothing.
+- Follow-up: science names include the filter,
+  `<object>_<filter>_C<comb_id:03d>_<UT date>.fits` (e.g.
+  `M11_V_C002_2026-08-19.fits`), using `_filter_name`.
+- Follow-up: the table is the authority for the object, filter, exposure time
+  and coordinates (`_table_values`, `_apply_table_values`). These are written
+  to the output headers, with differing raw values kept in `ORIGOBJ`,
+  `ORIGFILT`, `ORIGEXP`, `ORIGRA` and `ORIGDEC`. Their hash (`PNTABH`) is part
+  of the reprocessing check.

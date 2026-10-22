@@ -8,7 +8,7 @@ from astropy.io import fits
 from astropy.nddata import CCDData
 from astropy.table import Table
 
-from pipnick import metadata
+from pipnick import cameras, metadata
 from pipnick.pipelines import reduction
 from pipnick.pipelines.reduction import check_comb_groups, check_single_setup, reduce_all
 from pipnick.pkg.exceptions import PipnickDataModelError
@@ -146,7 +146,8 @@ def test_names():
 
     tbl = Table(
         {
-            'object': ['M11 V', 'focus', 'M11 V', 'M 11'], 'comb_id': [7, 7, 7, 7],
+            'object': ['M11 V', 'focus', 'M11 V', 'M 11'], 'filter': ["i'"] * 4,
+            'comb_id': [7, 7, 7, 7],
             'date': ['2026-08-21T00:10:00.000', '2026-08-20T23:50:00.000',
                      '2026-08-21T00:20:00.000', '2026-08-20T23:40:00.000'],
             'mjd': [3., 1., 4., 0.]
@@ -154,11 +155,12 @@ def test_names():
     )
     indx = reduction._group_indices(tbl)[7]
     assert list(indx) == [3, 1, 0, 2], 'Frames in a group should be ordered by MJD'
-    assert reduction._science_name(tbl, indx, 7) == 'M11_V_C007_2026-08-20.fits', (
-        'Science names should use the most common object and the UT date of the first frame'
+    assert reduction._science_name(tbl, indx, 7) == 'M11_V_ip_C007_2026-08-20.fits', (
+        'Science names should use the most common object, the filter, and the UT date of the '
+        'first frame'
     )
     tbl['object'] = ['b', 'a', 'b', 'a']
-    assert reduction._science_name(tbl, indx, 7) == 'a_C007_2026-08-20.fits', (
+    assert reduction._science_name(tbl, indx, 7) == 'a_ip_C007_2026-08-20.fits', (
         'Ties in the most common object should go to the earliest frame'
     )
 
@@ -205,8 +207,17 @@ def set_comb_id(table, files, comb_id):
     """
     Set the combination group of a set of frames in a per-setup file.
     """
+    set_column(table, files, 'comb_id', comb_id)
+
+
+def set_column(table, files, column, value):
+    """
+    Set a column value for a set of frames in a per-setup file, as a user
+    would by editing the file.
+    """
     tbl, commented = metadata.read_metadata(table, include_commented=True, expand=False)
-    tbl['comb_id'][np.isin(tbl['file'], files)] = comb_id
+    # Rebuild the column, so that longer strings are not truncated
+    tbl[column] = [value if f in files else v for f, v in zip(tbl['file'], tbl[column])]
     metadata.write_metadata(tbl, table, commented=commented)
 
 
@@ -243,7 +254,7 @@ def test_reduce(night, tmp_path):
     rdxdir = tmp_path / 'rdx'
     science = reduce_all(night, rdxdir=rdxdir)
 
-    sci_name = f'M11_V_C{comb_id(night, "n5011.fits"):03d}_2026-08-20.fits'
+    sci_name = f'M11_V_V_C{comb_id(night, "n5011.fits"):03d}_2026-08-20.fits'
     expected = [
         'Bias.fits', 'Dark_120s.fits', 'DomeFlat_R.fits', 'DomeFlat_V.fits', 'SkyFlat_V.fits',
         sci_name
@@ -306,13 +317,13 @@ def test_reduce_new_science(night, tmp_path, caplog):
     metadata.build_metadata(rawdir=rawdir, filename=tmp_path / 'n5.ecsv', split=True, append=True)
     before = mtimes(rdxdir)
     science = reduce_all(night, rdxdir=rdxdir)
-    new_name = f'M11_V_C{comb_id(night, "n5013.fits"):03d}_2026-08-20.fits'
+    new_name = f'M11_V_V_C{comb_id(night, "n5013.fits"):03d}_2026-08-20.fits'
     assert new_name in [f.name for f in science], 'The new frame should be reduced'
     after = mtimes(rdxdir)
     assert all(after[f] == before[f] for f in before), 'Existing outputs should not change'
 
     # Adding it to the existing science group reprocesses only that group
-    sci_name = f'M11_V_C{comb_id(night, "n5011.fits"):03d}_2026-08-20.fits'
+    sci_name = f'M11_V_V_C{comb_id(night, "n5011.fits"):03d}_2026-08-20.fits'
     set_comb_id(night, ['n5013.fits'], comb_id(night, 'n5011.fits'))
     caplog.clear()
     reduce_all(night, rdxdir=rdxdir)
@@ -387,4 +398,73 @@ def test_bias_stats(caplog):
     assert np.isclose(measured, readnoise, rtol=0.05), (
         'The read noise should be the standard deviation of the pair differences divided by '
         'sqrt(2)'
+    )
+
+
+def test_apply_table_values():
+    camera = cameras.get_camera('NickelC2')
+    ccd = CCDData(
+        np.zeros((4, 4)), unit='electron',
+        meta=fits.Header({'OBJECT': 'M11 V', 'FILTNAM': 'V', 'EXPTIME': 60, 'RA': '18:51:05.0'})
+    )
+    values = {'object': 'M11', 'filter': 'R', 'exptime': 60., 'ra': '18:51:05.0', 'dec': None}
+    reduction._apply_table_values(ccd, values, camera)
+
+    assert ccd.meta['OBJECT'] == 'M11' and ccd.meta['ORIGOBJ'] == 'M11 V', (
+        'A corrected object should be written, keeping the raw value'
+    )
+    assert ccd.meta['FILTNAM'] == 'R' and ccd.meta['FILTER'] == 'R', (
+        'The filter should be written to the camera keyword and the standard keyword'
+    )
+    assert ccd.meta['ORIGFILT'] == 'V', 'The raw filter should be kept'
+    assert 'ORIGEXP' not in ccd.meta and 'ORIGRA' not in ccd.meta, (
+        'Raw values that agree with the table should not be duplicated'
+    )
+    assert 'DEC' not in ccd.meta, 'Unknown table values should not be written'
+
+
+def test_reduce_table_edits(night, tmp_path, caplog):
+    rdxdir = tmp_path / 'rdx'
+    reduce_all(night, rdxdir=rdxdir)
+    cid = comb_id(night, 'n5011.fits')
+    old_name = f'M11_V_V_C{cid:03d}_2026-08-20.fits'
+    hdr = fits.getheader(rdxdir / old_name)
+    assert hdr['OBJECT'] == 'M11 V' and 'ORIGOBJ' not in hdr, (
+        'Unedited table values should match the raw header'
+    )
+    assert hdr['XPOSURE'] == 30. and hdr['EXPTIME'] == 30., (
+        'The exposure time should be written to the camera and standard keywords'
+    )
+
+    # Correct the object name in the table
+    set_column(night, ['n5011.fits', 'n5012.fits'], 'object', 'M11')
+    before = mtimes(rdxdir)
+    caplog.clear()
+    science = reduce_all(night, rdxdir=rdxdir)
+    new_name = f'M11_V_C{cid:03d}_2026-08-20.fits'
+    assert [f.name for f in science] == [new_name], 'The corrected object should set the name'
+    hdr = fits.getheader(rdxdir / new_name)
+    assert hdr['OBJECT'] == 'M11' and hdr['ORIGOBJ'] == 'M11 V', (
+        'The corrected object should be in the header, with the raw value kept'
+    )
+    after = mtimes(rdxdir)
+    assert all(after[f] == before[f] for f in before if f != old_name), (
+        'Editing the science object should not reprocess the calibrations'
+    )
+    assert old_name in caplog.text, 'The output with the old name should be reported as stale'
+
+    # Correct the coordinates of one frame; the name does not change
+    set_column(night, ['n5011.fits'], 'ra', '18:51:06.0')
+    caplog.clear()
+    reduce_all(night, rdxdir=rdxdir)
+    assert 'metadata table values changed' in caplog.text, (
+        'An edited table value should trigger reprocessing'
+    )
+    hdr = fits.getheader(rdxdir / new_name)
+    assert hdr['RA'] == '18:51:06.0' and hdr['ORIGRA'] == '18:51:05.0', (
+        'The corrected coordinates should be in the header, with the raw value kept'
+    )
+    final = mtimes(rdxdir)
+    assert [f for f in final if final[f] != after.get(f)] == [new_name], (
+        'Only the science output with the edited frame should be reprocessed'
     )

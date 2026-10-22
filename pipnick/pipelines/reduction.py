@@ -50,20 +50,29 @@ def reduce_all(table, rdxdir=None, overwrite=False):
           The darks are not yet applied to the science frames.
         - ``SkyFlat_<filter>.fits`` and ``DomeFlat_<filter>.fits``: the
           combined, bias-subtracted flats for each filter.
-        - ``<object>_C<comb_id>_<date>.fits``: the processed science frames,
-          e.g., ``M11_C002_2026-08-19.fits``, where ``<object>`` is the most
-          common object name in the group, ``<comb_id>`` is the zero-padded
-          group number, and ``<date>`` is the UT date of the group's first
-          frame.  Science frames are bias-subtracted, flat-fielded with the
-          sky flat for their filter (or the dome flat, if there is no sky
-          flat), and cleaned of cosmic rays.  The frames in a group are
-          combined without registration, after scaling them to the median
-          exposure time of the group.
+        - ``<object>_<filter>_C<comb_id>_<date>.fits``: the processed science
+          frames, e.g., ``M11_V_C002_2026-08-19.fits``, where ``<object>`` is
+          the most common object name in the group, ``<filter>`` is the
+          filter (with a prime written as ``p``, e.g., ``ip`` for ``i'``),
+          ``<comb_id>`` is the zero-padded group number, and ``<date>`` is the
+          UT date of the group's first frame.  Science frames are
+          bias-subtracted, flat-fielded with the sky flat for their filter
+          (or the dome flat, if there is no sky flat), and cleaned of cosmic
+          rays.  The frames in a group are combined without registration,
+          after scaling them to the median exposure time of the group.
+
+    The metadata table, not the raw headers, is the authority for the object,
+    filter, exposure time, and coordinates, so that edits to the table (e.g.,
+    a corrected object name) propagate to the outputs.  These values are
+    written to the output headers, and any raw header value that differs is
+    kept in an ``ORIG*`` keyword (e.g., ``ORIGOBJ``); see
+    :func:`_apply_table_values`.
 
     The header of each output records the setup, the combination group, and
     the raw frames and calibrations used to construct it (as HISTORY lines and
     the ``PN*`` keywords).  When the reduction is rerun, an existing output is
-    only reprocessed if its raw frames or calibrations have changed, so that
+    only reprocessed if its raw frames, calibrations, or table values (above)
+    have changed, so that
     new frames can be added to the metadata table (see ``pipnick_metadata
     --split --append``) and the reduction simply rerun.  Outputs for the same
     setup that are no longer produced, e.g., because their group was merged
@@ -150,7 +159,7 @@ def reduce_all(table, rdxdir=None, overwrite=False):
     bias = None
     for product in products:
         if product['frametype'] == 'bias':
-            bias = _reduce_calibration(product, raw, tag, overwrite)
+            bias = _reduce_calibration(product, metadata, raw, tag, overwrite, camera)
     if bias is None:
         log.warning('No bias frames available.  Attempting to continue anyway...')
 
@@ -158,10 +167,10 @@ def reduce_all(table, rdxdir=None, overwrite=False):
     flats = {}
     for product in products:
         if product['frametype'] == 'dark':
-            _reduce_calibration(product, raw, tag, overwrite, bias=bias)
+            _reduce_calibration(product, metadata, raw, tag, overwrite, camera, bias=bias)
         elif product['frametype'] in ['domeflat', 'skyflat']:
             flats[(product['frametype'], product['filter'])] = _reduce_calibration(
-                product, raw, tag, overwrite, bias=bias
+                product, metadata, raw, tag, overwrite, camera, bias=bias
             )
 
     # Reduce the science frames, which depend on the bias and flat
@@ -424,14 +433,131 @@ def _flat_name(frametype, filt):
     return f'{title}_{_filter_name(filt)}.fits'
 
 
+def _group_object(metadata, indx):
+    """
+    Return the most common object name in a combination group.
+
+    Ties go to the earliest frame.
+
+    Parameters
+    ----------
+    metadata : :class:`astropy.table.Table`
+        The metadata table.
+    indx : :class:`numpy.ndarray`
+        The rows in the group, sorted by MJD; see :func:`_group_indices`.
+
+    Returns
+    -------
+    str, None
+        The object name, as given in the table, or None if it is unknown.
+    """
+    objects = [_masked_to_none(metadata['object'][i]) for i in indx]
+    # max returns the first of the most common objects, i.e., the earliest
+    return max(objects, key=objects.count)
+
+
+def _table_values(metadata, indx, frametype):
+    """
+    Return the metadata table values to write to the header of an output.
+
+    The table is the authority for these values, so that edits to it (e.g., a
+    corrected object name) propagate to the reduced images.
+
+    Parameters
+    ----------
+    metadata : :class:`astropy.table.Table`
+        The metadata table.
+    indx : :class:`numpy.ndarray`
+        The rows in the group, sorted by MJD; see :func:`_group_indices`.
+    frametype : str
+        The frame type of the group.
+
+    Returns
+    -------
+    dict
+        The values keyed by the quantity (``'filter'`` and ``'exptime'`` for
+        all frame types, and ``'object'``, ``'ra'``, and ``'dec'`` for science
+        frames).  Unknown values are None.  The object is the most common in
+        the group (see :func:`_group_object`), the exposure time is the
+        median, and the other values are from the earliest frame.
+    """
+    exptimes = [_exptime(metadata, i) for i in indx]
+    values = {
+        'filter': _masked_to_none(metadata['filter'][indx[0]]),
+        'exptime': None if None in exptimes else float(np.median(exptimes))
+    }
+    if frametype == 'science':
+        values['object'] = _group_object(metadata, indx)
+        values['ra'] = _masked_to_none(metadata['ra'][indx[0]])
+        values['dec'] = _masked_to_none(metadata['dec'][indx[0]])
+    return values
+
+
+def _table_hash(values):
+    """
+    Return a hash of the metadata table values written to the header of an
+    output (see :func:`_table_values`), used to determine if they have changed.
+
+    The hash is the first 16 hexadecimal digits of the SHA-1 hash of the
+    sorted ``quantity=value`` pairs, separated by newlines.
+    """
+    text = '\n'.join(f'{k}={values[k]}' for k in sorted(values.keys()))
+    return hashlib.sha1(text.encode()).hexdigest()[:16]
+
+
+def _apply_table_values(ccd, values, camera):
+    """
+    Write metadata table values to the header of an output.
+
+    Each value is written to the camera keyword for its quantity found in the
+    header (e.g., ``FILTNAM`` for the filter of the original Nickel camera),
+    and to the standard keyword (``OBJECT``, ``FILTER``, ``EXPTIME``, ``RA``,
+    or ``DEC``) if that is different.  If the header value differs from the
+    table value, the header value is saved to ``ORIGOBJ``, ``ORIGFILT``,
+    ``ORIGEXP``, ``ORIGRA``, or ``ORIGDEC``.  Unknown (None) table values are
+    not written.
+
+    Parameters
+    ----------
+    ccd : :class:`astropy.nddata.CCDData`
+        The output image, with a :class:`astropy.io.fits.Header` as its
+        ``meta``.  Modified in place.
+    values : dict
+        The table values; see :func:`_table_values`.
+    camera : :class:`~pipnick.cameras.cameras.NickelCamera`
+        The camera used to obtain the data.
+    """
+    keys = {
+        'object': ('OBJECT', 'ORIGOBJ'), 'filter': ('FILTER', 'ORIGFILT'),
+        'exptime': ('EXPTIME', 'ORIGEXP'), 'ra': ('RA', 'ORIGRA'), 'dec': ('DEC', 'ORIGDEC')
+    }
+    for quantity, value in values.items():
+        if value is None:
+            continue
+        standard, orig = keys[quantity]
+        key = camera.header_keyword(ccd.meta, quantity)
+        original = None if key is None else ccd.meta[key]
+        if original is not None:
+            if isinstance(value, float):
+                changed = not np.isclose(float(original), value)
+            else:
+                changed = str(original).strip() != str(value).strip()
+            if changed:
+                ccd.meta[orig] = (original, f'{key} in the raw header')
+        for k in ([standard] if key is None or key == standard else [key, standard]):
+            ccd.meta[k] = value
+
+
 def _science_name(metadata, indx, comb_id):
     """
     Return the name of the output science image for a combination group.
 
-    The name is ``<object>_C<comb_id>_<date>.fits``, where ``<object>`` is the
-    most common object name in the group (ties go to the earliest frame),
-    ``<comb_id>`` is zero-padded to three digits, and ``<date>`` is the UT date
-    of the earliest frame.
+    The name is ``<object>_<filter>_C<comb_id>_<date>.fits``, where
+    ``<object>`` is the most common object name in the group (ties go to the
+    earliest frame), ``<filter>`` is the filter of the earliest frame (all
+    frames in a group have the same filter; see :func:`check_comb_groups` and
+    :func:`_filter_name`), ``<comb_id>`` is zero-padded to three digits, and
+    ``<date>`` is the UT date of the earliest frame.
 
     Parameters
     ----------
@@ -447,15 +573,12 @@ def _science_name(metadata, indx, comb_id):
     str
         The file name.
     """
-    objects = [
-        '' if o is None else _safe_name(o)
-        for o in [_masked_to_none(metadata['object'][i]) for i in indx]
-    ]
-    # max returns the first of the most common objects, i.e., the earliest
-    obj = max(objects, key=objects.count)
+    obj = _group_object(metadata, indx)
+    obj = '' if obj is None else _safe_name(obj)
     date = _masked_to_none(metadata['date'][indx[0]])
     date = 'nodate' if date is None else str(date).split('T')[0]
-    return f'{"unknown" if len(obj) == 0 else obj}_C{comb_id:03d}_{date}.fits'
+    filt = _filter_name(_filter(metadata, indx[0]))
+    return f'{"unknown" if len(obj) == 0 else obj}_{filt}_C{comb_id:03d}_{date}.fits'
 
 
 def _plan_products(metadata, rdxdir):
@@ -551,7 +674,7 @@ def _raw_hash(files):
     return hashlib.sha1(names.encode()).hexdigest()[:16]
 
 
-def _needs_update(ofile, tag, raw_hash, calib_hashes, overwrite):
+def _needs_update(ofile, tag, raw_hash, table_hash, calib_hashes, overwrite):
     """
     Determine if an output file must be (re)constructed.
 
@@ -564,6 +687,9 @@ def _needs_update(ofile, tag, raw_hash, calib_hashes, overwrite):
     raw_hash : str
         The hash of the raw frames used to construct the output; see
         :func:`_raw_hash`.
+    table_hash : str
+        The hash of the metadata table values written to the output header;
+        see :func:`_table_hash`.  Compared to the ``PNTABH`` header keyword.
     calib_hashes : dict
         The hash of each calibration used to construct the output, keyed by
         the calibration type (e.g., ``'bias'``), or ``'none'`` if the
@@ -598,6 +724,8 @@ def _needs_update(ofile, tag, raw_hash, calib_hashes, overwrite):
         return True, 'overwrite is set'
     if hdr.get('PNRAWHSH') != raw_hash:
         return True, 'the raw frames changed'
+    if hdr.get('PNTABH') != table_hash:
+        return True, 'the metadata table values changed'
     for name, value in calib_hashes.items():
         if hdr.get(f'PN{name.upper()}H') != value:
             return True, f'the {name} changed'
@@ -1024,7 +1152,7 @@ def _report_bias_stats(frames, files):
     )
 
 
-def _reduce_calibration(product, raw, tag, overwrite, bias=None):
+def _reduce_calibration(product, metadata, raw, tag, overwrite, camera, bias=None):
     """
     Construct a combined calibration frame, unless it is up to date.
 
@@ -1035,12 +1163,16 @@ def _reduce_calibration(product, raw, tag, overwrite, bias=None):
     ----------
     product : dict
         The combination group; see :func:`_plan_products`.
+    metadata : :class:`astropy.table.Table`
+        The metadata table.
     raw : list
         The path to the raw file for each row in the metadata table.
     tag : str
         The setup tag; see :func:`~pipnick.metadata.setup_tag`.
     overwrite : bool
         Reconstruct the calibration even if it is up to date.
+    camera : :class:`~pipnick.cameras.cameras.NickelCamera`
+        The camera used to obtain the data.
     bias : dict, optional
         The bias, as returned by this function, used for darks and flats.
 
@@ -1057,8 +1189,10 @@ def _reduce_calibration(product, raw, tag, overwrite, bias=None):
     raw_hash = _raw_hash(files)
     calib = {'file': product['file'], 'hash': raw_hash, 'ccd': None}
     calibs = {} if frametype == 'bias' else {'bias': bias}
+    values = _table_values(metadata, product['indx'], frametype)
+    table_hash = _table_hash(values)
     update, reason = _needs_update(
-        product['file'], tag, raw_hash, _calib_hashes(calibs), overwrite
+        product['file'], tag, raw_hash, table_hash, _calib_hashes(calibs), overwrite
     )
     if not update:
         log.info(f'{product["file"].name} is up to date.')
@@ -1080,6 +1214,8 @@ def _reduce_calibration(product, raw, tag, overwrite, bias=None):
     else:
         ccd.meta['OBJECT'] = 'SkyFlat' if frametype == 'skyflat' else 'DomeFlat'
     _add_provenance(ccd, tag, product['comb_id'], files, raw_hash, calibs)
+    _apply_table_values(ccd, values, camera)
+    ccd.meta['PNTABH'] = (table_hash, 'Hash of the metadata table values')
     ccd.write(product['file'], overwrite=True)
     log.info(f'Saved {product["file"]}')
     calib['ccd'] = ccd
@@ -1093,8 +1229,9 @@ def _reduce_science(product, metadata, raw, tag, overwrite, camera, bias=None, f
 
     The frames are bias-subtracted, flat-fielded, and cleaned of cosmic rays.
     If there is more than one frame, they are scaled to the median exposure
-    time of the group and combined, without registration, and the exposure
-    time in the header is set to the median.
+    time of the group and combined, without registration.  The object,
+    filter, exposure time (the median), and coordinates in the header are set
+    by the metadata table; see :func:`_apply_table_values`.
 
     Parameters
     ----------
@@ -1119,8 +1256,10 @@ def _reduce_science(product, metadata, raw, tag, overwrite, camera, bias=None, f
     files = [raw[i] for i in indx]
     raw_hash = _raw_hash(files)
     calibs = {'bias': bias, 'flat': flat}
+    values = _table_values(metadata, indx, 'science')
+    table_hash = _table_hash(values)
     update, reason = _needs_update(
-        product['file'], tag, raw_hash, _calib_hashes(calibs), overwrite
+        product['file'], tag, raw_hash, table_hash, _calib_hashes(calibs), overwrite
     )
     if not update:
         log.info(f'{product["file"].name} is up to date.')
@@ -1131,23 +1270,17 @@ def _reduce_science(product, metadata, raw, tag, overwrite, camera, bias=None, f
     frames = process_frames(
         files, bias=_calibration_data(bias), flat=_calibration_data(flat), flag_cosmics=True
     )
-    exptime = None
     scale = None
     if len(frames) > 1:
-        exptimes = [_exptime(metadata, i) for i in indx]
-        if None in exptimes:
+        if values['exptime'] is None:
             log.warning(
                 'Some frames have no exposure time; the frames are combined without scaling.'
             )
         else:
-            exptime = float(np.median(exptimes))
-            scale = exptime / np.array(exptimes)
+            scale = values['exptime'] / np.array([_exptime(metadata, i) for i in indx])
     ccd = combine_frames(frames, scale=scale)
     _add_provenance(ccd, tag, product['comb_id'], files, raw_hash, calibs)
-    if exptime is not None:
-        key = camera.header_keyword(ccd.meta, 'exptime')
-        if key is not None and key != 'EXPTIME':
-            ccd.meta[key] = exptime
-        ccd.meta['EXPTIME'] = (exptime, 'Median exposure time of the combined frames')
+    _apply_table_values(ccd, values, camera)
+    ccd.meta['PNTABH'] = (table_hash, 'Hash of the metadata table values')
     ccd.write(product['file'], overwrite=True)
     log.info(f'Saved {product["file"]}')

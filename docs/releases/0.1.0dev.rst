@@ -36,7 +36,7 @@ Breaking Changes
 - ``pipnick_reduce`` requires a per-setup metadata file (``-t``), written by
   ``pipnick_metadata --split``; the ``--rawdir`` and ``--append`` options are
   removed.  Reduced science images are named
-  ``<object>_C<comb_id>_<UT date>.fits`` instead of ``<raw file>_rdx.fits``.
+  ``<object>_<filter>_C<comb_id>_<UT date>.fits`` instead of ``<raw file>_rdx.fits``.
   ``reduce_all`` takes the metadata file as its first argument and returns the
   paths to the reduced science images.
 
@@ -66,17 +66,23 @@ Functionality/Performance Improvements and Additions
   column, after checking that the groups give one bias, one dark per exposure
   time, and one flat of each type per filter.  Combined darks
   (``Dark_<exptime>s.fits``) are constructed, but not yet applied.  In the
-  names of the combined flats, a primed filter is written with a ``p``, e.g.,
-  ``SkyFlat_ip.fits`` for ``i'``.  Science
-  frames use the sky flat for their filter, or the dome flat if there is no
-  sky flat.  Science frames in the same group are scaled to their median
-  exposure time and combined without registration.
+  names of the combined flats and science images, a primed filter is written
+  with a ``p``, e.g., ``SkyFlat_ip.fits`` for ``i'``.  Science frames use the
+  sky flat for their filter, or the dome flat if there is no sky flat.
+  Science frames in the same group are scaled to their median exposure time
+  and combined without registration.
 
 - The header of each reduced image lists the raw frames and calibrations used
   to construct it, and records its setup and combination group.  Rerunning
   ``pipnick_reduce`` only reprocesses images whose raw frames or calibrations
   have changed, and reports images that are no longer produced.  A reduction
   directory can only hold the images from one setup.
+
+- The metadata table, rather than the raw headers, sets the object, filter,
+  exposure time, and coordinates of the reduced images, so that edits to the
+  table propagate to the reduced images and their headers.  Raw header values
+  that differ are kept in ``ORIG*`` keywords (e.g., ``ORIGOBJ``), and edited
+  table values trigger reprocessing.
 
 - ``pipnick_reduce`` logs the number of saturated pixels in each frame, the
   mean overscan level, the size of the trimmed image, the number of pixels
