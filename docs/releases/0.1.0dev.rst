@@ -78,6 +78,13 @@ Functionality/Performance Improvements and Additions
   have changed, and reports images that are no longer produced.  A reduction
   directory can only hold the images from one setup.
 
+- ``pipnick_reduce`` logs the number of saturated pixels in each frame, the
+  mean overscan level, the size of the trimmed image, the number of pixels
+  affected by cosmic rays, the mean level of each bias frame, and the read
+  noise measured from pairs of bias frames.
+
+- The Nickel Andor saturation level is now 65535 ADU.
+
 - ``pipnick_metadata`` identifies the instrument setup (camera, binning, read
   mode, and readout window) of each frame, checks the frame quality, and
   comments out frames that fail the checks.  ``--classify stats`` adds checks

@@ -20,7 +20,7 @@ import numpy as np
 from astropy.coordinates import SkyCoord
 from astropy.io import fits
 from astropy.nddata import CCDData
-from astropy.stats import sigma_clip
+from astropy.stats import sigma_clip, sigma_clipped_stats
 from astropy.wcs.wcs import FITSFixedWarning
 from astropy import units
 import ccdproc
@@ -797,7 +797,16 @@ def init_ccddata(frame, bpm=None, saturation=None, gain=None, readnoise=None):
     if _sat is not None:
         if ccd.mask is None:
             ccd.mask = np.zeros(ccd.data.shape, dtype=bool)
-        ccd.mask[ccd.data >= _sat] = True
+        saturated = ccd.data >= _sat
+        nsat = int(np.sum(saturated))
+        if nsat > 0:
+            # Bad pixels can read as saturated, so these are reported separately
+            nbad = int(np.sum(saturated & ccd.mask))
+            log.info(
+                f'{_frame.name} has {nsat} saturated pixels (>= {_sat} ADU), {nbad} of which '
+                'are known bad pixels.'
+            )
+        ccd.mask[saturated] = True
 
     # Get and save the RN (in electrons) and gain (in electrons/ADU)
     ccd.meta['PROCGAIN'] = readout.gain if gain is None and readout is not None else gain
@@ -819,7 +828,9 @@ def process_frame(raw_frame, bias=None, flat=None, flag_cosmics=True):
     Perform basic image processing
 
     This includes overscan subtraction, trimming, bias subtraction, and
-    field-flattening.    
+    field-flattening.  The mean overscan level (in ADU), the size of the
+    trimmed image, and the number of pixels affected by cosmic rays are
+    logged, and the overscan level is saved to the ``PNOSCAN`` header keyword.
 
     Parameters
     ----------
@@ -846,10 +857,14 @@ def process_frame(raw_frame, bias=None, flat=None, flag_cosmics=True):
         if biassec is None:
             log.warning('Frame has no overscan region.')
         else:
-            log.info('Subtracting overscan.')
+            level = _masked_mean(ccdproc.trim_image(ccd, fits_section=biassec))
+            if ccd.meta['PROCGAIN'] is not None:
+                level /= ccd.meta['PROCGAIN']
+            ccd.meta['PNOSCAN'] = (level, 'Mean overscan level (ADU)')
+            log.info(f'Subtracting overscan; mean level is {level:.1f} ADU.')
             ccd = ccdproc.subtract_overscan(ccd, fits_section=biassec, overscan_axis=1)
-        log.info('Trimming image.')
         ccd = ccdproc.trim_image(ccd, fits_section=datasec)
+        log.info(f'Trimmed image to {ccd.shape[1]} x {ccd.shape[0]} (columns x rows).')
     if bias is not None:
         log.info('Subtracting super bias')
         ccd = ccdproc.subtract_bias(ccd, bias)
@@ -857,11 +872,21 @@ def process_frame(raw_frame, bias=None, flat=None, flag_cosmics=True):
         log.info('Applying flat-field correction')
         ccd = ccdproc.flat_correct(ccd, flat)
     if flag_cosmics:
-        log.info(f'Removing cosmic rays from {raw_frame}')
+        nmasked = 0 if ccd.mask is None else int(np.sum(ccd.mask))
         ccd = ccdproc.cosmicray_lacosmic(
-            ccd, gain_apply=False, gain=1.0, readnoise=ccd.meta['PROCRN'], verbose=True
+            ccd, gain_apply=False, gain=1.0, readnoise=ccd.meta['PROCRN'], verbose=False
         )
+        ncosmic = 0 if ccd.mask is None else int(np.sum(ccd.mask)) - nmasked
+        log.info(f'Removed cosmic rays from {Path(raw_frame).name}; {ncosmic} pixels affected.')
     return ccd
+
+
+def _masked_mean(ccd):
+    """
+    Return the mean of the unmasked pixels in an image.
+    """
+    data = np.ma.MaskedArray(ccd.data, mask=ccd.mask)
+    return float(np.ma.mean(data))
 
 
 def process_frames(raw_frames, bias=None, flat=None, flag_cosmics=True):
@@ -948,6 +973,57 @@ def combine_frames(frames, scale=None):
     return combined
 
 
+def _report_bias_stats(frames, files):
+    r"""
+    Report the bias level of each bias frame and the read noise measured from
+    the set of frames.
+
+    The bias level is the mean of the unmasked pixels in the data section
+    before overscan subtraction, in ADU, for comparison with the overscan
+    level.  The read noise is measured from the difference of each consecutive
+    pair of frames as :math:`\sigma_{\rm diff}/\sqrt{2}`, where
+    :math:`\sigma_{\rm diff}` is the standard deviation of the difference after
+    rejecting 5-sigma outliers (e.g., cosmic rays).  The frames include the
+    nominal gain, so the read noise is in electrons (unless the gain is
+    unknown).
+
+    Parameters
+    ----------
+    frames : list
+        The processed bias frames; see :func:`process_frames`.
+    files : list
+        The raw files.
+    """
+    for f, frame in zip(files, frames):
+        gain = frame.meta['PROCGAIN']
+        residual = _masked_mean(frame) / (1. if gain is None else gain)
+        oscan = frame.meta.get('PNOSCAN', 0.)
+        log.info(
+            f'{Path(f).name}: mean bias level is {oscan + residual:.1f} ADU ({residual:.2f} ADU '
+            'after overscan subtraction).'
+        )
+    if len(frames) < 2:
+        log.info('At least two bias frames are needed to measure the read noise.')
+        return
+
+    readnoise = []
+    for i in range(len(frames) - 1):
+        mask = np.zeros(frames[i].shape, dtype=bool)
+        for frame in frames[i:i+2]:
+            if frame.mask is not None:
+                mask |= frame.mask
+        diff = np.ma.MaskedArray(frames[i+1].data - frames[i].data, mask=mask)
+        _, _, std = sigma_clipped_stats(diff, sigma=5.)
+        readnoise.append(std / np.sqrt(2.))
+    unit = frames[0].unit.to_string()
+    nominal = frames[0].meta['PROCRN']
+    log.info(
+        f'Read noise from {len(readnoise)} pairs of bias frames: median {np.median(readnoise):.2f}'
+        f' {unit} (range {np.min(readnoise):.2f}-{np.max(readnoise):.2f}); nominal value is '
+        f'{nominal} electron.'
+    )
+
+
 def _reduce_calibration(product, raw, tag, overwrite, bias=None):
     """
     Construct a combined calibration frame, unless it is up to date.
@@ -990,6 +1066,8 @@ def _reduce_calibration(product, raw, tag, overwrite, bias=None):
 
     log.info(f'Reprocessing {product["file"].name} ({reason}) from {len(files)} frames.')
     frames = process_frames(files, bias=_calibration_data(calibs.get('bias')), flag_cosmics=False)
+    if frametype == 'bias':
+        _report_bias_stats(frames, files)
     scale = None
     if frametype in ['domeflat', 'skyflat']:
         mean = np.array([float(f.mean().data) for f in frames])

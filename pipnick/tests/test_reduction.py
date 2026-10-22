@@ -5,6 +5,7 @@ Tests for the reduction pipeline, using synthetic FITS files.
 import numpy as np
 import pytest
 from astropy.io import fits
+from astropy.nddata import CCDData
 from astropy.table import Table
 
 from pipnick import metadata
@@ -347,3 +348,43 @@ def test_reduce_other_setup(night, tmp_path):
     fits.PrimaryHDU(data=np.zeros((4, 4)), header=hdr).writeto(rdxdir / 'Bias.fits')
     with pytest.raises(PipnickDataModelError, match='different setup'):
         reduce_all(night, rdxdir=rdxdir)
+
+
+def test_frame_stats(tmp_path, caplog):
+    path = tmp_path / 'n6001.fits'
+    write_frame(path, 5000, 'M11 V', 30., 'V', '?', '04:00:00')
+    with fits.open(path, mode='update') as hdu:
+        hdu[0].data[100,100:103] = 65535
+        hdu[0].data[200,200] = 30000
+    ccd = reduction.process_frame(path, flag_cosmics=True)
+
+    assert 'has 3 saturated pixels' in caplog.text, 'Saturated pixels should be counted'
+    assert 'mean level is 300.0 ADU' in caplog.text, 'The overscan level should be reported'
+    assert ccd.meta['PNOSCAN'] == 300., 'The overscan level should be saved to the header'
+    assert f'Trimmed image to {ccd.shape[1]} x {ccd.shape[0]}' in caplog.text, (
+        'The size of the trimmed image should be reported'
+    )
+    assert 'Removed cosmic rays from n6001.fits; 1 pixels affected' in caplog.text, (
+        'The number of pixels affected by cosmic rays should be reported'
+    )
+
+
+def test_bias_stats(caplog):
+    rng = np.random.default_rng(1)
+    gain = 2.
+    readnoise = 5.
+    frames = [
+        CCDData(
+            rng.normal(loc=10., scale=readnoise, size=(200, 200)), unit='electron',
+            meta={'PROCGAIN': gain, 'PROCRN': readnoise, 'PNOSCAN': 300.}
+        ) for _ in range(3)
+    ]
+    reduction._report_bias_stats(frames, ['b1.fits', 'b2.fits', 'b3.fits'])
+    assert 'b1.fits: mean bias level is 305.0 ADU' in caplog.text, (
+        'The bias level should include the overscan level and be in ADU'
+    )
+    measured = float(caplog.text.split('pairs of bias frames: median ')[1].split()[0])
+    assert np.isclose(measured, readnoise, rtol=0.05), (
+        'The read noise should be the standard deviation of the pair differences divided by '
+        'sqrt(2)'
+    )
