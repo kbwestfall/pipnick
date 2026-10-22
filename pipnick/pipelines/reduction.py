@@ -35,7 +35,9 @@ def reduce_all(rawdir=None, table=None, rdxdir=None, overwrite=False, append=Fal
         Path to the parent directory of the raw directory containing the raw
         FITS files to be reduced.  If None, ``table`` *must* be provided.
     table : str, :class:`pathlib.Path`, optional
-        A file with the tabulated data to reduce.  If None, this file is
+        A file with the tabulated data to reduce.  This can be a table with all
+        setups (with only one setup left uncommented) or a per-setup file
+        written by ``pipnick_metadata --split``.  If None, this file is
         automatically generated based on the data found and reduced in
         ``rawdir``; see :func:`~pipnick.metadata.build_metadata`.
     rdxdir : str, :class:`pathlib.Path`, optional
@@ -70,23 +72,7 @@ def reduce_all(rawdir=None, table=None, rdxdir=None, overwrite=False, append=Fal
 
     # TODO: Match the calibrations to the science frames by setup, so that
     # data from more than one setup can be reduced together.
-    if 'setup' not in metadata.colnames:
-        raise PipnickDataModelError(
-            f'{metafile} has no setup column; it was likely built by an '
-            'older version of pipnick.  Rebuild it using '
-            'pipnick_metadata.'
-        )
-    setups, counts = np.unique(metadata['setup'], return_counts=True)
-    if len(setups) > 1:
-        definitions = metadata.meta.get('setups', {})
-        summary = '\n'.join(
-            f'    {s} ({n} frames): {definitions.get(s)}' for s, n in zip(setups, counts)
-        )
-        raise PipnickDataModelError(
-            f'{metafile} includes frames from more than one setup:\n'
-            f'{summary}\nData from only one setup can be reduced at a '
-            'time.  Comment out the rows for the other setups.'
-        )
+    check_single_setup(metadata, metafile)
 
     # Get the output directory
     if 'rdxdir' in metadata.meta:
@@ -154,6 +140,42 @@ def reduce_all(rawdir=None, table=None, rdxdir=None, overwrite=False, append=Fal
 
     # Return the metadata table
     return metadata
+
+
+def check_single_setup(metadata, metafile):
+    """
+    Check that a metadata table includes frames from only one setup.
+
+    Parameters
+    ----------
+    metadata : :class:`astropy.table.Table`
+        The metadata table, excluding commented-out rows; see
+        :func:`~pipnick.metadata.read_metadata`.
+    metafile : str, :class:`pathlib.Path`
+        The file the table was read from, used in error messages.
+
+    Raises
+    ------
+    :exc:`~pipnick.pkg.exceptions.PipnickDataModelError`
+        Raised if the table has no ``setup`` column, or includes frames from
+        more than one setup.
+    """
+    if 'setup' not in metadata.colnames:
+        raise PipnickDataModelError(
+            f'{metafile} has no setup column; it was likely built by an older version of '
+            'pipnick.  Rebuild it using pipnick_metadata.'
+        )
+    setups, counts = np.unique(metadata['setup'], return_counts=True)
+    if len(setups) > 1:
+        definitions = metadata.meta.get('setups', {})
+        summary = '\n'.join(
+            f'    {s} ({n} frames): {definitions.get(s)}' for s, n in zip(setups, counts)
+        )
+        raise PipnickDataModelError(
+            f'{metafile} includes frames from more than one setup:\n{summary}\nData from only '
+            'one setup can be reduced at a time.  Comment out the rows for the other setups, '
+            'or use pipnick_metadata --split to write one file per setup.'
+        )
 
 
 def init_ccddata(frame, bpm=None, saturation=None, gain=None, readnoise=None):
