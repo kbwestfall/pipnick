@@ -42,15 +42,17 @@ def reduce_all(rawdir=None, table=None, rdxdir=None, overwrite=False, append=Fal
         ``/User/janedoe/Nickel/raw``, ``rdxdir`` will be set to
         ``/User/janedoe/Nickel/``.
     overwrite : bool, optional
-        Overwrite any existing files.
+        Overwrite any existing reduction products.  An existing metadata
+        ``table`` is never rebuilt, to preserve any user edits; use
+        ``pipnick_metadata --overwrite`` to rebuild it.
     append : bool, optional
-        If the data-reduction table already exists, add any new science frames
-        found in the raw data directory to the provided table.  In effect, this
-        simply overwrites the existing ``table`` with a new listing of files in
-        ``rawdir``.  The difference with ``overwrite`` is that the *products* of
-        the reduction are *not* overwritten.  This means that new raw
-        calibration frames are ignored.  To incorporate new calibration files in
-        the reduction, you should set ``overwrite=True``.
+        If the data-reduction table already exists, add any new frames found in
+        the raw data directory to the provided table, preserving the existing
+        rows (including user edits and commented-out rows); see
+        :func:`~pipnick.metadata.build_metadata`.  The existing *products* of
+        the reduction are *not* overwritten, so new raw calibration frames do
+        not change existing combined calibrations.  To incorporate new
+        calibration files in the reduction, you should set ``overwrite=True``.
 
     Returns
     -------
@@ -58,9 +60,26 @@ def reduce_all(rawdir=None, table=None, rdxdir=None, overwrite=False, append=Fal
         Paths to the reduced images written to disk.
     """
     # Organize raw files based on input directory or table
+    # NOTE: overwrite applies to the reduction products, not the metadata table;
+    # rebuilding an existing table would discard any user edits to it.
     metafile, metadata = rawmeta.build_metadata(
-        rawdir=rawdir, filename=table, overwrite=overwrite or append, rdxdir=rdxdir
+        rawdir=rawdir, filename=table, append=append, rdxdir=rdxdir
     )
+
+    # TODO: Match the calibrations to the science frames by setup, so that
+    # data from more than one setup can be reduced together.
+    if 'setup' not in metadata.colnames:
+        raise PipnickDataModelError(f'{metafile} has no setup column; it was likely built by an '
+                                    'older version of pipnick.  Rebuild it using '
+                                    'pipnick_metadata.')
+    setups, counts = np.unique(metadata['setup'], return_counts=True)
+    if len(setups) > 1:
+        definitions = metadata.meta.get('setups', {})
+        summary = '\n'.join(f'    {s} ({n} frames): {definitions.get(s)}'
+                            for s, n in zip(setups, counts))
+        raise PipnickDataModelError(f'{metafile} includes frames from more than one setup:\n'
+                                    f'{summary}\nData from only one setup can be reduced at a '
+                                    'time.  Comment out the rows for the other setups.')
 
     # Get the output directory
     if 'rdxdir' in metadata.meta:
@@ -68,8 +87,8 @@ def reduce_all(rawdir=None, table=None, rdxdir=None, overwrite=False, append=Fal
     else:
         _rdxdir = Path(metadata.meta['rawdir']).absolute().parent
         metadata.meta['rdxdir'] = str(_rdxdir)
-        # Overwrite the file to include the reduction directory
-        metadata.write(metafile, format='ascii.ecsv', overwrite=True)
+        # Update the file to include the reduction directory
+        rawmeta.update_metadata_meta(metafile, rdxdir=str(_rdxdir))
     if not _rdxdir.is_dir():
         _rdxdir.mkdir(parents=True)
 

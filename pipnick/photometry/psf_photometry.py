@@ -16,7 +16,6 @@ from photutils.psf import SourceGrouper
 
 from pipnick import log
 from pipnick.utils.fits_class import Fits_Simple
-from pipnick.utils.nickel_data import bad_columns
 from pipnick.utils.log import log_astropy_table
 from pipnick.photometry.moffat import FitMoffat2D, FitEllipticalMoffat2D, EllipticalMoffat2DModel
 from pipnick.photometry import starfind

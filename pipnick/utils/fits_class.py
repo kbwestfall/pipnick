@@ -7,8 +7,8 @@ from pathlib import Path
 from typing import Union
 
 from pipnick import log
-from pipnick.utils.nickel_data import (ccd_shape, fov_shape)
-#from pipnick.utils.nickel_masks import get_masks_from_file
+from pipnick import cameras
+from pipnick.pkg.exceptions import PipnickDataModelError
 
 class Fits_Simple:
     """
@@ -124,12 +124,53 @@ class Fits_Simple:
                 try:
                     self._mask = hdul['MASK'].data
                 except KeyError:
-                    log.debug(f'No mask in FITS file {self.path.name}; returning default mask')
-                    if all(self.shape == ccd_shape):
-                        self._mask = get_masks_from_file('mask')
-                    elif all(self.shape == fov_shape):
-                        self._mask = get_masks_from_file('fov_mask')
+                    log.debug(f'No mask in FITS file {self.path.name}; returning the camera '
+                              'bad-pixel mask')
+                    self._mask = self.camera_bpm()
         return self._mask
+
+    @property
+    def camera(self):
+        """
+        The camera used to obtain the image, identified from its header.
+
+        Returns
+        -------
+        camera : :class:`~pipnick.cameras.cameras.NickelCamera` or None
+            The camera, or None if it cannot be identified.
+        """
+        try:
+            return cameras.identify_camera(self.header)
+        except PipnickDataModelError:
+            return None
+
+    def camera_bpm(self):
+        """
+        The archival bad-pixel mask of the camera used to obtain the image.
+
+        Returns
+        -------
+        bpm : :class:`numpy.ndarray` or None
+            The bad-pixel mask, or None if the camera cannot be identified or
+            the image is not a raw frame (e.g., it has been trimmed).
+        """
+        camera = self.camera
+        if camera is None:
+            return None
+        try:
+            return camera.bpm(self.header)
+        except PipnickDataModelError:
+            return None
+
+    def _header_value(self, quantity, keyword):
+        """
+        Get a header quantity, using the camera keywords if the camera can be
+        identified, or the provided keyword otherwise.
+        """
+        camera = self.camera
+        if camera is not None:
+            return camera.header_value(self.header, quantity)
+        return self.header.get(keyword)
 
     @mask.setter
     def mask(self, new_mask):
@@ -200,10 +241,7 @@ class Fits_Simple:
         object : str or None
             The object name from the FITS header, or None if not found.
         """
-        try:
-            return self.header["OBJECT"]
-        except KeyError:
-            return None
+        return self._header_value('object', 'OBJECT')
 
     @property
     def filtnam(self):
@@ -215,10 +253,7 @@ class Fits_Simple:
         filtnam : str or None
             The filter name from the FITS header, or None if not found.
         """
-        try:
-            return self.header["FILTNAM"]
-        except KeyError:
-            return None
+        return self._header_value('filter', 'FILTNAM')
 
     @property
     def exptime(self):
@@ -230,10 +265,7 @@ class Fits_Simple:
         exptime : float or None
             The exposure time from the FITS header, or None if not found.
         """
-        try:
-            return self.header["EXPTIME"]
-        except KeyError:
-            return None
+        return self._header_value('exptime', 'EXPTIME')
 
     @property
     def airmass(self):
@@ -245,10 +277,7 @@ class Fits_Simple:
         airmass : float or None
             The airmass value from the FITS header, or None if not found.
         """
-        try:
-            return self.header["AIRMASS"]
-        except KeyError:
-            return None
+        return self._header_value('airmass', 'AIRMASS')
 
     def __str__(self) -> str:
         """

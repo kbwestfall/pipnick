@@ -21,7 +21,6 @@ from pipnick.utils.fits_class import Fits_Simple
 from pipnick.photometry.moffat import FitEllipticalMoffat2D, FitMoffat2D, make_ellipse
 #from pipnick.photometry.starfind import generate_stamps
 from pipnick.utils.fits_class import unzip_directories
-from pipnick.utils.nickel_data import plate_scale_approx
 
 
 def fit_psf_stack(input_base, num_images, fittype='ellip', ofile=None):
@@ -338,7 +337,7 @@ def get_graphable_pars(file_paths, group_name, verbose=False):
     return fwhm, ecc, phi
 
 
-def get_param_list(param_type, pars, shape, img_nums=None):
+def get_param_list(param_type, pars, shape, img_nums=None, plate_scale=None):
     """
     Generate the desired single parameter list, color range, and title
     for contour plotting based on Moffat pars.
@@ -353,6 +352,11 @@ def get_param_list(param_type, pars, shape, img_nums=None):
         Shape to output param_list.
     img_nums : :class:`numpy.ndarray`, optional
         Image number for each source.
+    plate_scale : float, optional
+        Plate scale of the images in arcsec per *binned* pixel, used to convert
+        the FWHM to arcsec.  This is the camera plate scale (see
+        :attr:`~pipnick.cameras.cameras.NickelCamera.plate_scale`) times the
+        binning.  If None, the FWHM is in pixels.
 
     Returns
     -------
@@ -368,12 +372,16 @@ def get_param_list(param_type, pars, shape, img_nums=None):
     :exc:`ValueError`
         If the input `param_type` is not 'fwhm', 'phi', 'ecc', or 'fwhm residuals'.
     """
+    # The FWHM color ranges were optimized for the 2024-06-26 data from the
+    # original Nickel camera, which have 0.37 arcsec pixels
+    ref_scale = 0.37
+    scale, units = (1.0, 'pixels') if plate_scale is None else (plate_scale, 'arcsec')
     if param_type == 'fwhm':
         # Calculate FWHM (average between semi-major and minor axes)
         param_list = (FitMoffat2D.to_fwhm(pars[:, 3], pars[:, 6]) +
-                      FitMoffat2D.to_fwhm(pars[:, 4], pars[:, 6])) / 2 * plate_scale_approx
-        color_range = [1.5, 2.7]  # Optimized for Nickel 06-26-24 data
-        title = "FWHM (arcsec)"
+                      FitMoffat2D.to_fwhm(pars[:, 4], pars[:, 6])) / 2 * scale
+        color_range = [1.5 / ref_scale * scale, 2.7 / ref_scale * scale]
+        title = f"FWHM ({units})"
     elif param_type == 'fwhm residuals':
         # Calculate FWHM residual (relative to minimum FWHM in image)
         fwhm_list = (FitMoffat2D.to_fwhm(pars[:, 3], pars[:, 6]) +
@@ -381,9 +389,9 @@ def get_param_list(param_type, pars, shape, img_nums=None):
         mins = {img_num: np.min(fwhm_list[img_nums == img_num])
                 for img_num in list(set(img_nums))}
         param_list = np.array([fwhm_list[i] - mins[img_num]
-                               for i, img_num in enumerate(img_nums)]) * plate_scale_approx
-        color_range = [0.0, 0.36]
-        title = "FWHM Residuals (arcsec)"
+                               for i, img_num in enumerate(img_nums)]) * scale
+        color_range = [0.0, 0.36 / ref_scale * scale]
+        title = f"FWHM Residuals ({units})"
     elif param_type == 'phi':
         # Convert phi rotation angle relative to x-axis from the original phi
         param_list = np.array([FitEllipticalMoffat2D.get_nice_phi(smooth_par)

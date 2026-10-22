@@ -21,6 +21,18 @@ Breaking Changes
 - The package logger is now ``pipnick.log`` (previously ``pipnick.logger``),
   and logging is no longer configured from JSON files.
 
+- ``pipnick.utils.dir_nav`` is replaced by ``pipnick.metadata``, and
+  ``pipnick.utils.nickel_data`` is removed; camera properties are now defined
+  by the camera configuration files (see below).
+
+- The metadata table has typed columns, a ``setup`` column, and a ``note``
+  column, and science frames have the frame type ``science``.  Tables built
+  by earlier versions must be rebuilt with ``pipnick_metadata``.
+
+- ``pipnick_reduce --overwrite`` no longer rebuilds an existing metadata
+  table, so that user edits to it are preserved; use ``pipnick_metadata
+  --overwrite`` to rebuild it.
+
 Dependency Changes
 ------------------
 
@@ -33,6 +45,27 @@ Dependency Changes
 
 Functionality/Performance Improvements and Additions
 ----------------------------------------------------
+
+- Added support for the new Nickel Andor camera alongside the original Nickel
+  camera.  Each camera is defined by a TOML configuration file in
+  ``pipnick/data/cameras``, which sets how the camera is identified, which
+  header keywords provide each quantity, the detector geometry, the readout
+  properties, the archival bad-pixel mask, the frame-type rules, and the
+  quality checks.  The camera is identified automatically from the raw file
+  headers.  The Andor gain and read noise are placeholders until they are
+  measured.
+
+- ``pipnick_metadata`` identifies the instrument setup (camera, binning, read
+  mode, and readout window) of each frame, checks the frame quality, and
+  comments out frames that fail the checks.  ``--classify stats`` adds checks
+  based on the image data.  ``--append`` adds new frames to an existing table,
+  preserving user edits and commented-out rows.  A summary of each night is
+  logged.
+
+- ``pipnick_reduce`` takes the overscan and data sections, bad-pixel mask,
+  saturation level, gain, and read noise from the camera configuration, for the
+  binning and read mode of each frame.  For now, it reduces data from only one
+  setup at a time.
 
 - The image PSF is now modeled as a 2D Moffat function fit to a stack of bright,
   isolated sources, which is then used for the PSF photometry.
@@ -73,3 +106,6 @@ Bug Fixes
 
 - Fixed an undefined logger in ``pipnick.utils.fits_class`` that raised a
   ``NameError`` when reading a FITS file without a mask.
+
+- ``pipnick.utils.fits_class.Fits_Simple`` falls back to the camera bad-pixel
+  mask for raw frames without a mask, instead of calling an undefined function.

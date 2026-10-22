@@ -75,6 +75,19 @@ rows = []
 regions = []
 # file = ""                 # Optional archival unbinned bad-pixel mask image
 
+[quality]
+# Frames failing these checks are commented out of the metadata table.  The
+# temperature check uses the header; the others require reading the image
+# (pipnick_metadata --classify stats).  Levels are in ADU, measured from the
+# median of the data section.  Based on the 2026 commissioning data: the
+# detector runs at -79.9 C, and the bias level is ~300-304 ADU, including in
+# darks of up to 960 s.
+max_temperature = -70.0         # C
+bias_level = [280, 400]         # Expected range for closed-shutter frames
+bias_exptime_max = 1.0          # Frames mislabeled as biases can be biases up to this exposure time
+min_illumination = 1000         # Minimum level of a flat above bias_level
+max_saturated_fraction = 0.1    # Maximum fraction of saturated data pixels
+
 [frametypes]
 default = "science"
 

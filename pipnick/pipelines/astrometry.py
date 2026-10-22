@@ -7,8 +7,8 @@ from astroquery.astrometry_net import AstrometryNet
 from astroquery.exceptions import TimeoutError
 
 from pipnick import log
-from pipnick.utils.nickel_data import (bad_columns, ra_key, dec_key, fwhm_approx,
-                                       fov_size_approx)
+from pipnick import cameras
+from pipnick.pkg.exceptions import PipnickDataModelError
 # TODO: organize_files no longer exists; the astrometry pipeline needs to be updated.
 from pipnick.metadata import organize_files
 
@@ -106,17 +106,26 @@ def astrometry_all(maindir, api_key, use_table=False, resolve=False,
             calibrated_fits_paths.append(output_path)
             continue
         
+        # Get the image scale, field of view, and seeing from the camera
+        hdr = fits.getheader(image_path)
+        camera = cameras.identify_camera(hdr)
+        xbin, _ = camera.binning(hdr)
+        pixel_scale = camera.plate_scale * xbin         # arcsec per binned pixel
+        fov_size = hdr['NAXIS1'] * pixel_scale / 60     # image width in arcmin
+        fwhm = camera.fwhm_guess / pixel_scale          # binned pixels
+
         log.info(f"Submitting image {image_path.name} to astrometry.net. This may take up "
                  f"to {timeout} seconds")
         try:
-            wcs_header = ast.solve_from_image(image_path, fwhm=fwhm_approx,
-                                              ra_key=ra_key, dec_key=dec_key,
+            wcs_header = ast.solve_from_image(image_path, fwhm=fwhm,
+                                              ra_key=camera.header_keyword(hdr, 'ra'),
+                                              dec_key=camera.header_keyword(hdr, 'dec'),
                                               # Max error of RA/Dec guess, in deg
-                                              radius=fov_size_approx/60,
+                                              radius=fov_size/60,
                                               scale_units='arcminwidth',
                                               scale_type='ul',
-                                              scale_lower=fov_size_approx*0.8,
-                                              scale_upper=fov_size_approx*1.2,
+                                              scale_lower=fov_size*0.8,
+                                              scale_upper=fov_size*1.2,
                                               solve_timeout=timeout,
                                               detect_threshold=8.0,
                                               publicly_visible='n',
@@ -171,9 +180,14 @@ def make_cleaned_inputs(image_paths, mod_dir):
                 mask = mask.astype(bool)
                 data[mask] = 0
             except KeyError:
-                # If no mask in FITS file, set bad columns to 0
-                data[:, bad_columns] = 0
-                log.debug("No mask in FITS file--masking Nickel bad columns only")
+                # If no mask in FITS file, use the camera bad-pixel mask, which
+                # is only possible for raw (untrimmed) frames
+                try:
+                    data[cameras.identify_camera(hdul[0].header).bpm(hdul[0].header)] = 0
+                except PipnickDataModelError:
+                    log.warning(f"No mask available for {file.name}")
+                else:
+                    log.debug("No mask in FITS file--using the camera bad-pixel mask")
             # Save the modified FITS file to the output directory
             fits.writeto(mod_path, data, hdul[0].header, overwrite=True)
         mod_paths.append(mod_path)

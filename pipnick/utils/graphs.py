@@ -8,10 +8,9 @@ from photutils.aperture import CircularAperture
 from astropy.visualization import ZScaleInterval
 
 from pipnick import log
-from pipnick.utils.nickel_data import ccd_shape
 from pipnick.utils.fits_class import Fits_Simple
 
-def smooth_contour(data_x, data_y, data_vals, color_range, backgrd_ax=None, 
+def smooth_contour(data_x, data_y, data_vals, color_range, shape, backgrd_ax=None,
                    frac=0.3, title=None, category_str=None):
     """
     Smooths and plots a contour map of the input data using LOESS smoothing.
@@ -26,6 +25,9 @@ def smooth_contour(data_x, data_y, data_vals, color_range, backgrd_ax=None,
         Array of data values at the corresponding (x, y) points.
     color_range : tuple
         Tuple specifying the range of colors for the contour levels (min, max).
+    shape : tuple
+        Shape of the image, as (rows, columns), used to define the grid on
+        which the smoothed data are sampled.
     backgrd_ax : :class:`matplotlib.axes.Axes`, optional
         Background axes to plot on. If None, a new figure and axes are created.
     frac : float, optional
@@ -55,8 +57,8 @@ def smooth_contour(data_x, data_y, data_vals, color_range, backgrd_ax=None,
     # Create a grid on which to sample the smoothed parameters
     subplot_size = 15
     border = int(subplot_size / 2)
-    grid_x, grid_y = np.mgrid[border:ccd_shape[0]-border:subplot_size, 
-                              border:ccd_shape[1]-border:subplot_size]
+    grid_x, grid_y = np.mgrid[border:shape[0]-border:subplot_size,
+                              border:shape[1]-border:subplot_size]
     
     try:
         # Perform LOESS smoothing on the data

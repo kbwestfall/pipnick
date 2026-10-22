@@ -54,6 +54,13 @@ binned and windowed equivalents for a given frame are derived from its header.
     pixel centers at integer coordinates), and an optional ``file`` (an
     unbinned mask image in ``pipnick/data/cameras``).
 
+``[quality]``
+    Thresholds used to reject frames; see :func:`NickelCamera.assess`.
+    ``max_temperature`` (C), ``bias_level`` (the ``[min, max]`` expected level
+    of closed-shutter frames, in ADU), ``bias_exptime_max`` (s),
+    ``min_illumination`` (the minimum level of a flat above the bias level, in
+    ADU), and ``max_saturated_fraction``.
+
 ``[frametypes]``
     ``default`` frame type, a ``map`` from explicit header frame-type values
     (see the ``frametype`` keyword) to pipnick frame types, and an ordered list
@@ -611,6 +618,95 @@ class NickelCamera:
                 continue
             return rule['frametype']
         return frametypes['default']
+
+    @staticmethod
+    def _section_slice(section):
+        """
+        Convert a FITS section string to a numpy slice.
+        """
+        (x1, x2), (y1, y2) = [map(int, s.split(':')) for s in section.strip('[]').split(',')]
+        return np.s_[y1 - 1:y2, x1 - 1:x2]
+
+    def assess(self, hdr, frametype, data=None):
+        """
+        Check the quality of a frame.
+
+        The checks use the thresholds in the ``[quality]`` section of the
+        configuration.  Using the header, frames are rejected if the detector
+        was too warm or the readout setting is not defined.  If the image data
+        are provided, frames are also rejected if they are empty (all zeros,
+        e.g., from a failed readout), have too many saturated pixels, are
+        closed-shutter frames (biases and darks) with a level above the bias
+        level, or are flats with too little illumination.  In addition, frames
+        that are labeled as calibrations but were exposed (frame type
+        ``'unknown'``) are reclassified as biases if their exposure time and
+        level are consistent with a bias.
+
+        Parameters
+        ----------
+        hdr : :class:`astropy.io.fits.Header`
+            The frame header.
+        frametype : str
+            The frame type; see :func:`classify`.
+        data : :class:`numpy.ndarray`, optional
+            The raw image data.  If None, only the header checks are performed.
+
+        Returns
+        -------
+        frametype : str
+            The frame type, which is changed only if the frame is reclassified.
+        reject : bool
+            True if the frame should be excluded from the reduction.
+        notes : list
+            Strings describing why the frame was rejected or reclassified.
+        """
+        quality = self.config.get('quality', {})
+        notes = []
+        reject = False
+
+        temperature = self._to_float(self.header_value(hdr, 'temperature'))
+        if 'max_temperature' in quality and temperature is not None \
+                and temperature > quality['max_temperature']:
+            reject = True
+            notes.append(f'detector temperature {temperature:.1f} C is too warm')
+
+        readout = self.readout(hdr)
+        if readout.mode == 'unknown':
+            reject = True
+            notes.append(f'readout setting {self.header_value(hdr, "readspeed")} is undefined')
+
+        if data is None:
+            return frametype, reject, notes
+
+        if np.all(data == 0):
+            notes.append('empty image')
+            return frametype, True, notes
+
+        datasec, _ = self.sections(hdr)
+        data = data[self._section_slice(datasec)]
+        level = float(np.median(data))
+        if 'max_saturated_fraction' in quality:
+            frac = float(np.mean(data >= readout.saturation))
+            if frac > quality['max_saturated_fraction']:
+                reject = True
+                notes.append(f'{100 * frac:.0f}% of pixels are saturated')
+
+        if 'bias_level' not in quality:
+            return frametype, reject, notes
+        bias_lo, bias_hi = quality['bias_level']
+        exptime = self._to_float(self.header_value(hdr, 'exptime'))
+        if frametype == 'unknown' and bias_lo <= level <= bias_hi and exptime is not None \
+                and exptime <= quality.get('bias_exptime_max', 0.):
+            frametype = 'bias'
+            notes.append(f'reclassified as bias (level {level:.0f} ADU)')
+        if frametype in ['bias', 'dark'] and level > bias_hi:
+            reject = True
+            notes.append(f'level {level:.0f} ADU is too high for a {frametype}')
+        if frametype in ['domeflat', 'skyflat'] \
+                and level < bias_hi + quality.get('min_illumination', 0.):
+            reject = True
+            notes.append(f'level {level:.0f} ADU is too low for a flat')
+        return frametype, reject, notes
 
     def window_label(self, hdr):
         """

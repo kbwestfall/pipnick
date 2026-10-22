@@ -468,3 +468,129 @@ and setups.
 | Andor n2 | 169 | A (2x2 fast) 168; B (2x2 fast, window) 1 |
 | Andor n3 | 287 | A (1x1 slow, includes n2170) 17; B (1x1 fast) 10; C (2x2 slow) 101; D (2x2 fast) 139; E (4x4 slow) 10; F (4x4 fast) 10 |
 | Andor n4 | 116 | A (2x2 slow) 23; B (2x2 fast) 93 |
+
+### Phase 3: commented rows, append/overwrite, `--classify`, the command line (done)
+
+- `write_metadata` and `read_metadata(include_commented=True)` preserve
+  commented-out rows.
+  - Commented lines are parsed with an ECSV-compatible `csv` splitter.
+    `shlex` failed on the Andor `i'` filter value.
+  - Comment lines that aren't table rows are ignored.
+  - `update_metadata_meta` changes the table `meta` without losing commented
+    rows.
+- `build_metadata(..., append=True)`:
+  - adds only new files;
+  - keeps existing rows as written, including user edits and commented-out
+    rows;
+  - keeps existing setup labels and gives new setups the next label;
+  - refuses to append from a different `rawdir`.
+- `overwrite` and `append` cannot be combined.
+- `reduce_all` no longer rebuilds an existing table when `overwrite` is set.
+  Its `overwrite` now applies only to reduction products, so it can't discard
+  user edits. Rebuilding is done with `pipnick_metadata --overwrite`.
+- Added a `[quality]` config section and `NickelCamera.assess`.
+  - Header mode rejects frames with a warm detector or an undefined readout
+    setting.
+  - Stats mode also checks the median of the data section. It rejects:
+    - empty images;
+    - frames with more than 10% saturated pixels;
+    - biases and darks above the bias level;
+    - flats with less than 1000 ADU above the bias level.
+  - Stats mode reclassifies `unknown` frames as biases when their exposure
+    time and level are bias-like.
+  - **Change from the plan:** dim flats are commented out, not just noted.
+    They're unusable for flat-fielding, and users can restore them.
+- New `note` column, and `summarize()`. The summary (logged on every
+  build or append) gives:
+  - the setup definitions;
+  - a frames-per-setup × frametype table;
+  - the commented rows and why;
+  - warnings for science frames without a bias or same-filter flats in their
+    setup.
+- `pipnick_metadata` options:
+  - `-d`, `-t`, `--camera` (choices come from the registry), `--ext`,
+    `--classify {header,stats}`;
+  - `-o` and `-a`, which are mutually exclusive;
+  - an error if the table exists and neither `-o` nor `-a` is given.
+- Tests: 54 pass, covering quality checks, the commented-row round trip,
+  append and overwrite, and the summary.
+
+Commented-out rows per night, from `pipnick_metadata` (tables written only
+to the scratchpad):
+
+| Night | Header mode | Stats mode |
+|---|---|---|
+| C2 n1 | 1 (d1061, undefined readout) | 1 (d1061, empty) |
+| C2 n2 | 1 (d1031) | 5 (d1030/1031 empty; d1076–1078 lamps-off dome flats) |
+| Andor n1 | 2 (n1017–1018, warm) | 16 (+14 saturated shutter tests n1003–1016) |
+| Andor n2 | 0 | 21 (light-leak biases and darks from the shutter tests; 4 dim and 1 saturated dome flat) |
+| Andor n3 | 0 | 6 (the lowest-level dome flats in the linearity series) |
+| Andor n4 | 0 | 8 (n4046–4055, stale 'twilight flat' label at 384–727 ADU) |
+
+In stats mode, Andor n2003 and n2005 ('test bias', open shutter, 301 ADU) are
+reclassified as biases. C2 d1012 ('Bias' at 10 s) stays `unknown`.
+
+Also tested on real files, using scratch symlinks to the first 100 Andor n2
+frames:
+- build the table, comment out one row, edit one frametype;
+- link the other 69 frames and append;
+- result: 169 unique rows, both edits preserved, n2104 auto-commented, setup
+  labels unchanged;
+- a second append is a no-op.
+
+### Phase 4: verification on all six nights (done)
+
+- The per-night summaries (stats mode) were reviewed by the user, who confirmed
+  the frame typing. The observing logs were not read; see the FITS-only rule
+  above.
+- **Deferred to a separate branch:** changes to how frames are grouped.
+
+### Phase 5: retire `nickel_data.py` and `nickel_masks.npz` (done)
+
+- Deleted `pipnick/utils/nickel_data.py`, `pipnick/utils/nickel_masks.npz`
+  (unused) and `docs/api/pipnick.utils.nickel_data.rst`.
+- `pipelines/astrometry.py`:
+  - plate scale, field of view, FWHM guess and RA/Dec keywords come from each
+    image's camera and binning;
+  - images without a mask use the camera BPM when possible.
+- `photometry/fit.py`: `get_param_list` takes an optional `plate_scale` per
+  binned pixel; without one it reports pixels.
+- `utils/graphs.py`: `smooth_contour` takes the image `shape`.
+- `utils/fits_class.py`:
+  - added `Fits_Simple.camera` and `camera_bpm()`;
+  - the object, filter, exposure-time and airmass properties use the camera
+    keywords, which fixes Andor `filtnam`/`exptime` returning None;
+  - the mask fallback uses the camera BPM.
+- `photometry/psf_photometry.py`: removed the unused `bad_columns` import.
+- Left as is:
+  - `tests/test_mask.py` tests the generic masking functions with literal
+    inputs and doesn't depend on `nickel_data`;
+  - the commented-out legacy code in `utils/masking.py`.
+
+### Phase 6: reduction rewiring, setup guard, docs (done)
+
+- The reduction rewiring (sections, BPM, saturation, gain and read noise from
+  the camera; `frametype == 'science'`) was done in phase 1.
+- Setup guard: `reduce_all` raises if the uncommented rows contain more than one
+  setup, and lists the setups. It also raises for tables without a `setup`
+  column, i.e. tables built before this branch.
+- Added `pipnick/tests/test_reduction.py`; 55 tests pass.
+- Release notes updated (`docs/releases/0.1.0dev.rst`); API pages regenerated;
+  the docs build with only the known astrometry warnings.
+- Smoke test, with outputs in the scratchpad: `pipnick_reduce` on C2 n1
+  produced the bias, the B/V/R/I sky flats and all 26 science frames.
+  - Products are trimmed to 1024×1024 and in electrons.
+  - The config BPM (columns 0, 256 and 1023, and row 0) is carried into each
+    product's mask.
+  - The guard stops Andor n3 and lists its six setups.
+
+### Open items (outside this branch)
+
+- `pipnick_astrometry` still fails to import: `organize_files` was removed in
+  an earlier refactor.
+- Measure the Andor gain, read noise and bad pixels. The `[bpm] file` hook is
+  ready for an archival mask.
+- Rework how frames are grouped, including matching calibrations to science
+  frames by setup (planned for a separate branch).
+- Rewrite the usage docs (`docs/*.rst`) for the new scripts and options,
+  adding the planned intersphinx and `:func:` cross-references.

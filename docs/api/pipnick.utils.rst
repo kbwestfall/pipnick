@@ -12,7 +12,6 @@ Submodules
    pipnick.utils.graphs
    pipnick.utils.log
    pipnick.utils.masking
-   pipnick.utils.nickel_data
 
 Module contents
 ---------------

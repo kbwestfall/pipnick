@@ -65,14 +65,15 @@ def photometry_all(rdxdir=None, raw_table=None, phot_table=None, thresh=8.0, gro
 
     if raw_table is None:
         # Find all the reduced files in the directory
-        framemeta = rawmeta.build_camera_datatable(rdxdir, ext='_rdx.fits', path_key='rdxdir')
+        framemeta, _ = rawmeta.build_camera_datatable(rdxdir, ext='_rdx.fits',
+                                                      path_key='rdxdir')
         # Change the name of the column
         framemeta['file'].name = 'rdxfile'
         # Set the reduction directory path
         _rdxdir = Path(framemeta.meta['rdxdir']).absolute()
     else:
         # Read the table with the raw metadata
-        framemeta = Table.read(raw_table, format='ascii.ecsv')
+        framemeta = rawmeta.read_metadata(raw_table)
         # Check that the reduction directory is defined
         if 'rdxdir' not in framemeta.meta:
             raise KeyError('Provided raw data table does not include rdxdir metadata keyword.')
