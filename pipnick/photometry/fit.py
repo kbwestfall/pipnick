@@ -20,7 +20,7 @@ from pipnick import log
 from pipnick.utils.fits_class import Fits_Simple
 from pipnick.photometry.moffat import FitEllipticalMoffat2D, FitMoffat2D, make_ellipse
 #from pipnick.photometry.starfind import generate_stamps
-from pipnick.utils.dir_nav import unzip_directories
+from pipnick.utils.fits_class import unzip_directories
 from pipnick.utils.nickel_data import plate_scale_approx
 
 

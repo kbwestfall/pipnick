@@ -384,3 +384,87 @@ Docs:
 - Smoke test: `pipnick_reduce -t <C2 n1 table>` still runs through bias and flat
   creation with geometry and BPM from the config, and the setup guard triggers
   on Andor n3.
+
+## Progress
+
+### Phase 1: camera configurations, class, registry, identification (done)
+
+- Added `pipnick/data/cameras/nickel_c2.toml` and `nickel_andor.toml`. They
+  are listed in `[tool.setuptools.package-data]`, so they ship even before git
+  tracks them.
+- `pipnick/cameras/cameras.py` now holds one config-driven `NickelCamera`,
+  plus `available_cameras`, `get_camera` and `identify_camera`.
+- Pulled forward so the package keeps working:
+  - `dir_nav` and `reduction` no longer call `eval`;
+  - reduction takes its sections, BPM, saturation, gain and read noise from
+    the camera;
+  - science frames are selected with `frametype == 'science'`.
+- `pipnick/tests/test_cameras.py` uses synthetic headers; 42 tests pass.
+
+Geometry and defects measured from the FITS data:
+
+- **C2:**
+  - Legacy bad columns are 0-based and confirmed in the 2024 sky flats.
+  - Added: binned columns 0 and 1023 (saturated) and row 0
+    (half-illuminated).
+  - The corner polygons are confirmed. Binning the unbinned mask adds 47
+    binned pixels along the diagonal corner edges, compared with the legacy
+    mask.
+- **Andor:** unbinned prescan 1–19, data 20–2067, overscan 2068–2088.
+  - Confirmed at 1x1, 2x2, 4x4 and in the windowed frame.
+  - The first ~6 unbinned overscan columns trail charge, so the overscan
+    level uses 2075–2088.
+  - Observed maxima: ≈65240 ADU (1.0 MHz) and ≈65140 ADU (0.05 MHz).
+
+All 923 raw frames identify correctly, and their sections and BPMs match the
+image shapes. The only `unknown` readout modes are the two C2 frames read with
+`READ-SPD` = 10 (failed readouts).
+
+Assumptions to confirm:
+
+- C2 `READ-SPD` = 80 is the slow mode with gain 1.8 e⁻/ADU and read noise
+  10.7 e⁻.
+- The Andor gain (1.0) and read noise (10.0) are placeholders. Reduction
+  logs a warning whenever they are used.
+
+### Phase 2: `pipnick/metadata.py`, typed table, setups (done)
+
+- Replaced `pipnick/utils/dir_nav.py` with `pipnick/metadata.py`.
+  - Moved: `build_metadata`, `frame_path`, `default_table_name`,
+    `default_reduced_file_name`.
+  - Rewritten: `build_camera_datatable`.
+  - Added: `assign_setups`.
+- `unzip_directories` moved to `pipnick/utils/fits_class.py`. The unused
+  `comment_out_rows`, `norm_str` and `create_exclusion_func` were removed.
+- The pipelines import the module as `rawmeta`, because they use `metadata`
+  as a local table variable.
+- `astrometry.py` now imports the missing `organize_files` from
+  `pipnick.metadata`, with a TODO. Its import error predates this branch.
+- `NickelCamera.metadata(hdr)` returns typed, normalized values. The
+  phase-1 stopgaps `metadata_cols` and `parse_metadata` were removed.
+- `build_camera_datatable`:
+  - identifies the camera per file;
+  - raises on mixed or unidentifiable cameras, unless `camera=` is given, in
+    which case other cameras' files are skipped;
+  - raises on an empty or missing directory;
+  - builds typed columns, with missing values masked.
+- Columns: `file`, `frametype`, `setup`, `object`, `filter`, `exptime`,
+  `airmass`, `ra`, `dec`, `date`, `mjd`, `xbin`, `ybin`, `readmode`, `naxis1`,
+  `naxis2`, `window`.
+- `meta`: `camera`, `rawdir`, `setups`. Each setup records the camera, binning,
+  read mode and window.
+- `pipnick/tests/test_metadata.py` uses synthetic FITS files; 50 tests pass in
+  total.
+
+Results for the six nights (scratch tables, not in the repository): all
+columns are typed, nothing is masked, and the ECSV round trip preserves types
+and setups.
+
+| Night | Frames | Setups |
+|---|---|---|
+| C2 n1 | 62 | A (2x2 slow) 61; B (unknown readout, failed read) 1 |
+| C2 n2 | 122 | A 121; B (unknown readout, failed read) 1 |
+| Andor n1 | 167 | A (2x2 fast) 133; B (2x2 slow) 34 |
+| Andor n2 | 169 | A (2x2 fast) 168; B (2x2 fast, window) 1 |
+| Andor n3 | 287 | A (1x1 slow, includes n2170) 17; B (1x1 fast) 10; C (2x2 slow) 101; D (2x2 fast) 139; E (4x4 slow) 10; F (4x4 fast) 10 |
+| Andor n4 | 116 | A (2x2 slow) 23; B (2x2 fast) 93 |

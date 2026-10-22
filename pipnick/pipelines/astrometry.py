@@ -9,7 +9,8 @@ from astroquery.exceptions import TimeoutError
 from pipnick import log
 from pipnick.utils.nickel_data import (bad_columns, ra_key, dec_key, fwhm_approx,
                                        fov_size_approx)
-from pipnick.utils.dir_nav import organize_files
+# TODO: organize_files no longer exists; the astrometry pipeline needs to be updated.
+from pipnick.metadata import organize_files
 
 ######################################
 ####  ASTROMETRY.NET CALIBRATION  ####

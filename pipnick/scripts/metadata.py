@@ -28,7 +28,7 @@ class MetaData(scriptbase.ScriptBase):
 
     @classmethod
     def main(cls, args):
-        from pipnick.utils.dir_nav import build_metadata
+        from pipnick.metadata import build_metadata
 
         # Initialize logger
         cls.init_log(args)

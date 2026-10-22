@@ -8,7 +8,7 @@ from astropy.table import Table
 
 from pipnick.photometry.psf_photometry import psf_analysis, consolidate_groups
 from pipnick.photometry.aperture_photometry import aperture_analysis
-from pipnick.utils import dir_nav
+from pipnick import metadata as rawmeta
 from pipnick import log
 
 
@@ -65,7 +65,7 @@ def photometry_all(rdxdir=None, raw_table=None, phot_table=None, thresh=8.0, gro
 
     if raw_table is None:
         # Find all the reduced files in the directory
-        framemeta = dir_nav.build_camera_datatable(rdxdir, ext='_rdx.fits', path_key='rdxdir')
+        framemeta = rawmeta.build_camera_datatable(rdxdir, ext='_rdx.fits', path_key='rdxdir')
         # Change the name of the column
         framemeta['file'].name = 'rdxfile'
         # Set the reduction directory path
@@ -83,9 +83,9 @@ def photometry_all(rdxdir=None, raw_table=None, phot_table=None, thresh=8.0, gro
             raise NotADirectoryError(f'Reduction directory in {raw_table} does not exist.  '
                                      f'Expected to find reduced data in: {_rdxdir}')
         # Define the paths to the raw files
-        raw_frames = dir_nav.frame_path(framemeta)
+        raw_frames = rawmeta.frame_path(framemeta)
         # Use those to build the names of the reduced files
-        rdx_frames = [_rdxdir / dir_nav.default_reduced_file_name(f) for f in raw_frames]
+        rdx_frames = [_rdxdir / rawmeta.default_reduced_file_name(f) for f in raw_frames]
         # Find which of the reduced files exist
         found_frames = [rf.is_file() for rf in rdx_frames]
         # Check if any of the files exist
@@ -99,7 +99,7 @@ def photometry_all(rdxdir=None, raw_table=None, phot_table=None, thresh=8.0, gro
 
     # Define the file for the output photometry metadata
     if phot_table is None:
-        _phot_table = Path(dir_nav.default_table_name(framemeta.meta['camera'], 'phot')).absolute()
+        _phot_table = Path(rawmeta.default_table_name(framemeta.meta['camera'], 'phot')).absolute()
     else:
         _phot_table = Path(phot_table).absolute()
     if _phot_table.is_file() and not overwrite:
@@ -110,7 +110,7 @@ def photometry_all(rdxdir=None, raw_table=None, phot_table=None, thresh=8.0, gro
 
     source_catalog_paths = []  # List to hold paths to source catalogs
 
-    rdx_frames = dir_nav.frame_path(framemeta, col_key='rdxfile', path_key='rdxdir')
+    rdx_frames = rawmeta.frame_path(framemeta, col_key='rdxfile', path_key='rdxdir')
     
     for frame in rdx_frames:
         # Perform PSF photometry on the file

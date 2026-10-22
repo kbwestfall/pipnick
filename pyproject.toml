@@ -87,6 +87,11 @@ build-backend = 'setuptools.build_meta'
 [tool.setuptools]
 include-package-data = true
 
+[tool.setuptools.package-data]
+# Listed explicitly so that the camera configurations are included even when
+# they are not tracked by git (setuptools_scm otherwise selects the data files)
+pipnick = ["data/cameras/*.toml"]
+
 [tool.setuptools.packages.find]
 # Without an explicit include, namespace-package discovery also picks up
 # non-package directories (e.g., licenses/) and installs them at the top level.
