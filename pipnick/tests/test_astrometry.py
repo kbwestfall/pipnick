@@ -4,6 +4,9 @@ star field.  The remote services are replaced by fakes; no test contacts
 astrometry.net or the Gaia archive (see ``conftest.py``).
 """
 
+import gzip
+import io
+import logging
 from pathlib import Path
 
 import numpy as np
@@ -93,6 +96,8 @@ class FakeSolver:
         self.calls = []
         # The image for each submission ID
         self.submitted = {}
+        # The headers returned, keyed by submission ID
+        self.returned = {}
 
     def _identify(self, x, y):
         best = None
@@ -110,9 +115,11 @@ class FakeSolver:
         Return the true solution as astrometry.net would: with ``EQUINOX =
         2000.0`` and no ``RADESYS``, i.e., labeled as FK5.
         """
-        hdr = self.truth[name].to_header()
+        hdr = fits.Header({'SIMPLE': True, 'BITPIX': 8, 'NAXIS': 0})
+        hdr.update(self.truth[name].to_header())
         hdr.remove('RADESYS', ignore_missing=True)
         hdr['EQUINOX'] = 2000.
+        hdr['COMMENT'] = 'Synthetic astrometry.net solution'
         return hdr
 
     def _result(self, name):
@@ -121,7 +128,8 @@ class FakeSolver:
         status = self.status.pop(0) if len(self.status) > 0 else 'solved'
         if status != 'solved':
             return status, None, submission_id
-        return 'solved', self.header(name), submission_id
+        self.returned[submission_id] = self.header(name)
+        return 'solved', self.returned[submission_id].copy(), submission_id
 
     def solve_sources(self, x, y, width, height, hints):
         name = self._identify(np.asarray(x), np.asarray(y))
@@ -350,7 +358,7 @@ def test_image_center_frame():
 
 def test_api_key(monkeypatch, caplog):
     monkeypatch.delenv('ASTROMETRY_NET_API_KEY', raising=False)
-    monkeypatch.setattr(services.astrometry_net_conf, 'api_key', '')
+    monkeypatch.setattr(services.astrometry_net.conf, 'api_key', '')
     with pytest.raises(PipnickError, match='No astrometry.net API key'):
         AstrometryNetSolver()
     monkeypatch.setenv('ASTROMETRY_NET_API_KEY', 'not-a-real-key')
@@ -394,8 +402,14 @@ def test_astrometry(tmp_path, caplog):
             f'The solution for {p.name} should be in the ICRS'
         )
     assert catalog.calls == 1, 'Only the distant image should need the catalog'
-    assert (rdxdir / 'astrometry' / f'anet_{fits.getheader(rdxdir / submitted)["PNASTIN"]}.fits'
-            ).is_file(), 'The astrometry.net result should be cached'
+    saved = rdxdir / 'astrometry' / f'anet_{fits.getheader(rdxdir / submitted)["PNASTIN"]}.fits'
+    assert (
+        fits.Header.fromfile(saved).tostring() == next(iter(solver.returned.values())).tostring()
+    ), 'The astrometry.net solution should be saved exactly as returned'
+    index = Table.read(rdxdir / 'astrometry' / 'astrometry_net.ecsv')
+    assert list(index['status']) == ['solved'] and index['solution'][0] == saved.name, (
+        'The submission should be recorded in the index'
+    )
 
     # Rerunning changes nothing
     before = {p.name: p.stat().st_mtime_ns for p in solved}
@@ -628,9 +642,14 @@ def test_wide_search(tmp_path, caplog):
     with fits.open(rdxdir / stale_2, mode='update') as hdu:
         astrometry._remove_wcs(hdu[0].header)
     caplog.clear()
-    astrometry_all(table, rdxdir=rdxdir, solver=solver, catalog=FakeCatalog(coords, flux))
-    assert 'consider correcting' not in caplog.text, (
-        'The restored pointing error should be used, without the wide search'
+    catalog = FakeCatalog(coords, flux)
+    astrometry_all(table, rdxdir=rdxdir, solver=solver, catalog=catalog)
+    assert catalog.calls == 0, 'The restored pointing error should be used, without the catalog'
+    assert f'{stale_2} is centered at' in caplog.text, (
+        'The incorrect pointing should be reported for every affected image'
+    )
+    assert 'PNASTPOE' in fits.getheader(rdxdir / stale_2), (
+        'The pointing error should be recorded for every affected image'
     )
     assert fits.getheader(rdxdir / stale_2)['PNASTREF'] == stale_1, (
         'The image should be bootstrapped from the first stale image'
@@ -675,4 +694,195 @@ def test_invalidate_chains():
     assert [image.status for image in images] == ['solved', None, None, 'solved'], (
         'Invalidating an image should invalidate the chain bootstrapped from it, and only that '
         'chain'
+    )
+
+
+def fake_gaia_query(catalog, query, output_file):
+    """
+    Stand-in for :meth:`~pipnick.astrometry.services.GaiaCatalog._query` that
+    writes the synthetic star field as a gzip-compressed VOTable, as the
+    archive would.
+    """
+    coords, flux = star_field()
+    catalog.nqueries = getattr(catalog, 'nqueries', 0) + 1
+    buffer = io.BytesIO()
+    Table(
+        {
+            'ra': coords.ra.deg, 'dec': coords.dec.deg, 'pmra': np.zeros(len(coords)),
+            'pmdec': np.full(len(coords), 100.), 'ref_epoch': np.full(len(coords), 2016.),
+            'phot_g_mean_mag': -2.5 * np.log10(flux) + 25.
+        }
+    ).write(buffer, format='votable')
+    with gzip.open(output_file, 'wb') as f:
+        f.write(buffer.getvalue())
+
+
+def test_gaia_catalog(tmp_path, monkeypatch):
+    monkeypatch.setattr(GaiaCatalog, '_query', fake_gaia_query)
+    catalog = GaiaCatalog(tmp_path / 'astrometry')
+    coords, mag = catalog.sources(FIELD_CENTER, 2. / 60, 2026.)
+    saved = tmp_path / 'astrometry' / 'gaia_0000.vot.gz'
+    assert saved.is_file() and catalog.nqueries == 1, 'The query result should be saved'
+    content = saved.read_bytes()
+    assert np.all(coords.separation(FIELD_CENTER).arcmin <= 2.), (
+        'Only sources in the requested cone should be returned'
+    )
+    # 100 mas/yr over 10 yr moves each star 1 arcsec north; moving the returned
+    # positions back should recover the catalog positions exactly
+    raw = Table.read(saved, format='votable')
+    back = coords.spherical_offsets_by(0. * units.arcsec, -1. * units.arcsec)
+    _, sep, _ = back.match_to_catalog_sky(SkyCoord(raw['ra'], raw['dec'], unit='deg'))
+    assert np.all(sep.arcsec < 1e-6), 'Positions should be propagated to the epoch'
+
+    # A covered cone reuses the saved query, which is not modified
+    catalog.sources(FIELD_CENTER.directional_offset_by(0. * units.deg, 0.5 * units.arcmin),
+                    1. / 60, 2026.)
+    assert catalog.nqueries == 1, 'A covered cone should not be queried again'
+    assert saved.read_bytes() == content, 'The saved query result should never be modified'
+    index = Table.read(tmp_path / 'astrometry' / 'gaia_queries.ecsv')
+    assert len(index) == 1 and 'gaiadr3.gaia_source' in index['query'][0], (
+        'The query should be recorded in the index'
+    )
+
+    # A deeper catalog needs a new query
+    GaiaCatalog(tmp_path / 'astrometry', mag_limit=20.).sources(FIELD_CENTER, 1. / 60, 2026.)
+    assert (tmp_path / 'astrometry' / 'gaia_0001.vot.gz').is_file(), (
+        'A query that is not deep enough should not be reused'
+    )
+
+
+def test_select_images(tmp_path, caplog):
+    table, rdxdir, truth, coords, flux = write_field(tmp_path)
+    solver = FakeSolver(truth, coords)
+    catalog = FakeCatalog(coords, flux)
+    astrometry_all(table, rdxdir=rdxdir, solver=solver, catalog=catalog)
+    names = sorted(truth.keys())
+    for name in names[1:3]:
+        with fits.open(rdxdir / name, mode='update') as hdu:
+            astrometry._remove_wcs(hdu[0].header)
+
+    # Only the selected image (by comb_id) is solved
+    solved = astrometry_all(
+        table, rdxdir=rdxdir, solver=solver, catalog=catalog, images=['2']
+    )
+    assert names[1] in [p.name for p in solved] and names[2] not in [p.name for p in solved], (
+        'Only the selected image should be solved'
+    )
+    summary = Table.read(rdxdir / 'astrometry' / 'summary.ecsv')
+    assert summary['status'][summary['image'] == names[2]][0] == 'skipped', (
+        'Images that are not selected should be reported as skipped'
+    )
+
+    # Re-solving a selected image changes only that image
+    submitted = solver.calls[0][1]
+    before = {name: (rdxdir / name).stat().st_mtime_ns for name in names}
+    astrometry_all(
+        table, rdxdir=rdxdir, solver=solver, catalog=catalog, images=[submitted], resolve=True,
+        max_submissions=1
+    )
+    changed = [name for name in names if (rdxdir / name).stat().st_mtime_ns != before[name]]
+    assert changed == [submitted], 'Resolve should only change the selected image'
+    assert len(solver.calls) <= 2, 'Resolve should submit at most the selected image'
+
+    with pytest.raises(ValueError, match='No reduced science image matches'):
+        astrometry_all(table, rdxdir=rdxdir, solver=solver, catalog=catalog, images=['n9999'])
+
+
+def test_summary(tmp_path, caplog):
+    table, rdxdir, truth, coords, flux = write_field(tmp_path)
+    solver = FakeSolver(truth, coords)
+    astrometry_all(
+        table, rdxdir=rdxdir, solver=solver, catalog=FakeCatalog(coords, flux), max_submissions=0
+    )
+    summary = Table.read(rdxdir / 'astrometry' / 'summary.ecsv')
+    assert list(summary['status']) == ['unsolved'] * 4, (
+        'Nothing can be solved without a submission'
+    )
+    assert all(r != '-' for r in summary['reason']), (
+        'The reason each image was not solved should be recorded'
+    )
+    assert any('--max_submissions' in s for s in summary['suggestion']), (
+        'The summary should suggest allowing a submission'
+    )
+    assert 'is not solved' in caplog.text, 'Unsolved images should be reported'
+
+    astrometry_all(table, rdxdir=rdxdir, solver=solver, catalog=FakeCatalog(coords, flux))
+    summary = Table.read(rdxdir / 'astrometry' / 'summary.ecsv')
+    assert list(summary['status']) == ['solved'] * 4, 'All images should be solved'
+    assert np.all(summary['rms'][summary['method'] != 'astrometry.net'] < 0.3), (
+        'The summary should give the RMS of the solutions'
+    )
+    assert summary['nmatch'].mask[summary['method'] == 'astrometry.net'][0], (
+        'Unavailable values should be masked'
+    )
+    assert 'Median telescope pointing offset: -3.0, +2.0 arcsec' in caplog.text, (
+        'The measured pointing offset should be reported'
+    )
+
+
+def test_failure_messages(tmp_path, caplog):
+    table, rdxdir, truth, coords, flux = write_field(tmp_path, images=STALE_IMAGES, stale=STALE)
+    solve_first(rdxdir, truth)
+    caplog.set_level(logging.DEBUG, logger='pipnick')
+    # In this dense field, the stale images find a few chance matches, which
+    # are rejected
+    astrometry_all(
+        table, rdxdir=rdxdir, solver=FakeSolver(truth, coords),
+        catalog=FakeCatalog(coords, flux), wide_search=0., max_submissions=0
+    )
+    assert 'votes' in caplog.text, 'The details of each match should be logged at debug level'
+    summary = Table.read(rdxdir / 'astrometry' / 'summary.ecsv')
+    unsolved = summary[summary['status'] == 'unsolved']
+    assert len(unsolved) == 2 and all('RMS residual' in r for r in unsolved['reason']), (
+        'The reason the chance matches were rejected should be recorded'
+    )
+    assert all(
+        'check the pointing' in s and '--max_submissions' in s for s in unsolved['suggestion']
+    ), 'The suggestion should cover the rejected matches and why the images were not submitted'
+
+    # With only a few detected sources, too few match
+    caplog.clear()
+    astrometry_all(
+        table, rdxdir=rdxdir, solver=FakeSolver(truth, coords),
+        catalog=FakeCatalog(coords, flux), wide_search=0., max_submissions=0, detect_thresh=300.
+    )
+    assert 'matched the' in caplog.text and 'minimum is 4' in caplog.text, (
+        'Failures to match should give the numbers of sources'
+    )
+    summary = Table.read(rdxdir / 'astrometry' / 'summary.ecsv')
+    unsolved = summary[summary['status'] == 'unsolved']
+    assert all('--search' in s for s in unsolved['suggestion']), (
+        'Images with too few matches should get a suggestion about the pointing'
+    )
+
+
+def test_qa_and_detection(tmp_path, caplog):
+    table, rdxdir, truth, coords, flux = write_field(tmp_path)
+    solver = FakeSolver(truth, coords)
+    catalog = FakeCatalog(coords, flux)
+
+    # Detection controls and the dry-run QA figures
+    astrometry_all(
+        table, rdxdir=rdxdir, dry_run=True, qa=True, max_sources=20, detect_thresh=5.
+    )
+    sources = Table.read(next((rdxdir / 'astrometry' / 'dry_run').glob('*.ecsv')))
+    assert len(sources) == 20, 'The number of detected sources should be limited'
+    assert len(list((rdxdir / 'astrometry' / 'qa').glob('*.png'))) == 4, (
+        'A dry run should write a QA figure for every image'
+    )
+    astrometry_all(table, rdxdir=rdxdir, dry_run=True, detect_thresh=500.)
+    assert 'sources were detected in' in caplog.text, 'Images with few sources should be noted'
+
+    # QA figures are only written for images solved in the run
+    for f in (rdxdir / 'astrometry' / 'qa').glob('*.png'):
+        f.unlink()
+    astrometry_all(table, rdxdir=rdxdir, solver=solver, catalog=catalog, qa=True)
+    assert len(list((rdxdir / 'astrometry' / 'qa').glob('*.png'))) == 4, (
+        'A QA figure should be written for each solved image'
+    )
+    for f in (rdxdir / 'astrometry' / 'qa').glob('*.png'):
+        f.unlink()
+    astrometry_all(table, rdxdir=rdxdir, solver=solver, catalog=catalog, qa=True)
+    assert len(list((rdxdir / 'astrometry' / 'qa').glob('*.png'))) == 0, (
+        'Images solved in an earlier run should not get new QA figures'
     )

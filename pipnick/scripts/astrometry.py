@@ -29,9 +29,16 @@ class Astrometry(scriptbase.ScriptBase):
                  'file is used.'
         )
         parser.add_argument(
+            '--images', nargs='+', default=None,
+            help='Only solve these images, given by file name (with or without the extension) '
+                 'or combination group (comb_id).  The other images are not changed, but their '
+                 'solutions are used as references.'
+        )
+        parser.add_argument(
             '--resolve', default=False, action='store_true',
-            help='Ignore existing and cached solutions and solve every image again.  This can '
-                 'submit jobs to astrometry.net for images that were solved before.'
+            help='Ignore existing and cached solutions and solve the images (only those given '
+                 'by --images, if provided) again.  This can submit jobs to astrometry.net for '
+                 'images that were solved before.'
         )
         parser.add_argument(
             '--upload_image', default=False, action='store_true',
@@ -42,6 +49,27 @@ class Astrometry(scriptbase.ScriptBase):
             '--dry_run', default=False, action='store_true',
             help='Detect the sources, group the images, and report what would be submitted to '
                  'astrometry.net, without solving or submitting anything.'
+        )
+        parser.add_argument(
+            '--qa', default=False, action='store_true',
+            help='Write a QA figure for each image solved in this run (for every image, with '
+                 '--dry_run) to the astrometry/qa directory, showing the detected sources and '
+                 'the matched sources with their residuals.'
+        )
+        parser.add_argument(
+            '--max_sources', type=int, default=100,
+            help='Maximum number of (brightest) sources detected in each image, and submitted '
+                 'to astrometry.net.'
+        )
+        parser.add_argument(
+            '--detect_thresh', type=float, default=5.,
+            help='Source detection threshold, as a multiple of the standard deviation of the '
+                 'background.'
+        )
+        parser.add_argument(
+            '--fwhm', type=float, default=None,
+            help='FWHM of the sources in arcsec, for their detection.  If not provided, the '
+                 'typical value for the camera is used.'
         )
         parser.add_argument(
             '--max_submissions', type=int, default=None,
@@ -61,6 +89,12 @@ class Astrometry(scriptbase.ScriptBase):
             '--max_rms', type=float, default=0.3,
             help='Maximum RMS residual in arcsec for a solution found from another image or the '
                  'Gaia catalog.'
+        )
+        parser.add_argument(
+            '--search', type=float, default=60.,
+            help='Maximum error in arcsec in the expected offset between matched images, or '
+                 'between an image and the Gaia catalog, e.g., from the error in the telescope '
+                 'pointing.'
         )
         parser.add_argument(
             '--wide_search', type=float, default=10.,
@@ -85,6 +119,8 @@ class Astrometry(scriptbase.ScriptBase):
             args.raw_table, rdxdir=args.rdxdir, resolve=args.resolve,
             upload_image=args.upload_image, dry_run=args.dry_run,
             max_submissions=args.max_submissions, group_radius=args.group_radius,
-            min_matches=args.min_matches, max_rms=args.max_rms, wide_search=args.wide_search,
-            wide_min_matches=args.wide_min_matches
+            min_matches=args.min_matches, max_rms=args.max_rms, search=args.search,
+            wide_search=args.wide_search,
+            wide_min_matches=args.wide_min_matches, images=args.images, qa=args.qa,
+            max_sources=args.max_sources, detect_thresh=args.detect_thresh, fwhm=args.fwhm
         )

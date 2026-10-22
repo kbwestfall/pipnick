@@ -185,10 +185,12 @@ def match_frames(
     dict, None
         The ``rotation`` (radians) and ``shift`` (pixels) of the
         transformation (see :func:`apply_rigid`), the indices of the matched
-        sources (``indx`` and ``indx_ref``), and the RMS residual of the
-        matches in pixels (``rms``).  None if fewer than 2 sources are matched.
+        sources (``indx`` and ``indx_ref``), the RMS residual of the matches in
+        pixels (``rms``), and the number of pairs that voted for the initial
+        shift (``nvotes``; see :func:`vote_shift`).  None if fewer than 2
+        sources are matched.
     """
-    shift, _ = vote_shift(x, y, xref, yref, expected=expected, search=search, binsize=tol)
+    shift, nvotes = vote_shift(x, y, xref, yref, expected=expected, search=search, binsize=tol)
     if shift is None:
         return None
     rotation = 0.
@@ -209,4 +211,7 @@ def match_frames(
         rotation, shift = fit_rigid(
             x[indx][keep], y[indx][keep], xref[indx_ref][keep], yref[indx_ref][keep]
         )
-    return {'rotation': rotation, 'shift': shift, 'indx': indx, 'indx_ref': indx_ref, 'rms': rms}
+    return {
+        'rotation': rotation, 'shift': shift, 'indx': indx, 'indx_ref': indx_ref, 'rms': rms,
+        'nvotes': nvotes
+    }

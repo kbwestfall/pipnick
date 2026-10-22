@@ -105,6 +105,9 @@ minversion = 7.0
 testpaths = [
     "pipnick",
 ]
+# Block internet access for the entire test session (pytest-remotedata); tests
+# must never contact astrometry.net or the Gaia archive
+remote_data_strict = true
 
 [tool.coverage]
 

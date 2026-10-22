@@ -9,6 +9,17 @@ Gaia archive unless the query is cached.  The pipeline accepts substitutes
 with the same methods, which is how it is tested without contacting either
 service.
 
+Products of the services
+------------------------
+
+What the services return is never modified.  The Gaia query results are
+saved exactly as returned by the archive (see :class:`GaiaCatalog`), and the
+astrometry.net solutions are saved exactly as returned by the service (see
+:func:`~pipnick.pipelines.astrometry.astrometry_all`).  Any change, such as
+relabeling the frame of a solution (:func:`icrs_header`) or propagating
+catalog positions (:func:`propagate_proper_motion`), is applied to a copy,
+when the product is ingested into a pipnick product.
+
 Coordinate frames
 -----------------
 
@@ -26,9 +37,11 @@ import numpy as np
 from astropy.coordinates import SkyCoord
 from astropy.io import fits
 from astropy.table import Table
-from astroquery.astrometry_net import conf as astrometry_net_conf
+from astropy.time import Time
+from astroquery import astrometry_net
 from astroquery.astrometry_net.core import AstrometryNetClass
 from astroquery.exceptions import TimeoutError
+from astroquery.utils.tap.core import TapPlus
 
 from pipnick import log
 from pipnick.pkg.exceptions import PipnickError
@@ -64,7 +77,7 @@ class AstrometryNetSolver:
     def __init__(self, api_key=None, solve_timeout=120):
         key = api_key
         if key is None:
-            key = os.environ.get('ASTROMETRY_NET_API_KEY', astrometry_net_conf.api_key)
+            key = os.environ.get('ASTROMETRY_NET_API_KEY', astrometry_net.conf.api_key)
         if key is None or len(key) == 0:
             raise PipnickError(
                 'No astrometry.net API key.  Set the ASTROMETRY_NET_API_KEY environment '
@@ -201,7 +214,8 @@ def icrs_header(header):
     -------
     :class:`astropy.io.fits.Header`
         A copy of the header, with ``RADESYS = 'ICRS'`` and without the
-        ``EQUINOX`` and (deprecated) ``RADECSYS`` keywords.
+        ``EQUINOX`` and (deprecated) ``RADECSYS`` keywords.  The provided
+        header is not modified.
     """
     hdr = fits.Header(header).copy()
     for key in ['EQUINOX', 'RADECSYS']:
@@ -270,12 +284,27 @@ def propagate_proper_motion(catalog, epoch):
 
 class GaiaCatalog:
     """
-    Provide Gaia DR3 sources near a position, caching every query.
+    Provide Gaia DR3 sources near a position, saving every query.
+
+    Queries are made with the Gaia archive TAP service
+    (https://gea.esac.esa.int/tap-server/tap), using
+    :class:`astroquery.utils.tap.core.TapPlus`.  This is the client that
+    ``astroquery.gaia`` is built on; ``astroquery.gaia`` itself is not used
+    because importing it contacts the Gaia archive (to print the archive
+    status messages).
+
+    Each query result is saved exactly as returned by the archive, as a
+    gzip-compressed VOTable (``gaia_<n>.vot.gz``), and is never modified.  The parameters of each
+    query are recorded in an index, ``gaia_queries.ecsv``, which is used to
+    find a saved query that covers a requested cone, so that each part of the
+    sky is queried only once.  The positions are propagated to the epoch of
+    the observation, and the sources in the requested cone selected, only when
+    they are returned by :meth:`sources`.
 
     Parameters
     ----------
     cache_dir : str, :class:`pathlib.Path`
-        Directory for the cached queries, written as ECSV files.
+        Directory for the saved queries and their index.
     mag_limit : float, optional
         The faintest G-band magnitude to return.
     max_sources : int, optional
@@ -290,30 +319,65 @@ class GaiaCatalog:
         self.max_sources = max_sources
         self.pad = pad
 
+    @property
+    def index_file(self):
+        """The index of the saved queries."""
+        return self.cache_dir / 'gaia_queries.ecsv'
+
+    def _read_index(self):
+        """
+        Read the index of the saved queries, or return None if there is none.
+        """
+        if not self.index_file.is_file():
+            return None
+        return Table.read(self.index_file, format='ascii.ecsv')
+
     def _find_cache(self, center, radius):
         """
-        Find a cached query that covers a cone, or return None.
+        Find a saved query that covers a cone, at least as deep and with at
+        least as many sources as this catalog, or return None.
         """
-        if not self.cache_dir.is_dir():
+        index = self._read_index()
+        if index is None:
             return None
-        for f in sorted(self.cache_dir.glob('gaia_*.ecsv')):
-            tbl = Table.read(f, format='ascii.ecsv')
-            cached = SkyCoord(tbl.meta['center_ra'], tbl.meta['center_dec'], unit='deg')
+        for row in index:
+            cached = SkyCoord(row['center_ra'], row['center_dec'], unit='deg')
             if (
-                tbl.meta['mag_limit'] >= self.mag_limit
-                and cached.separation(center).deg + radius <= tbl.meta['radius']
+                row['mag_limit'] >= self.mag_limit and row['max_sources'] >= self.max_sources
+                and cached.separation(center).deg + radius <= row['radius']
             ):
-                log.info(f'Using the cached Gaia query in {f.name}.')
-                return tbl
+                log.info(f'Using the saved Gaia query in {row["file"]}.')
+                return self.cache_dir / row['file']
         return None
 
-    def _query(self, center, radius):
+    def _query(self, query, output_file):
         """
-        Query the Gaia archive.  This is the only method that contacts it.
+        Query the Gaia archive, saving the result exactly as returned.  This is
+        the only method that contacts the archive.
+
+        Parameters
+        ----------
+        query : str
+            The ADQL query.
+        output_file : :class:`pathlib.Path`
+            The file for the result, a gzip-compressed VOTable.
         """
-        # NOTE: astroquery.gaia contacts the Gaia archive when it is imported, so
-        # it is only imported when a query is actually made.
-        from astroquery.gaia import Gaia
+        tap = TapPlus(
+            url='https://gea.esac.esa.int/', server_context='tap-server', tap_context='tap'
+        )
+        tap.launch_job(
+            query, output_file=str(output_file), output_format='votable', dump_to_file=True
+        )
+
+    def _new_query(self, center, radius):
+        """
+        Query the Gaia archive for a cone, and record the query in the index.
+
+        Returns
+        -------
+        :class:`pathlib.Path`
+            The file with the query result.
+        """
         query = (
             f'SELECT TOP {self.max_sources} ra, dec, pmra, pmdec, ref_epoch, phot_g_mean_mag '
             'FROM gaiadr3.gaia_source WHERE 1 = CONTAINS(POINT(ra, dec), '
@@ -323,7 +387,25 @@ class GaiaCatalog:
         log.info(
             f'Querying Gaia DR3 within {radius*60:.1f} arcmin of {center.to_string("hmsdms")}.'
         )
-        return Table(Gaia.launch_job(query).get_results())
+        index = self._read_index()
+        self.cache_dir.mkdir(parents=True, exist_ok=True)
+        # NOTE: The archive returns gzip-compressed VOTables; with the .gz extension,
+        # TapPlus saves the result to this file without renaming it
+        ofile = self.cache_dir / f'gaia_{0 if index is None else len(index):04d}.vot.gz'
+        self._query(query, ofile)
+        row = {
+            'file': ofile.name, 'center_ra': float(center.icrs.ra.deg),
+            'center_dec': float(center.icrs.dec.deg), 'radius': float(radius),
+            'mag_limit': float(self.mag_limit), 'max_sources': int(self.max_sources),
+            'date': Time.now().isot, 'query': query
+        }
+        if index is None:
+            index = Table(rows=[row])
+        else:
+            index.add_row(row)
+        index.write(self.index_file, format='ascii.ecsv', overwrite=True)
+        log.info(f'Saved the Gaia query result to {ofile.name}.')
+        return ofile
 
     def sources(self, center, radius, epoch):
         """
@@ -346,33 +428,10 @@ class GaiaCatalog:
         mag : :class:`numpy.ndarray`
             The G-band magnitudes.
         """
-        tbl = self._find_cache(center, radius)
-        if tbl is None:
-            qradius = radius * self.pad
-            tbl = self._query(center, qradius)
-            tbl.meta = {
-                'center_ra': float(center.icrs.ra.deg), 'center_dec': float(center.icrs.dec.deg),
-                'radius': float(qradius), 'mag_limit': float(self.mag_limit)
-            }
-            self.cache_dir.mkdir(parents=True, exist_ok=True)
-            ofile = self.cache_dir / (
-                f'gaia_{center.icrs.ra.deg:08.4f}_{center.icrs.dec.deg:+08.4f}_'
-                f'{qradius*60:.1f}.ecsv'
-            )
-            # Only the needed columns, with simple names
-            tbl = Table(
-                {
-                    'ra': np.asarray(tbl['ra'], dtype=float),
-                    'dec': np.asarray(tbl['dec'], dtype=float),
-                    'pmra': np.ma.asarray(tbl['pmra'], dtype=float),
-                    'pmdec': np.ma.asarray(tbl['pmdec'], dtype=float),
-                    'ref_epoch': np.asarray(tbl['ref_epoch'], dtype=float),
-                    'mag': np.asarray(tbl['phot_g_mean_mag'], dtype=float)
-                },
-                meta=tbl.meta
-            )
-            tbl.write(ofile, format='ascii.ecsv', overwrite=True)
-            log.info(f'Cached the Gaia query in {ofile.name}.')
+        path = self._find_cache(center, radius)
+        if path is None:
+            path = self._new_query(center, radius * self.pad)
+        tbl = Table.read(path, format='votable')
         coords = propagate_proper_motion(tbl, epoch)
         inside = coords.separation(center).deg <= radius
-        return coords[inside], np.asarray(tbl['mag'], dtype=float)[inside]
+        return coords[inside], np.asarray(tbl['phot_g_mean_mag'], dtype=float)[inside]

@@ -56,6 +56,7 @@ from pipnick.astrometry.fit import (
     wcs_from_transform, wcs_hash, wcs_residuals
 )
 from pipnick.astrometry.match import match_frames
+from pipnick.astrometry.qa import plot_solution
 from pipnick.astrometry.services import (
     AstrometryNetSolver, GaiaCatalog, astrometry_net_hints, icrs_header
 )
@@ -93,11 +94,15 @@ class AstrometryImage:
     input_hash : str
         The hash of what would be submitted to astrometry.net, used to find
         cached results; see :func:`_input_hash`.
+    comb_id : int, optional
+        The combination group of the image.
     """
     def __init__(
-        self, path, header, shape, pointing, epoch, scale, fwhm, sources, hints, input_hash
+        self, path, header, shape, pointing, epoch, scale, fwhm, sources, hints, input_hash,
+        comb_id=None
     ):
         self.path = path
+        self.comb_id = comb_id
         self.header = header
         self.shape = shape
         self.pointing = pointing
@@ -114,8 +119,18 @@ class AstrometryImage:
         self.submission_id = None
         self.submit_failed = False
         # The distance (arcmin) between the image center and the pointing in
-        # the metadata table, if the solution required the wide search
+        # the metadata table, if larger than the search distance (i.e., the
+        # pointing is likely incorrect); see _pointing_error
         self.pointing_error = None
+        # Whether the image is selected for solving
+        self.selected = True
+        # The last reasons the image could not be solved locally and could not
+        # be submitted, each as a (code, message) tuple; see _fail
+        self.reason = None
+        self.submit_reason = None
+        # The matched sources of a solution found in this run, for the QA
+        # figure; see plot_solution
+        self.matched = None
 
     @property
     def name(self):
@@ -137,6 +152,33 @@ class AstrometryImage:
         self.method = header['PNASTMTH']
         self.pointing_error = header.get('PNASTPOE')
         self.status = 'solved'
+        self.reason = None
+        self.submit_reason = None
+
+
+def _fail(image, code, message):
+    """
+    Record and log why an image could not be solved.
+
+    Parameters
+    ----------
+    image : :class:`AstrometryImage`
+        The image.
+    code : str
+        The kind of failure, used to suggest what the user can do (see
+        :func:`_suggestion`).  Failures to solve the image locally are
+        ``'few_matches'``, ``'few_matches_wide'``, ``'rejected'``, and
+        ``'no_reference'``; failures to submit it are ``'limit'``,
+        ``'waiting'``, and ``'submission_failed'``.  The last failure of each
+        kind is kept.
+    message : str
+        The explanation.
+    """
+    if code in ['limit', 'waiting', 'submission_failed']:
+        image.submit_reason = (code, message)
+    else:
+        image.reason = (code, message)
+    log.info(message)
 
 
 class _Session:
@@ -177,18 +219,26 @@ class _Session:
         """
         Check if an image can be submitted to astrometry.net.
         """
-        if image.submit_failed or image.status == 'pending':
+        if image.status == 'pending':
+            return False
+        if image.submit_failed:
+            _fail(
+                image, 'submission_failed',
+                f'Not submitting {image.name}: an earlier astrometry.net submission failed.'
+            )
             return False
         if len(self.pending) > 0:
             # A pending solution may allow this image to be solved without a
             # submission
-            log.info(
+            _fail(
+                image, 'waiting',
                 f'Not yet submitting {image.name}: waiting for the pending astrometry.net '
                 'submissions.'
             )
             return False
         if self.max_submissions is not None and self.nsubmitted >= self.max_submissions:
-            log.warning(
+            _fail(
+                image, 'limit',
                 f'Not submitting {image.name}: the limit of {self.max_submissions} astrometry.net '
                 'submissions has been reached.'
             )
@@ -260,8 +310,9 @@ def apply_wcs(
         - ``PNASTIN`` and ``PNASTSUB``: the hash of the astrometry.net input
           and the submission ID, for astrometry.net solutions;
         - ``PNASTPOE``: the distance in arcmin between the image center and
-          the pointing in the metadata table, for solutions that required the
-          wide search for an incorrect pointing (see :func:`astrometry_all`).
+          the pointing in the metadata table, if it is larger than the search
+          distance of :func:`astrometry_all`, i.e., if the pointing is likely
+          incorrect.
 
     The solution is written in its own frame (``RADESYS``).  Solutions found
     by :func:`astrometry_all` are in the ICRS; a solution provided by the
@@ -294,8 +345,7 @@ def apply_wcs(
     submission_id : str, optional
         The astrometry.net submission ID.
     pointing_error : float, optional
-        The pointing error in arcmin, for solutions that required the wide
-        search.
+        The pointing error in arcmin, if the pointing is likely incorrect.
 
     Returns
     -------
@@ -351,9 +401,14 @@ def _read_image(path):
     return data, mask, hdr
 
 
-def _load_images(metadata, rdxdir, tag, camera, upload_image):
+def _load_images(
+    metadata, rdxdir, tag, camera, upload_image, max_sources=100, detect_thresh=5., fwhm=None
+):
     """
     Read the reduced science images and detect their sources.
+
+    A warning is issued for images with fewer than 10 detected sources, which
+    are likely to be hard to solve.
 
     Parameters
     ----------
@@ -367,6 +422,14 @@ def _load_images(metadata, rdxdir, tag, camera, upload_image):
         The camera used to obtain the data.
     upload_image : bool
         Images will be uploaded to astrometry.net, instead of source lists.
+    max_sources : int, optional
+        The maximum number of (brightest) sources to detect in each image.
+    detect_thresh : float, optional
+        The detection threshold, as a multiple of the standard deviation of the
+        background.
+    fwhm : float, optional
+        The FWHM of the sources in arcsec.  If None, the typical value for the
+        camera is used.
 
     Returns
     -------
@@ -398,19 +461,92 @@ def _load_images(metadata, rdxdir, tag, camera, upload_image):
             metadata['ra'][i], metadata['dec'][i], unit=(units.hourangle, units.deg)
         )
         scale = camera.plate_scale * int(metadata['xbin'][i])
-        fwhm = camera.fwhm_guess / scale
-        sources = detect_sources(data, mask=mask, fwhm=fwhm)
+        fwhm_pix = (camera.fwhm_guess if fwhm is None else fwhm) / scale
+        sources = detect_sources(
+            data, mask=mask, fwhm=fwhm_pix, thresh=detect_thresh, nmax=max_sources
+        )
         # Allow for a pointing error of up to the image width
         radius = max(data.shape) * scale / 3600.
         hints = astrometry_net_hints(pointing, radius, scale)
         images.append(
             AstrometryImage(
                 path, hdr, data.shape, pointing, Time(metadata['mjd'][i], format='mjd').jyear,
-                scale, fwhm, sources, hints, _input_hash(data, sources, hints, upload_image)
+                scale, fwhm_pix, sources, hints, _input_hash(data, sources, hints, upload_image),
+                comb_id=product['comb_id']
             )
         )
         log.info(f'{path.name}: detected {len(sources)} sources.')
+        if len(sources) < 10:
+            log.warning(
+                f'Only {len(sources)} sources were detected in {path.name}, which may be hard to '
+                'solve; see the troubleshooting advice in the documentation.'
+            )
     return images
+
+
+def _anet_index_file(astro_dir):
+    """
+    Return the index of the astrometry.net submissions; see
+    :func:`_record_anet`.
+    """
+    return astro_dir / 'astrometry_net.ecsv'
+
+
+def _anet_record(astro_dir, input_hash):
+    """
+    Return the record of the astrometry.net submission of an input, or None;
+    see :func:`_record_anet`.
+    """
+    index_file = _anet_index_file(astro_dir)
+    if not index_file.is_file():
+        return None
+    index = Table.read(index_file, format='ascii.ecsv')
+    match = index['input_hash'] == input_hash
+    if not np.any(match):
+        return None
+    row = index[np.where(match)[0][0]]
+    return {k: str(row[k]) for k in index.colnames}
+
+
+def _record_anet(astro_dir, image, status, submission_id, solution):
+    """
+    Record the result of an astrometry.net submission.
+
+    The solutions returned by astrometry.net are saved exactly as returned
+    (``astrometry/anet_<hash>.fits``, where ``<hash>`` is the hash of the
+    input; see :func:`_input_hash`), and never modified.  The result of each
+    submission is recorded separately, in the index
+    ``astrometry/astrometry_net.ecsv``, with one row per input: the input
+    hash, the image, the status (``'solved'``, ``'failed'``, ``'rejected'``
+    by :func:`_check_submission`, or ``'pending'``), the submission ID, the
+    file with the solution (``'none'`` if there is none), and the date.
+
+    Parameters
+    ----------
+    astro_dir : :class:`pathlib.Path`
+        The directory with the index.
+    image : :class:`AstrometryImage`
+        The submitted image.
+    status : str
+        The status of the submission.
+    submission_id : str
+        The astrometry.net submission ID.
+    solution : str
+        The name of the file with the solution, or ``'none'``.
+    """
+    index_file = _anet_index_file(astro_dir)
+    row = {
+        'input_hash': image.input_hash, 'image': image.name, 'status': status,
+        'submission_id': str(submission_id), 'solution': solution, 'date': Time.now().isot
+    }
+    if index_file.is_file():
+        index = Table.read(index_file, format='ascii.ecsv')
+        index.remove_rows(np.where(index['input_hash'] == image.input_hash)[0])
+        index.add_row(row)
+    else:
+        index = Table(rows=[row])
+    astro_dir.mkdir(parents=True, exist_ok=True)
+    index.write(index_file, format='ascii.ecsv', overwrite=True)
 
 
 def _restore_solution(image, images, astro_dir):
@@ -423,10 +559,10 @@ def _restore_solution(image, images, astro_dir):
     solution not labeled as ICRS (see
     :func:`~pipnick.astrometry.services.icrs_header`).  Otherwise, a solution provided by
     the user (``astrometry/<image>_points.fits``) or a cached astrometry.net
-    result (``astrometry/anet_<hash>.fits``, matched by the hash of the input)
-    is applied.  A cached failure prevents the image from being submitted
-    again, and a cached pending submission is monitored instead of
-    submitting the image again.
+    result (matched by the hash of the input)
+    is applied (see :func:`_anet_record`).  A failed or rejected submission
+    prevents the image from being submitted again, and a pending submission
+    is monitored instead of submitting the image again.
 
     Parameters
     ----------
@@ -458,20 +594,21 @@ def _restore_solution(image, images, astro_dir):
     if points.is_file():
         image.set_solution(apply_wcs(image.path, wcs_from_header(fits.getheader(points))))
         return
-    cached = astro_dir / f'anet_{image.input_hash}.fits'
-    if not cached.is_file():
+    record = _anet_record(astro_dir, image.input_hash)
+    if record is None:
         return
-    hdr = fits.getheader(cached)
-    if hdr.get('PNANSTAT') == 'pending':
+    if record['status'] == 'pending':
         log.info(f'The astrometry.net submission for {image.name} is pending.')
         image.status = 'pending'
-        image.submission_id = hdr['PNASTSUB']
-    elif hdr.get('PNANSTAT') == 'solved':
+        image.submission_id = record['submission_id']
+    elif record['status'] == 'solved':
         log.info(f'Using the cached astrometry.net solution for {image.name}.')
+        # The solution as returned by astrometry.net, relabeled as ICRS
+        solution = fits.Header.fromfile(astro_dir / record['solution'])
         image.set_solution(
             apply_wcs(
-                image.path, wcs_from_header(icrs_header(hdr)), method='astrometry.net',
-                input_hash=image.input_hash, submission_id=hdr.get('PNASTSUB')
+                image.path, wcs_from_header(icrs_header(solution)), method='astrometry.net',
+                input_hash=image.input_hash, submission_id=record['submission_id']
             )
         )
     else:
@@ -550,8 +687,8 @@ def _pointing_offset(images):
     Return the median offset between the solved and the telescope pointing of
     the solved images, as longitude and latitude offsets in arcsec; see
     :func:`astropy.coordinates.SkyCoord.spherical_offsets_to`.  Images with
-    incorrect pointings (solved by the wide search) are excluded.  The offset
-    is 0 if no image is solved.
+    likely incorrect pointings (see :func:`_pointing_error`) are excluded.
+    The offset is 0 if no image is solved.
     """
     dlon = []
     dlat = []
@@ -571,10 +708,10 @@ def _predicted_center(image, images):
     Predict the coordinates of the center of an image from its pointing and
     the pointing offset of the solved images; see :func:`_pointing_offset`.
 
-    If an image solved by the wide search (i.e., with an incorrect pointing in
-    the metadata table) has the same pointing (to within 1 arcsec), the
-    pointing is likely stale for both, and the offset measured for that image
-    is used instead.
+    If a solved image with a likely incorrect pointing in the metadata table
+    (see :func:`_pointing_error`) has the same pointing (to within 1 arcsec),
+    the pointing is likely stale for both, and the offset measured for that
+    image is used instead.
     """
     for other in images:
         if (
@@ -585,6 +722,35 @@ def _predicted_center(image, images):
             return image.pointing.spherical_offsets_by(dlon, dlat)
     dlon, dlat = _pointing_offset(images)
     return image.pointing.spherical_offsets_by(dlon, dlat)
+
+
+def _pointing_error(image, wcs, session):
+    """
+    Check the pointing in the metadata table against a solution.
+
+    If the center of the solved image is farther from its pointing in the
+    metadata table than ``search``, the pointing is likely incorrect (e.g., a
+    stale pointing in the raw header).  This is reported in a warning, and the
+    image is excluded from the pointing offset used to predict the positions
+    of other images (see :func:`_pointing_offset`).
+
+    Returns
+    -------
+    float, None
+        The distance in arcmin between the image center and the pointing, if
+        it is larger than ``search``, or None otherwise.
+    """
+    center = image_center(wcs, image.shape)
+    offset = center.separation(image.pointing).arcsec
+    if offset <= session.search:
+        return None
+    log.warning(
+        f'{image.name} is centered at {center.to_string("hmsdms", sep=":", precision=1)}, '
+        f'{offset/60:.1f} arcmin from its pointing in the metadata table.  The pointing in the '
+        'raw header may be incorrect; consider correcting the RA and Dec in the metadata table '
+        'and rerunning pipnick_reduce.'
+    )
+    return offset / 60
 
 
 def _accept(image, wcs, stats, ref_wcs, session, min_matches=None):
@@ -609,9 +775,207 @@ def _accept(image, wcs, stats, ref_wcs, session, min_matches=None):
     if abs(scale / ref_scale - 1) > 0.02 or abs(drot) > 1. or parity != ref_parity:
         reasons.append('the pixel scale or rotation differs from the reference')
     if len(reasons) > 0:
-        log.info(f'Rejected the solution for {image.name}: {"; ".join(reasons)}.')
+        _fail(image, 'rejected', f'Rejected the solution for {image.name}: {"; ".join(reasons)}.')
         return False
     return True
+
+
+def _log_match(image, reference, match):
+    """
+    Log the details of an attempt to match the sources in an image to a
+    reference, at the debug level.
+    """
+    if match is None:
+        log.debug(f'{image.name} vs {reference}: no shift found in the search region.')
+        return
+    log.debug(
+        f'{image.name} vs {reference}: shift ({match["shift"][0]:.1f}, {match["shift"][1]:.1f}) '
+        f'pixels, rotation {np.degrees(match["rotation"]):.3f} deg, {match["nvotes"]} votes, '
+        f'{len(match["indx"])} matches, RMS {match["rms"]:.2f} pixels.'
+    )
+
+
+def _matched_positions(image, match, wcs, coords, label):
+    """
+    Return the matched sources of a solution for the QA figure: their pixel
+    coordinates, the pixel coordinates of their matches predicted by the
+    solution, and a label for the reference; see
+    :func:`~pipnick.astrometry.qa.plot_solution`.
+    """
+    xref, yref = wcs.world_to_pixel(coords)
+    return {
+        'x': np.asarray(image.sources['x'])[match['indx']],
+        'y': np.asarray(image.sources['y'])[match['indx']], 'xref': xref, 'yref': yref,
+        'label': label
+    }
+
+
+def _log_pointing_offset(images):
+    """
+    Log the median telescope pointing offset (see :func:`_pointing_offset`),
+    which sets the predicted positions of the images.
+    """
+    n = len([i for i in images if i.status == 'solved' and i.pointing_error is None])
+    if n == 0:
+        return
+    dlon, dlat = _pointing_offset(images)
+    log.info(
+        f'Median telescope pointing offset: {dlon.value:+.1f}, {dlat.value:+.1f} arcsec (east, '
+        f'north) from {n} solved images.'
+    )
+
+
+def _suggestion(image, images):
+    """
+    Suggest what the user can do to solve an image that could not be solved,
+    based on why it could not be solved locally and why it could not be
+    submitted; see :func:`_fail`.
+    """
+    suggestions = {
+        'few_matches': 'check the pointing in the metadata table, or increase --search',
+        'few_matches_wide': (
+            'check the pointing in the metadata table, or increase --search or --wide_search'
+        ),
+        'rejected': (
+            'the matches may be by chance if the pointing is wrong, so check the pointing in '
+            'the metadata table; otherwise, consider --max_rms'
+        ),
+        'no_reference': (
+            'solve another image in its pointing group or setup first'
+            if any(i.status == 'solved' for i in images)
+            else 'no image in the setup is solved, so a submission is needed'
+        ),
+        'limit': 'allow a submission (--max_submissions)',
+        'waiting': 'rerun to check the pending submission',
+        'submission_failed': (
+            'try --upload_image or provide a solution; use --resolve and --images to resubmit'
+        )
+    }
+    found = []
+    if len(image.sources) < 10:
+        found.append(
+            'few detected sources: try --detect_thresh, --upload_image, or provide a solution '
+            '(fit_wcs and apply_wcs)'
+        )
+    for reason in [image.reason, image.submit_reason]:
+        if reason is not None:
+            found.append(suggestions[reason[0]])
+    return 'see the log' if len(found) == 0 else '; '.join(found)
+
+
+def _summarize(images, astro_dir):
+    """
+    Log a summary of the solution of each image, and write it to
+    ``astrometry/summary.ecsv``.
+
+    The summary gives, for each image, its status (``solved``, ``unsolved``,
+    ``pending``, or ``skipped`` if not selected), the method, the reference,
+    the number of matched sources, the RMS residual (arcsec), and the
+    pointing error (arcmin; see :func:`_pointing_error`) of its solution, and,
+    for images that are not solved, the reason and a suggestion.
+    """
+    rows = []
+    for image in images:
+        status = (
+            image.status if image.status in ['solved', 'pending', 'skipped'] else 'unsolved'
+        )
+        hdr = image.header if image.status == 'solved' else {}
+        reason = '' if status == 'solved' else ' '.join(
+            r[1] for r in [image.reason, image.submit_reason] if r is not None
+        )
+        suggestion = _suggestion(image, images) if status == 'unsolved' else ''
+        rows.append(
+            {
+                'image': image.name, 'status': status, 'method': hdr.get('PNASTMTH', '-'),
+                'reference': hdr.get('PNASTREF', '-'), 'nmatch': hdr.get('PNASTNPT', -1),
+                'rms': hdr.get('PNASTRMS', -1.), 'pointing_error': hdr.get('PNASTPOE', -1.),
+                'reason': reason if len(reason) > 0 else '-',
+                'suggestion': suggestion if len(suggestion) > 0 else '-'
+            }
+        )
+    tbl = Table(rows=rows)
+    # Missing values are masked, not set to an invalid number
+    for name in ['nmatch', 'rms', 'pointing_error']:
+        tbl[name] = np.ma.MaskedArray(tbl[name], mask=np.asarray(tbl[name]) < 0)
+    astro_dir.mkdir(parents=True, exist_ok=True)
+    tbl.write(astro_dir / 'summary.ecsv', format='ascii.ecsv', overwrite=True)
+    log.info(
+        'Astrometry summary (also in astrometry/summary.ecsv):\n'
+        + '\n'.join(tbl['image', 'status', 'method', 'reference', 'nmatch', 'rms',
+                         'pointing_error'].pformat(max_lines=-1, max_width=-1))
+    )
+    for row in tbl:
+        if row['status'] == 'unsolved':
+            log.warning(f'{row["image"]} is not solved: {row["reason"]}  Suggestion: '
+                        f'{row["suggestion"]}.')
+
+
+def _write_qa(images, astro_dir, previous=None):
+    """
+    Write a QA figure for images to ``astrometry/qa/<image>.png``; see
+    :func:`~pipnick.astrometry.qa.plot_solution`.
+
+    Parameters
+    ----------
+    images : list
+        The :class:`AstrometryImage` objects.
+    astro_dir : :class:`pathlib.Path`
+        The ``astrometry`` directory.
+    previous : set, optional
+        The names of the images that were solved before this run, which are
+        skipped, along with images that are not solved.  If None, a figure is
+        written for every image (e.g., for a dry run).
+    """
+    qa_dir = astro_dir / 'qa'
+    qa_dir.mkdir(parents=True, exist_ok=True)
+    for image in images:
+        if previous is not None and (image.status != 'solved' or image.name in previous):
+            continue
+        data, mask, _ = _read_image(image.path)
+        title = f'{image.name}: {len(image.sources)} detected sources'
+        if image.status == 'solved':
+            title += f'; {image.method} solution'
+        plot_solution(
+            data, mask, image.sources, qa_dir / f'{image.path.stem}.png', matched=image.matched,
+            title=title
+        )
+    log.info(f'QA figures written to {qa_dir}.')
+
+
+def _select(images, selection):
+    """
+    Select the images to solve.
+
+    Parameters
+    ----------
+    images : list
+        The :class:`AstrometryImage` objects.  Their ``selected`` attribute is
+        set.
+    selection : list
+        The images to select, by file name, file name without the extension,
+        or combination group (``comb_id``).
+
+    Raises
+    ------
+    ValueError
+        Raised if an entry does not match any image.
+    """
+    unknown = []
+    for image in images:
+        image.selected = False
+    for item in selection:
+        found = False
+        for image in images:
+            if (
+                str(item) in [image.name, image.path.stem]
+                or (str(item).isdigit() and image.comb_id == int(item))
+            ):
+                image.selected = True
+                found = True
+        if not found:
+            unknown.append(str(item))
+    if len(unknown) > 0:
+        raise ValueError(f'No reduced science image matches: {", ".join(unknown)}.')
 
 
 def _fit_matched(image, match, ref_wcs, coords):
@@ -663,8 +1027,14 @@ def _bootstrap_frame(image, ref, images, session):
         np.asarray(ref.sources['x']), np.asarray(ref.sources['y']), expected=expected,
         search=session.search / image.scale, tol=max(2., image.fwhm)
     )
-    if match is None or len(match['indx']) < session.min_matches:
-        log.info(f'Too few sources in {image.name} match those in {ref.name}.')
+    _log_match(image, ref.name, match)
+    nmatch = 0 if match is None else len(match['indx'])
+    if nmatch < session.min_matches:
+        _fail(
+            image, 'few_matches',
+            f'{nmatch} of the {len(image.sources)} sources in {image.name} matched the '
+            f'{len(ref.sources)} sources in {ref.name} (minimum is {session.min_matches}).'
+        )
         return False
     # In the ICRS, even if the reference solution is in another frame
     coords = to_icrs(
@@ -679,9 +1049,10 @@ def _bootstrap_frame(image, ref, images, session):
     image.set_solution(
         apply_wcs(
             image.path, wcs, method='bootstrap', stats=stats, reference=ref.name,
-            reference_hash=ref.solution_hash
+            reference_hash=ref.solution_hash, pointing_error=_pointing_error(image, wcs, session)
         )
     )
+    image.matched = _matched_positions(image, match, wcs, coords, ref.name)
     log.info(
         f'Solved {image.name} from {ref.name} with {stats["npts"]} sources (RMS '
         f'{stats["rms"]:.2f} arcsec).'
@@ -700,8 +1071,10 @@ def _bootstrap_gaia(image, ref, images, session, wide=False):
     If ``wide`` is True, the match allows for an error of up to
     ``wide_search`` arcmin in the predicted position of the image, e.g.,
     because the pointing in the metadata table is incorrect, and at least
-    ``wide_min_matches`` matched sources are required.  The pointing error is
-    recorded in the header (``PNASTPOE``) and reported in a warning.
+    ``wide_min_matches`` matched sources are required.
+
+    For any solution, a pointing error larger than ``search`` is recorded in
+    the header (``PNASTPOE``) and reported; see :func:`_pointing_error`.
 
     Returns
     -------
@@ -720,38 +1093,40 @@ def _bootstrap_gaia(image, ref, images, session, wide=False):
         image_center(predicted, image.shape), radius, image.epoch
     )
     gx, gy = predicted.world_to_pixel(coords)
-    # Catalog sources that could be in the image, allowing for the search
+    # Catalog sources that could be in the image.  The wide search must allow
+    # for the large error in the predicted position; otherwise, sources outside
+    # the predicted image are excluded, because in sparse fields they only add
+    # false matches.
+    margin = search if wide else 0.
     inside = (
-        (gx >= -search) & (gx <= image.shape[1] - 1 + search) & (gy >= -search)
-        & (gy <= image.shape[0] - 1 + search)
+        (gx >= -margin) & (gx <= image.shape[1] - 1 + margin) & (gy >= -margin)
+        & (gy <= image.shape[0] - 1 + margin)
     )
     match = match_frames(
         np.asarray(image.sources['x']), np.asarray(image.sources['y']), gx[inside], gy[inside],
         search=search, tol=max(2., image.fwhm)
     )
-    if match is None or len(match['indx']) < min_matches:
-        log.info(
-            f'Too few sources in {image.name} match Gaia sources'
-            + (' in the wide search.' if wide else '.')
+    _log_match(image, 'Gaia DR3' + (' (wide search)' if wide else ''), match)
+    nmatch = 0 if match is None else len(match['indx'])
+    if nmatch < min_matches:
+        _fail(
+            image, 'few_matches_wide' if wide else 'few_matches',
+            f'{nmatch} of the {len(image.sources)} sources in {image.name} matched the '
+            f'{np.sum(inside)} Gaia sources expected in or near the field'
+            + (' in the wide search' if wide else '') + f' (minimum is {min_matches}).'
         )
         return False
     wcs, stats = _fit_matched(image, match, predicted, coords[inside][match['indx_ref']])
     if not _accept(image, wcs, stats, predicted, session, min_matches=min_matches):
         return False
-    pointing_error = None
-    if wide:
-        pointing_error = float(image_center(wcs, image.shape).separation(image.pointing).arcmin)
-        center = image_center(wcs, image.shape).to_string('hmsdms', sep=':', precision=1)
-        log.warning(
-            f'{image.name} is centered at {center}, {pointing_error:.1f} arcmin from its pointing '
-            'in the metadata table.  The pointing in the raw header may be incorrect; consider '
-            'correcting the RA and Dec in the metadata table and rerunning pipnick_reduce.'
-        )
     image.set_solution(
         apply_wcs(
             image.path, wcs, method='gaia', stats=stats, reference='Gaia DR3',
-            pointing_error=pointing_error
+            pointing_error=_pointing_error(image, wcs, session)
         )
+    )
+    image.matched = _matched_positions(
+        image, match, wcs, coords[inside][match['indx_ref']], 'Gaia DR3'
     )
     log.info(
         f'Solved {image.name} using Gaia with {stats["npts"]} sources (RMS '
@@ -779,10 +1154,15 @@ def _check_submission(image, wcs):
 
 def _handle_result(image, status, header, submission_id, session):
     """
-    Handle the result of an astrometry.net submission: apply and cache a
-    solution, cache a failure, or record and cache a pending submission.
+    Handle the result of an astrometry.net submission: save and apply a
+    solution, or record a failure or a pending submission; see
+    :func:`_record_anet`.
+
+    A returned solution is saved exactly as returned.  The solution applied to
+    the image is a copy relabeled as ICRS (see
+    :func:`~pipnick.astrometry.services.icrs_header`), after checking that it
+    is consistent with the submitted settings (see :func:`_check_submission`).
     """
-    cache = session.astro_dir / f'anet_{image.input_hash}.fits'
     if status == 'pending':
         log.info(
             f'The astrometry.net solution for {image.name} is not yet finished; it will be '
@@ -791,36 +1171,33 @@ def _handle_result(image, status, header, submission_id, session):
         image.status = 'pending'
         image.submission_id = submission_id
         session.pending.add(image.name)
-        hdr = fits.Header()
-        hdr['PNANSTAT'] = ('pending', 'astrometry.net result')
-        hdr['PNASTSUB'] = (str(submission_id), 'astrometry.net submission ID')
-        cache.parent.mkdir(parents=True, exist_ok=True)
-        fits.PrimaryHDU(header=hdr).writeto(cache, overwrite=True)
+        _record_anet(session.astro_dir, image, 'pending', submission_id, 'none')
         return
     image.status = None
     session.pending.discard(image.name)
-    # astrometry.net labels its solutions as FK5, but they are ICRS; see icrs_header
-    wcs = None if status != 'solved' else wcs_from_header(icrs_header(header))
-    if wcs is not None and not _check_submission(image, wcs):
-        wcs = None
-    cache.parent.mkdir(parents=True, exist_ok=True)
+    wcs = None
+    solution = 'none'
+    if status == 'solved':
+        solution = f'anet_{image.input_hash}.fits'
+        session.astro_dir.mkdir(parents=True, exist_ok=True)
+        # The solution exactly as returned by astrometry.net
+        header.tofile(session.astro_dir / solution, overwrite=True)
+        # astrometry.net labels its solutions as FK5, but they are ICRS; see icrs_header
+        wcs = wcs_from_header(icrs_header(header))
+        if not _check_submission(image, wcs):
+            wcs = None
     if wcs is None:
         log.warning(f'astrometry.net did not solve {image.name}.')
-        hdr = fits.Header()
-        hdr['PNANSTAT'] = ('failed', 'astrometry.net result')
-        hdr['PNASTSUB'] = (str(submission_id), 'astrometry.net submission ID')
-        fits.PrimaryHDU(header=hdr).writeto(cache, overwrite=True)
+        image.submit_reason = ('submission_failed', f'astrometry.net did not solve {image.name}.')
+        result = 'rejected' if status == 'solved' else 'failed'
+        _record_anet(session.astro_dir, image, result, submission_id, solution)
         image.submit_failed = True
         return
-    hdr = _solution_header(
-        wcs, 'astrometry.net', input_hash=image.input_hash, submission_id=submission_id
-    )
-    hdr['PNANSTAT'] = ('solved', 'astrometry.net result')
-    fits.PrimaryHDU(header=hdr).writeto(cache, overwrite=True)
+    _record_anet(session.astro_dir, image, 'solved', submission_id, solution)
     image.set_solution(
         apply_wcs(
             image.path, wcs, method='astrometry.net', input_hash=image.input_hash,
-            submission_id=submission_id
+            submission_id=submission_id, pointing_error=_pointing_error(image, wcs, session)
         )
     )
 
@@ -887,6 +1264,7 @@ def _solve_without_reference(image, images, session):
     """
     ref = _nearest_solved(image, images)
     if ref is None:
+        _fail(image, 'no_reference', f'No image in the setup is solved to match {image.name} to.')
         return False
     width = max(image.shape) * image.scale / 3600.
     center = _predicted_center(image, images)
@@ -937,6 +1315,11 @@ def _solve_group(group, images, session):
         if not _solve_without_reference(best, images, session) and session.can_submit(best):
             _submit(best, session)
         if best.status != 'solved':
+            for image in candidates[1:]:
+                image.reason = (
+                    'no_reference', f'No image in its pointing group was solved ({best.name} '
+                    'was tried first).'
+                )
             return
         ref = best
     for image in group:
@@ -978,6 +1361,7 @@ def _report_dry_run(images, groups, astro_dir):
         for image in group:
             state = (
                 f'solved ({image.method})' if image.status == 'solved'
+                else 'not selected' if image.status == 'skipped'
                 else 'not submitted (earlier submission failed)' if image.submit_failed
                 else 'unsolved'
             )
@@ -1011,7 +1395,8 @@ def _report_dry_run(images, groups, astro_dir):
 def astrometry_all(
     table, rdxdir=None, solver=None, catalog=None, api_key=None, resolve=False,
     upload_image=False, dry_run=False, max_submissions=None, group_radius=1., min_matches=4,
-    max_rms=0.3, search=30., wide_search=10., wide_min_matches=10
+    max_rms=0.3, search=60., wide_search=10., wide_min_matches=10, images=None, qa=False,
+    max_sources=100, detect_thresh=5., fwhm=None
 ):
     """
     Find the astrometric solutions of the reduced science images.
@@ -1042,9 +1427,9 @@ def astrometry_all(
         The astrometry.net API key, if ``solver`` is None; see
         :class:`~pipnick.astrometry.services.AstrometryNetSolver`.
     resolve : bool, optional
-        Ignore the existing and cached solutions, and solve every image
-        again.  This can submit jobs to astrometry.net for images that were
-        solved before.
+        Ignore the existing and cached solutions, and solve the images again
+        (only the selected images, if ``images`` is provided).  This can
+        submit jobs to astrometry.net for images that were solved before.
     upload_image : bool, optional
         Upload images to astrometry.net, instead of the lists of their
         detected sources.
@@ -1063,7 +1448,8 @@ def astrometry_all(
         The maximum RMS residual in arcsec for a bootstrapped solution.
     search : float, optional
         The maximum error in arcsec in the expected offset between matched
-        images (or between an image and the catalog).
+        images (or between an image and the catalog), e.g., from the error in
+        the telescope pointing.
     wide_search : float, optional
         For images that cannot be solved otherwise, the maximum error in
         arcmin in the expected position of the image when matching to the Gaia
@@ -1072,6 +1458,31 @@ def astrometry_all(
     wide_min_matches : int, optional
         The minimum number of matched sources for a solution found by the wide
         search.
+    images : list, optional
+        Only solve these images, given by file name, file name without the
+        extension, or combination group (``comb_id``).  The other images are
+        not changed, but their solutions are used as references.  If None, all
+        images are solved.
+    qa : bool, optional
+        Write a QA figure for each image solved in this run (for every image,
+        for a dry run) to ``astrometry/qa``; see
+        :func:`~pipnick.astrometry.qa.plot_solution`.
+    max_sources : int, optional
+        The maximum number of (brightest) sources detected in each image, and
+        submitted to astrometry.net.
+    detect_thresh : float, optional
+        The source detection threshold, as a multiple of the standard
+        deviation of the background.
+    fwhm : float, optional
+        The FWHM of the sources in arcsec, for their detection.  If None, the
+        typical value for the camera is used.
+
+    Changing ``max_sources``, ``detect_thresh``, or ``fwhm`` changes the
+    sources that would be submitted, so cached astrometry.net results for the
+    previous sources are not reused.
+
+    A summary of the solution of each image is logged and written to
+    ``astrometry/summary.ecsv``; see :func:`_summarize`.
 
     Returns
     -------
@@ -1089,33 +1500,45 @@ def astrometry_all(
     astro_dir = _rdxdir / 'astrometry'
     log.info(f'Astrometric calibration of the images in {_rdxdir}')
 
-    images = _load_images(metadata, _rdxdir, tag, camera, upload_image)
-    if len(images) == 0:
+    _images = _load_images(
+        metadata, _rdxdir, tag, camera, upload_image, max_sources=max_sources,
+        detect_thresh=detect_thresh, fwhm=fwhm
+    )
+    if len(_images) == 0:
         log.warning('No reduced science images to calibrate.')
         return []
-    by_name = {image.name: image for image in images}
-    if not resolve:
-        for image in images:
+    if images is not None:
+        _select(_images, images)
+    by_name = {image.name: image for image in _images}
+    for image in _images:
+        if not resolve or not image.selected:
             _restore_solution(image, by_name, astro_dir)
-        _invalidate_chains(images, by_name)
-    groups = group_by_pointing(images, group_radius)
+    _invalidate_chains(_images, by_name)
+    for image in _images:
+        if not image.selected and image.status != 'solved':
+            image.status = 'skipped'
+    _log_pointing_offset(_images)
+    groups = group_by_pointing(_images, group_radius)
 
     if dry_run:
-        _report_dry_run(images, groups, astro_dir)
-        return [image.path for image in images if image.status == 'solved']
+        _report_dry_run(_images, groups, astro_dir)
+        if qa:
+            _write_qa(_images, astro_dir)
+        return [image.path for image in _images if image.status == 'solved']
 
     session = _Session(
         solver, GaiaCatalog(astro_dir) if catalog is None else catalog, api_key, astro_dir,
         upload_image, max_submissions, min_matches, max_rms, search, wide_search, wide_min_matches
     )
-    session.pending = set(image.name for image in images if image.status == 'pending')
+    session.pending = set(image.name for image in _images if image.status == 'pending')
+    previous = set(image.name for image in _images if image.status == 'solved')
     # Solve the groups with a solved image first, then the richest groups
     groups.sort(key=_group_order)
     for group in groups:
-        _solve_group(group, images, session)
+        _solve_group(group, _images, session)
 
     # Check the pending submissions, and then solve the remaining groups
-    for image in images:
+    for image in _images:
         if image.status != 'pending':
             continue
         status, header, submission_id = session.solver().monitor(image.submission_id)
@@ -1127,20 +1550,21 @@ def astrometry_all(
             )
     groups.sort(key=_group_order)
     for group in groups:
-        _solve_group(group, images, session)
+        _solve_group(group, _images, session)
 
-    solved = [image for image in images if image.status == 'solved']
+    if qa:
+        _write_qa(_images, astro_dir, previous=previous)
+    _log_pointing_offset(_images)
+    _summarize(_images, astro_dir)
+    solved = [image for image in _images if image.status == 'solved']
     methods = {}
     for image in solved:
         methods[image.method] = methods.get(image.method, 0) + 1
-    unsolved = [image.name for image in images if image.status != 'solved']
     log.info(
-        f'Solved {len(solved)} of {len(images)} images ('
+        f'Solved {len(solved)} of {len(_images)} images ('
         + ', '.join(f'{n} {m}' for m, n in sorted(methods.items()))
         + f'), with {session.nsubmitted} astrometry.net submissions.'
     )
-    if len(unsolved) > 0:
-        log.warning(f'Unsolved images: {", ".join(unsolved)}')
     return [image.path for image in solved]
 
 

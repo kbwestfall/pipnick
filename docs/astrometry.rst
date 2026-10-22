@@ -73,11 +73,29 @@ The options are:
   be submitted, without solving or submitting anything.  The source lists
   that would be submitted are written to ``astrometry/dry_run``.
 - ``--max_submissions``: The maximum number of submissions to astrometry.net.
-- ``--resolve``: Ignore the existing and cached solutions and solve every image
-  again.  This can submit images that were solved before.
+- ``--images``: Only solve these images, given by file name (with or without
+  the extension) or combination group (``comb_id``).  The other images are not
+  changed, but their solutions are used as references.
+- ``--resolve``: Ignore the existing and cached solutions and solve the images
+  (only those given by ``--images``, if provided) again.  This can submit
+  images that were solved before.
+- ``--qa``: Write a check figure for each image solved in the run (for every
+  image, with ``--dry_run``) to ``astrometry/qa``.  It shows the image, the
+  detected sources (circles, numbered by brightness), and the sources matched
+  to the reference image or Gaia (crosses), with their residuals magnified
+  20 times (red).
+- ``--max_sources``, ``--detect_thresh``, ``--fwhm``: The maximum number of
+  (brightest) sources detected in each image (default 100), the detection
+  threshold as a multiple of the background noise (default 5), and the FWHM
+  of the sources in arcsec (default: typical for the camera).  Changing these
+  changes the sources that would be submitted, so earlier astrometry.net
+  results for an image are not reused.
 - ``--upload_image``: Upload the images (with masked pixels set to 0) instead
   of source lists, so that astrometry.net detects the sources.
 - ``--group_radius``, ``--min_matches``, ``--max_rms``: See `Overview`_.
+- ``--search``: The maximum error in arcsec in the expected position of an
+  image when matching it to another image or to Gaia, e.g., from the error in
+  the telescope pointing (default 60).
 - ``--wide_search``, ``--wide_min_matches``: The maximum pointing error in
   arcmin allowed by the wide search (default 10; 0 disables it), and the
   minimum number of matched sources it requires (default 10).  See
@@ -110,14 +128,46 @@ replacing any existing WCS, with these keywords recording how it was found:
   images bootstrapped from it are solved again on the next run.
 - ``PNASTIN`` and ``PNASTSUB``: The hash of the submitted input and the
   astrometry.net submission ID.
-- ``PNASTPOE``: For images solved by the wide search, the distance in arcmin
-  between the image center and the pointing in the metadata table.
+- ``PNASTPOE``: If the image center is farther than ``--search`` from the
+  pointing in the metadata table, i.e., if the pointing is likely incorrect,
+  the distance in arcmin between them.
 
-The ``astrometry`` subdirectory of the reduction directory holds the cached
-astrometry.net results (``anet_<hash>.fits``, including failed and pending
-submissions, which are not resubmitted), the cached Gaia queries
-(``gaia_*.ecsv``), and the solutions you provided (``<image>_points.fits``).
-Do not delete it unless you want to submit the images again.
+The ``astrometry`` subdirectory of the reduction directory holds:
+
+- ``anet_<hash>.fits``: Each solution returned by astrometry.net, saved
+  exactly as returned (a FITS header), where ``<hash>`` identifies the
+  submitted input.
+- ``astrometry_net.ecsv``: An index of the astrometry.net submissions, with
+  the input hash, image, status (``solved``, ``failed``, ``rejected``, or
+  ``pending``), submission ID, solution file, and date of each.  Failed and
+  rejected submissions are not resubmitted, and pending submissions are
+  checked again on the next run.
+- ``gaia_<n>.vot.gz``: Each Gaia query result, saved exactly as returned by
+  the Gaia archive (a gzip-compressed VOTable).
+- ``gaia_queries.ecsv``: An index of the Gaia queries, with the cone, the
+  magnitude limit, the maximum number of sources, the date, and the query
+  of each.  A saved query that covers an image is reused.
+- ``<image>_points.fits``: The solutions you provided (see
+  `Providing a solution`_).
+- ``summary.ecsv``: The summary of the last run; see
+  `Using the command-line script`_.
+- ``qa/<image>.png``: The check figures written with ``--qa``.
+- ``dry_run/<image>_sources.ecsv``: The detected sources, written with
+  ``--dry_run``.
+
+The products returned by astrometry.net and Gaia are never modified; any
+change (e.g., relabeling a solution as ICRS, see `Coordinate frames`_, or
+propagating Gaia positions to the epoch of the observation) is applied when
+they are used.  Do not delete this directory unless you want to submit the
+images or query Gaia again.
+
+The log and ``astrometry/summary.ecsv`` summarize the result for each image:
+its status (``solved``, ``unsolved``, ``pending``, or ``skipped`` if not
+selected by ``--images``), method, reference, number of matched sources, RMS
+residual, and pointing error.  For each unsolved image, the summary gives the
+reason it could not be solved and a suggestion.  With ``-v 2``, the log also
+gives the details of every attempt to match an image (the shift, rotation,
+number of votes and matches, and RMS residual).
 
 Incorrect telescope pointings
 -----------------------------
@@ -136,11 +186,17 @@ submission to astrometry.net:
   otherwise is matched to Gaia allowing for a pointing error of up to
   ``--wide_search`` arcmin (default 10), as long as another image in the
   same setup is solved.  Because chance matches are more likely over a wide
-  area, at least ``--wide_min_matches`` sources (default 10) must match.  The
-  pointing error is recorded in the header (``PNASTPOE``) and reported with a
-  warning that gives the true image center.  Other images with the same
-  (stale) pointing then use the measured error, so they are solved by the
-  usual matching, even if they have too few sources for the wide search.
+  area, at least ``--wide_min_matches`` sources (default 10) must match.
+  Other images with the same (stale) pointing then use the measured error,
+  so they are solved by the usual matching, even if they have too few sources
+  for the wide search.
+
+  Any image whose center is farther than ``--search`` (default 60 arcsec)
+  from its pointing in the metadata table, however it was solved, is
+  reported with a warning that gives the true image center, and the distance
+  is recorded in the header (``PNASTPOE``).  These images are not used to
+  measure the typical pointing offset used to predict the positions of the
+  other images.
 
 - **By correcting the metadata table.**  Edit the ``ra`` and ``dec`` of the
   affected frames in the metadata file (e.g., using the image centers
@@ -157,6 +213,68 @@ submission to astrometry.net:
   their headers, and ``pipnick_astrometry`` then solves them with the usual
   matching.  This is the better choice if the reduced images will be used
   elsewhere, because it also corrects the coordinates in their headers.
+
+Troubleshooting
+---------------
+
+Finding astrometric solutions can be difficult, e.g., for sparse fields,
+short exposures, or images with incorrect pointings.  If images are not
+solved, or their solutions are poor:
+
+- **Start with a dry run.**  ``--dry_run`` shows the pointing groups, the
+  number of sources detected in each image, and which images would be
+  submitted.  With ``--qa``, it writes a figure of each image with its
+  detected sources, so you can check that they are stars and not, e.g.,
+  knots in a galaxy, cosmic rays, or artifacts along the image edges.  Images
+  with fewer than about 10 sources (e.g., short exposures in the B band, or
+  sparse fields at high Galactic latitude) are the hardest to solve.
+
+- **Read the summary.**  The reason each image was not solved, and a
+  suggestion, are given at the end of the log and in
+  ``astrometry/summary.ecsv``.
+
+- **Check the pointing first.**  A warning that an image "is centered at ...
+  arcmin from its pointing" usually means that the RA and Dec in the raw
+  header are wrong; see `Incorrect telescope pointings`_.  Chance matches
+  rejected because of a large RMS residual are also a sign of a wrong
+  pointing.
+
+- **Allow for larger pointing errors.**  If images fail because too few of
+  their sources match and the telescope pointing is poor, increase
+  ``--search`` (default 60 arcsec).  For larger, isolated errors, increase
+  ``--wide_search``.
+
+- **Get one good solution first.**  Every other method builds on a solved
+  image in the same setup, so make sure the richest image is solved (e.g.,
+  with ``--max_submissions 1``).  This is usually enough for the whole setup:
+  images in other pointing groups are matched to Gaia using its solution.  If
+  a pointing group still cannot be solved (e.g., in a sparse field), solving
+  one image in that group (by a submission, or by providing a solution)
+  allows the rest of the group to be bootstrapped from it.
+
+- **Adjust the source detection.**  In sparse fields, a lower
+  ``--detect_thresh`` finds more (fainter) sources; in crowded fields, a
+  smaller ``--max_sources`` keeps only the brightest.  ``--fwhm`` should match
+  the seeing.
+
+- **Sparse fields.**  Lowering ``--min_matches`` makes false matches more
+  likely.  Instead, provide a solution yourself from a handful of identified
+  stars (see `Providing a solution`_), or let astrometry.net detect the
+  sources with ``--upload_image``.
+
+- **Rejected solutions.**  The log gives the reason, e.g., "RMS residual is
+  0.41 arcsec".  In poor seeing or crowded fields, a modestly larger
+  ``--max_rms`` (e.g., 0.5) may be acceptable for your science; check the
+  ``--qa`` figure first.
+
+- **Iterate on the problem images.**  ``--images`` limits a run to the images
+  you are working on.  Results are cached, and failed submissions are not
+  repeated; ``--resolve`` ignores all of this and can submit again, so combine
+  it with ``--images`` and ``--max_submissions``.
+
+- **Inspect the result.**  Check ``PNASTMTH``, ``PNASTNPT``, ``PNASTRMS``, and
+  ``PNASTPOE`` in the headers (or ``astrometry/summary.ecsv``), and the
+  ``--qa`` figures.
 
 Coordinate frames
 -----------------

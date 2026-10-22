@@ -515,3 +515,71 @@ which images *would* be submitted.
    `pipnick_astrometry --wide_search 0 --max_submissions 0` solved all 22
    with the usual matching. Documented in `docs/astrometry.rst` ("Incorrect
    telescope pointings").
+
+## Imports and products of the services (user request)
+
+**Imports:**
+- `import astroquery.gaia` creates a module-level `GaiaClass()`, which makes
+  one HTTP request to the Gaia archive for status messages. That costs about
+  0.7 s per import, prints a banner, and cannot be disabled.
+- `GaiaCatalog` now uses `astroquery.utils.tap.core.TapPlus` (the client
+  `GaiaClass` is built on) with the same server, imported at the top of
+  `services.py`. Constructing it makes no request.
+
+**Network blocking in tests:** `pytest-remotedata` blocks the internet only
+with `remote_data_strict = true`, which was missing. It is now in
+`pyproject.toml`. The earlier claim that it blocked internet access in tests
+was wrong; `conftest.py` was the only guard. `conftest.py` now also blocks
+`TapPlus.launch_job`.
+
+**Products are kept as returned:**
+- Gaia results are saved as returned (`gaia_<n>.vot.gz`; TapPlus keeps the
+  `.gz` name), with the index `gaia_queries.ecsv`.
+- astrometry.net solutions are saved as returned (`anet_<hash>.fits`, via
+  `Header.tofile`), with the index `astrometry_net.ecsv` holding the status,
+  submission ID, solution file and date.
+- The relabelling, proper-motion propagation and column selection are applied
+  on use.
+- Tests compare the saved files with what was returned, byte for byte or card
+  for card.
+
+**Fixes found on real data while verifying:**
+- **Normal search radius:** NGC 3982 B has a 31 arcsec pointing error and
+  only about 8 Gaia matches. The 30 arcsec search was too tight, so the
+  default `search` is now 60 arcsec (`--search`).
+- **Pointing errors from any method:** images bootstrapped from a
+  stale-pointing image were not flagged, and their 5.4 arcmin offsets skewed
+  the median pointing offset. `_pointing_error` now flags any solution more
+  than `search` from its table pointing: it writes `PNASTPOE`, warns, and
+  excludes the image from the offset model. All 8 stale frames are now
+  reported, and there are no false warnings.
+- **Catalog margin:** the margin around the predicted image is applied only in
+  the wide search.
+
+**Result:** both real-data copies solve 22 of 22 with 0 submissions.
+
+## Iteration tools and logging (user request)
+
+- **Troubleshooting section** in `docs/astrometry.rst`. The "one good
+  solution" bullet was clarified: one solved image per setup usually
+  suffices (other groups are matched to Gaia), and solving one image per
+  failing pointing group helps when that fails.
+- **Options:**
+  - `--images` (file names or comb_ids; `--resolve` applies only to them);
+  - `--qa` (figures in `astrometry/qa/`, made with matplotlib `Figure`, not
+    pyplot);
+  - `--max_sources`, `--detect_thresh`, `--fwhm`.
+  - `--gaia_mag_limit` was skipped (user decision).
+  - The summary is written on every run (no `--summary` flag).
+- **Logging:**
+  - numeric failure messages;
+  - two recorded reasons per image (`reason` for local solving,
+    `submit_reason` for submission), combined in the summary with
+    suggestions;
+  - the end-of-run summary table, also in `astrometry/summary.ecsv`;
+  - the median pointing-offset report;
+  - a warning for fewer than 10 detections;
+  - debug-level match details (`match_frames` now returns `nvotes`).
+- **Real data** (`--max_submissions 0`): 22 of 22 solved and 21 QA figures.
+  The figures show spurious detections (galaxy knots in NGC 3982, edge and
+  masked-column artifacts), which supports the deferred source vetting.
