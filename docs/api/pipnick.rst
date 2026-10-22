@@ -14,6 +14,14 @@ Subpackages
    pipnick.scripts
    pipnick.utils
 
+Submodules
+----------
+
+.. toctree::
+   :maxdepth: 4
+
+   pipnick.metadata
+
 Module contents
 ---------------
 

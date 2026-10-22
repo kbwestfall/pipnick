@@ -4,8 +4,9 @@ from scipy import linalg
 from astropy import stats
 
 
-def photometric_calibration_coefficients_iterej(mag_c, mag_i, airmass, color_defs, order=2,
-                                                weights=None, gpm=None, rej=3., maxiter=3):
+def photometric_calibration_coefficients_iterej(
+    mag_c, mag_i, airmass, color_defs, order=2, weights=None, gpm=None, rej=3., maxiter=3
+):
     r"""
     Iteratively determine the photometric calibration coefficients by
     fitting the data and then rejecting outliers.
@@ -90,9 +91,10 @@ def photometric_calibration_coefficients_iterej(mag_c, mag_i, airmass, color_def
         for i in range(nmags):
             color = np.squeeze(-np.diff(mag_c[:,color_defs[i]], axis=1))
             gpm_i = _gpm[:,i] & _gpm[:,color_defs[i][0]] & _gpm[:,color_defs[i][1]]
-            coeff[i] = photometric_calibration_coefficients(mag_c[:,i], color, mag_i[:,i],
-                                                            airmass[:,i], order=order, 
-                                                            weights=weights, gpm=gpm_i)
+            coeff[i] = photometric_calibration_coefficients(
+                mag_c[:,i], color, mag_i[:,i], airmass[:,i], order=order, weights=weights,
+                gpm=gpm_i
+            )
         # Apply the calibration to get the calibrated magnitudes
         app_mag = apply_photometric_calibration(mag_i, airmass, coeff, color_defs, gpm=_gpm)
         # Get the difference between the catalog and calibrated
@@ -114,8 +116,9 @@ def photometric_calibration_coefficients_iterej(mag_c, mag_i, airmass, color_def
     return coeff, app_mag, _gpm
 
 
-def photometric_calibration_coefficients(mag_c, color_c, mag_i, airmass, order=2, weights=None,
-                                         gpm=None):
+def photometric_calibration_coefficients(
+    mag_c, color_c, mag_i, airmass, order=2, weights=None, gpm=None
+):
     r"""
     Determine photometric calibration coefficients.
 
@@ -234,8 +237,9 @@ def apparent_mag(mag_i, color, airmass, coeffs):
     return mag_i - np.dot(coeffs, x)
 
 
-def apply_photometric_calibration(mag, airmass, coeff, color_defs, atol=1e-2, maxiter=10,
-                                  gpm=None):
+def apply_photometric_calibration(
+    mag, airmass, coeff, color_defs, atol=1e-2, maxiter=10, gpm=None
+):
     r"""
     Apply photometric calibration coefficients to a set of observations.
 
@@ -313,8 +317,9 @@ def apply_photometric_calibration(mag, airmass, coeff, color_defs, atol=1e-2, ma
     i = 0
     while rms > atol and i < maxiter:
         # Calculate all the apparent mags
-        app_mag = np.column_stack([apparent_mag(m, c, a, k)
-                            for m, c, a, k in zip(mag.T, color.T, airmass.T, coeff)])
+        app_mag = np.column_stack(
+            [apparent_mag(m, c, a, k) for m, c, a, k in zip(mag.T, color.T, airmass.T, coeff)]
+        )
         # Get the updated color
         updated_color = np.column_stack([-np.diff(app_mag[:,c], axis=1) for c in color_defs])
         # Get the RMS difference with the old color

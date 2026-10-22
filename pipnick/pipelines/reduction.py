@@ -13,7 +13,10 @@ from astropy import units
 import ccdproc
 
 from pipnick import cameras
-from pipnick.utils import dir_nav
+from pipnick.pkg.exceptions import PipnickDataModelError
+from pipnick.metadata import (
+    build_metadata, default_reduced_file_name, frame_path, update_metadata_meta
+)
 from pipnick import log
 
 
@@ -34,22 +37,24 @@ def reduce_all(rawdir=None, table=None, rdxdir=None, overwrite=False, append=Fal
     table : str, :class:`pathlib.Path`, optional
         A file with the tabulated data to reduce.  If None, this file is
         automatically generated based on the data found and reduced in
-        ``rawdir``; see :func:`~pipnick.utils.dir_nav.build_metadata`.
+        ``rawdir``; see :func:`~pipnick.metadata.build_metadata`.
     rdxdir : str, :class:`pathlib.Path`, optional
         Top-level directory for the reduced data.  If None, this is the parent
         directory of ``rawdir``.  I.e., if the raw directory is
         ``/User/janedoe/Nickel/raw``, ``rdxdir`` will be set to
         ``/User/janedoe/Nickel/``.
     overwrite : bool, optional
-        Overwrite any existing files.
+        Overwrite any existing reduction products.  An existing metadata
+        ``table`` is never rebuilt, to preserve any user edits; use
+        ``pipnick_metadata --overwrite`` to rebuild it.
     append : bool, optional
-        If the data-reduction table already exists, add any new science frames
-        found in the raw data directory to the provided table.  In effect, this
-        simply overwrites the existing ``table`` with a new listing of files in
-        ``rawdir``.  The difference with ``overwrite`` is that the *products* of
-        the reduction are *not* overwritten.  This means that new raw
-        calibration frames are ignored.  To incorporate new calibration files in
-        the reduction, you should set ``overwrite=True``.
+        If the data-reduction table already exists, add any new frames found in
+        the raw data directory to the provided table, preserving the existing
+        rows (including user edits and commented-out rows); see
+        :func:`~pipnick.metadata.build_metadata`.  The existing *products* of
+        the reduction are *not* overwritten, so new raw calibration frames do
+        not change existing combined calibrations.  To incorporate new
+        calibration files in the reduction, you should set ``overwrite=True``.
 
     Returns
     -------
@@ -57,9 +62,31 @@ def reduce_all(rawdir=None, table=None, rdxdir=None, overwrite=False, append=Fal
         Paths to the reduced images written to disk.
     """
     # Organize raw files based on input directory or table
-    metafile, metadata = dir_nav.build_metadata(
-        rawdir=rawdir, filename=table, overwrite=overwrite or append, rdxdir=rdxdir
+    # NOTE: overwrite applies to the reduction products, not the metadata table;
+    # rebuilding an existing table would discard any user edits to it.
+    metafile, metadata = build_metadata(
+        rawdir=rawdir, filename=table, append=append, rdxdir=rdxdir
     )
+
+    # TODO: Match the calibrations to the science frames by setup, so that
+    # data from more than one setup can be reduced together.
+    if 'setup' not in metadata.colnames:
+        raise PipnickDataModelError(
+            f'{metafile} has no setup column; it was likely built by an '
+            'older version of pipnick.  Rebuild it using '
+            'pipnick_metadata.'
+        )
+    setups, counts = np.unique(metadata['setup'], return_counts=True)
+    if len(setups) > 1:
+        definitions = metadata.meta.get('setups', {})
+        summary = '\n'.join(
+            f'    {s} ({n} frames): {definitions.get(s)}' for s, n in zip(setups, counts)
+        )
+        raise PipnickDataModelError(
+            f'{metafile} includes frames from more than one setup:\n'
+            f'{summary}\nData from only one setup can be reduced at a '
+            'time.  Comment out the rows for the other setups.'
+        )
 
     # Get the output directory
     if 'rdxdir' in metadata.meta:
@@ -67,8 +94,8 @@ def reduce_all(rawdir=None, table=None, rdxdir=None, overwrite=False, append=Fal
     else:
         _rdxdir = Path(metadata.meta['rawdir']).absolute().parent
         metadata.meta['rdxdir'] = str(_rdxdir)
-        # Overwrite the file to include the reduction directory
-        metadata.write(metafile, format='ascii.ecsv', overwrite=True)
+        # Update the file to include the reduction directory
+        update_metadata_meta(metafile, rdxdir=str(_rdxdir))
     if not _rdxdir.is_dir():
         _rdxdir.mkdir(parents=True)
 
@@ -82,26 +109,29 @@ def reduce_all(rawdir=None, table=None, rdxdir=None, overwrite=False, append=Fal
         log.warning('No bias frames available. Attempting to continue anyway...')
 
     # Get the super flat.  Try to get sky flats first:
-    super_flat = get_super_flats(metadata, rdxdir=metadata.meta['rdxdir'],
-                                 flattype='skyflat', bias=super_bias, overwrite=overwrite)
+    super_flat = get_super_flats(
+        metadata, rdxdir=metadata.meta['rdxdir'], flattype='skyflat', bias=super_bias,
+        overwrite=overwrite
+    )
     # If there were no sky flats, try finding some dome flats
     if super_flat is None:
-        super_flat = get_super_flats(metadata, rdxdir=metadata.meta['rdxdir'],
-                                     flattype='domeflat', bias=super_bias, overwrite=overwrite)
+        super_flat = get_super_flats(
+            metadata, rdxdir=metadata.meta['rdxdir'], flattype='domeflat', bias=super_bias,
+            overwrite=overwrite
+        )
     # Still no flats.  Warn the user and keep going
     if super_flat is None:
         log.warning('No flat frames available.  Attempting to continue anyway...')
     
-    # Assume all unknown frame types are on-sky science observations (but this
-    # will include pointing and focus frames!)
-    is_science = metadata['frametype'] == 'None'
+    # Reduce the science frames; pointing and focus frames have their own types
+    is_science = metadata['frametype'] == 'science'
     if np.sum(is_science) == 0:
         log.warning('No science frames available.  Reduction will end.')
         return metadata
     
     # Perform the basic processing of all science frames
     rdx_file = np.empty(len(metadata), dtype=object)
-    frame = dir_nav.frame_path(metadata, path_key='rawdir')
+    frame = frame_path(metadata, path_key='rawdir')
     nfiles = len(metadata)
     for i in range(nfiles):
         if not is_science[i]:
@@ -113,7 +143,7 @@ def reduce_all(rawdir=None, table=None, rdxdir=None, overwrite=False, append=Fal
             flat = super_flat[metadata['filter'][i]]
 
         # Trim and overscan correct it
-        rdx_file[i] = _rdxdir / dir_nav.default_reduced_file_name(frame[i])
+        rdx_file[i] = _rdxdir / default_reduced_file_name(frame[i])
         if rdx_file[i].is_file() and not overwrite:
             log.info(f'{rdx_file[i]} exists and overwrite is False.  Continuing...')
             continue
@@ -161,26 +191,36 @@ def init_ccddata(frame, bpm=None, saturation=None, gain=None, readnoise=None):
     # Determine the camera used
     try:
         camera = cameras.identify_camera(ccd.header)
-    except:
+    except PipnickDataModelError:
         warnings.warn(f'Unable to determine camera used for {_frame.name}.')
         camera = None
+        readout = None
     else:
-        ccd.meta['camera'] = camera
-        camera = eval(f'cameras.{camera}')
+        ccd.meta['camera'] = camera.name
+        readout = camera.readout(ccd.header)
+        if readout.placeholder:
+            log.warning(
+                f'The {camera.name} gain and read noise for the {readout.mode} readout '
+                'are placeholders.'
+            )
 
     # Mask bad pixels
-    _bpm = camera.bpm() if bpm is None and camera is not None else bpm
+    _bpm = camera.bpm(ccd.header) if bpm is None and camera is not None else bpm
     if _bpm is not None:
         ccd.mask = _bpm
 
     # Mask saturated pixels; saturation is in ADU
-    _sat = camera.saturation if saturation is None and camera is not None else saturation
+    _sat = readout.saturation if saturation is None and readout is not None else saturation
     if _sat is not None:
+        if ccd.mask is None:
+            ccd.mask = np.zeros(ccd.data.shape, dtype=bool)
         ccd.mask[ccd.data >= _sat] = True
 
     # Get and save the RN (in electrons) and gain (in electrons/ADU)
-    ccd.meta['PROCGAIN'] = camera.gain if gain is None else gain
-    ccd.meta['PROCRN'] = camera.readnoise if readnoise is None else readnoise
+    ccd.meta['PROCGAIN'] = readout.gain if gain is None and readout is not None else gain
+    ccd.meta['PROCRN'] = (
+        readout.readnoise if readnoise is None and readout is not None else readnoise
+    )
 
     # Apply gain if available
     if ccd.meta['PROCGAIN'] is not None:
@@ -216,15 +256,17 @@ def process_frame(raw_frame, bias=None, flat=None, flag_cosmics=True):
     """
 #    warnings.simplefilter("error", RuntimeWarning)
     ccd = init_ccddata(raw_frame)
-    try:
-        oscansec = eval(f'cameras.{ccd.meta["camera"]}').oscansec(ccd.header)
-    except:
-        log.warning('Could not determine overscan region!')
-        oscansec = None
+    if 'camera' not in ccd.meta:
+        log.warning('Unknown camera; cannot determine the overscan and data sections!')
     else:
-        log.info('Subtracting overscan and trimming image.')
-        ccd = ccdproc.subtract_overscan(ccd, fits_section=oscansec, overscan_axis=1)
-        ccd = ccdproc.trim_image(ccd, fits_section=ccd.header['DATASEC'])
+        datasec, biassec = cameras.get_camera(ccd.meta['camera']).sections(ccd.header)
+        if biassec is None:
+            log.warning('Frame has no overscan region.')
+        else:
+            log.info('Subtracting overscan.')
+            ccd = ccdproc.subtract_overscan(ccd, fits_section=biassec, overscan_axis=1)
+        log.info('Trimming image.')
+        ccd = ccdproc.trim_image(ccd, fits_section=datasec)
     if bias is not None:
         log.info('Subtracting super bias')
         ccd = ccdproc.subtract_bias(ccd, bias)
@@ -233,8 +275,9 @@ def process_frame(raw_frame, bias=None, flat=None, flag_cosmics=True):
         ccd = ccdproc.flat_correct(ccd, flat)
     if flag_cosmics:
         log.info(f'Removing cosmic rays from {raw_frame}')
-        ccd = ccdproc.cosmicray_lacosmic(ccd, gain_apply=False, gain=1.0,
-                                         readnoise=ccd.meta['PROCRN'], verbose=True)
+        ccd = ccdproc.cosmicray_lacosmic(
+            ccd, gain_apply=False, gain=1.0, readnoise=ccd.meta['PROCRN'], verbose=True
+        )
     return ccd
 
 
@@ -255,8 +298,10 @@ def stack_frames(raw_frames, scale=False, bias=None, flat=None, flag_cosmics=Tru
         Combined CCDData object.
     """
     # TODO: For *many* images, this may be too memory intensive.
-    rdx_frames = [process_frame(frame, bias=bias, flat=flat, flag_cosmics=flag_cosmics) 
-                    for frame in raw_frames]
+    rdx_frames = [
+        process_frame(frame, bias=bias, flat=flat, flag_cosmics=flag_cosmics)
+        for frame in raw_frames
+    ]
 
     # TODO: Need to figure out how to handle the scaling; i.e., how is this
     # passed to the combiner?
@@ -275,9 +320,10 @@ def stack_frames(raw_frames, scale=False, bias=None, flat=None, flag_cosmics=Tru
         # TODO:
         #   - does ccdproc provide an iterative sigma clipper?
         #   - allow user to change the clipping parameters
-        combiner.data_arr = sigma_clip(combiner.data_arr, sigma=5., maxiters=1,
-                                       cenfunc=np.ma.mean, stdfunc=np.ma.std,
-                                       axis=0, masked=True, copy=False)
+        combiner.data_arr = sigma_clip(
+            combiner.data_arr, sigma=5., maxiters=1, cenfunc=np.ma.mean, stdfunc=np.ma.std, axis=0,
+            masked=True, copy=False
+        )
         old_n_masked = new_n_masked
         new_n_masked = combiner.data_arr.mask.sum()
 
@@ -324,7 +370,7 @@ def get_super_bias(metadata, rdxdir=None, overwrite=False):
 
     log.info(f'Found {nbias} bias frames to process and combine.')
 
-    frames = dir_nav.frame_path(metadata, select=indx, path_key='rawdir')
+    frames = frame_path(metadata, select=indx, path_key='rawdir')
     super_bias = stack_frames(frames, flag_cosmics=False)
 
     if rdxdir is None:
@@ -336,8 +382,9 @@ def get_super_bias(metadata, rdxdir=None, overwrite=False):
     return super_bias
 
 
-def get_super_flats(metadata, rdxdir=None, flattype='skyflat', bias=None, filter=None,
-                    overwrite=False):
+def get_super_flats(
+    metadata, rdxdir=None, flattype='skyflat', bias=None, filter=None, overwrite=False
+):
     """
     Create combined (super) flat frames (one per filter) from individual flat
     frames.
@@ -389,7 +436,7 @@ def get_super_flats(metadata, rdxdir=None, flattype='skyflat', bias=None, filter
                 continue
     
         log.info(f'Processing and combining {np.sum(_indx)} {f} flats')
-        frames = dir_nav.frame_path(metadata, select=_indx, path_key='rawdir')
+        frames = frame_path(metadata, select=_indx, path_key='rawdir')
         super_flat[f] = stack_frames(frames, scale=True, bias=bias, flag_cosmics=False)
         if _rdxdir is None:
             continue

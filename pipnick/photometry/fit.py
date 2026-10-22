@@ -20,8 +20,7 @@ from pipnick import log
 from pipnick.utils.fits_class import Fits_Simple
 from pipnick.photometry.moffat import FitEllipticalMoffat2D, FitMoffat2D, make_ellipse
 #from pipnick.photometry.starfind import generate_stamps
-from pipnick.utils.dir_nav import unzip_directories
-from pipnick.utils.nickel_data import plate_scale_approx
+from pipnick.utils.fits_class import unzip_directories
 
 
 def fit_psf_stack(input_base, num_images, fittype='ellip', ofile=None):
@@ -45,8 +44,9 @@ def fit_psf_stack(input_base, num_images, fittype='ellip', ofile=None):
     :class:`numpy.ndarray`
         Fit of all sources stacked (fit.par = parameters).
     """
-    return fit_psf_generic('stack', input_base, num_images, fittype, 
-                           ofile=ofile)
+    return fit_psf_generic(
+        'stack', input_base, num_images, fittype, ofile=ofile
+    )
 
 def fit_psf_single(input_base, num_images, fittype='ellip', sigma_clip=True):
     """
@@ -73,11 +73,44 @@ def fit_psf_single(input_base, num_images, fittype='ellip', sigma_clip=True):
     img_nums : :class:`numpy.ndarray`
         Image number of all sources.
     """
-    return fit_psf_generic('single', input_base, num_images, fittype, 
-                           sigma_clip=sigma_clip, ofile=None)
+    return fit_psf_generic(
+        'single', input_base, num_images, fittype, sigma_clip=sigma_clip, ofile=None
+    )
 
-def fit_psf_generic(mode, input_base, num_images, fittype='ellip', 
-                    sigma_clip=True, ofile=None):
+def _moffat_p0(fittype, amplitude, stamp_width, gamma, alpha):
+    """
+    Construct the initial guess for the Moffat parameters of a stamp.
+
+    Parameters
+    ----------
+    fittype : str
+        Type of model to fit ('ellip' or 'circ').
+    amplitude : float
+        Initial guess for the amplitude.
+    stamp_width : int
+        Width of the (square) stamp in pixels; the center is the initial guess
+        for the source position.
+    gamma : float
+        Initial guess for the Moffat core width; both widths for 'ellip'.
+    alpha : float
+        Initial guess for the Moffat power index.
+
+    Returns
+    -------
+    :class:`numpy.ndarray`
+        The initial parameters, ordered as expected by
+        :class:`~pipnick.photometry.moffat.FitEllipticalMoffat2D` ('ellip') or
+        :class:`~pipnick.photometry.moffat.FitMoffat2D` ('circ').
+    """
+    center = float(stamp_width // 2)
+    if fittype == 'ellip':
+        return np.array([center, center, amplitude, gamma, gamma, 0.0, alpha, 0.0])
+    return np.array([center, center, amplitude, gamma, alpha, 0.0])
+
+
+def fit_psf_generic(
+    mode, input_base, num_images, fittype='ellip', sigma_clip=True, ofile=None
+):
     """
     Generic function to fit PSFs to images.
 
@@ -147,21 +180,15 @@ def fit_psf_generic(mode, input_base, num_images, fittype='ellip',
         alpha = 3.5
         gamma = default_fwhm / 2 / np.sqrt(2**(1/alpha)-1)
         
-        def get_p0(fittype, stamp):
-            if fittype == 'ellip':
-                return np.array([float(stamp_width//2), float(stamp_width//2),
-                                 np.amax(stamp[i]), gamma, gamma, 0.0,
-                                 alpha, 0.0])
-            elif fittype == 'circ':
-                return np.array([float(stamp_width//2), float(stamp_width//2),
-                                 np.amax(stamp[i]), gamma, alpha, 0.0])
-        
         if mode == 'stack':
             # Stack mode: Sum the stamps and divide by flux before fitting
-            psf_sum_stack[i,...] = np.sum(hdu[ext].data[stamp_indx[in_q]], axis=0) \
-                                        / np.sum(srcdb[in_q,7])
+            psf_sum_stack[i,...] = (
+                np.sum(hdu[ext].data[stamp_indx[in_q]], axis=0) / np.sum(srcdb[in_q,7])
+            )
             # Initial guess for Moffat parameters
-            p0 = get_p0(fittype, psf_sum_stack[i])
+            # TODO: The amplitude guess is the maximum of row i of the stack,
+            # not of the full stamp, which is likely a bug.
+            p0 = _moffat_p0(fittype, np.amax(psf_sum_stack[i][i]), stamp_width, gamma, alpha)
             
             fit = fitter(psf_sum_stack[i])  # Initialize fit object
             fit.fit(p0=p0)  # Perform the fit
@@ -172,7 +199,9 @@ def fit_psf_generic(mode, input_base, num_images, fittype='ellip',
             # Single mode: Fit each individual stamp
             for step_num, stamp_img in enumerate(hdu[ext].data[stamp_indx[in_q]]):
                 # Initial guess for Moffat parameters
-                p0 = get_p0(fittype, stamp_img)
+                # TODO: The amplitude guess is the maximum of row i of the
+                # stamp, not of the full stamp, which is likely a bug.
+                p0 = _moffat_p0(fittype, np.amax(stamp_img[i]), stamp_width, gamma, alpha)
                 
                 fit = fitter(stamp_img)  # Initialize fit object
                 try:
@@ -196,11 +225,13 @@ def fit_psf_generic(mode, input_base, num_images, fittype='ellip',
     
     if mode == 'stack':
         # Save the results to a new FITS file
-        fits.HDUList([fits.PrimaryHDU(),
-                      fits.ImageHDU(data=psf_sum_stack, name='STACK'),
-                      fits.ImageHDU(data=psf_sum_model, name='MOFFAT'),
-                      fits.ImageHDU(data=psf_sum_model_par, name='PAR')
-                     ]).writeto(str(ofile), overwrite=True)
+        fits.HDUList(
+            [
+                fits.PrimaryHDU(), fits.ImageHDU(data=psf_sum_stack, name='STACK'),
+                fits.ImageHDU(data=psf_sum_model, name='MOFFAT'),
+                fits.ImageHDU(data=psf_sum_model_par, name='PAR')
+            ]
+        ).writeto(str(ofile), overwrite=True)
         return fit
     
     elif mode == 'single':
@@ -234,8 +265,10 @@ def fit_psf_generic(mode, input_base, num_images, fittype='ellip',
                 clipped_coords = clipped_coords[~masked_fwhm2.mask]
                 clipped_source_images = clipped_source_images[~masked_fwhm2.mask]
             
-            log.info("Number of sources removed in sigma clipping = "
-                     f"{len(fit_pars) - len(clipped_fit_objs)}")
+            log.info(
+                "Number of sources removed in sigma clipping = "
+                f"{len(fit_pars) - len(clipped_fit_objs)}"
+            )
             log.info(f"Number of sources remaining = {len(clipped_fit_objs)}")
             
             return clipped_coords, clipped_fit_objs, clipped_source_images
@@ -338,7 +371,7 @@ def get_graphable_pars(file_paths, group_name, verbose=False):
     return fwhm, ecc, phi
 
 
-def get_param_list(param_type, pars, shape, img_nums=None):
+def get_param_list(param_type, pars, shape, img_nums=None, plate_scale=None):
     """
     Generate the desired single parameter list, color range, and title
     for contour plotting based on Moffat pars.
@@ -353,6 +386,11 @@ def get_param_list(param_type, pars, shape, img_nums=None):
         Shape to output param_list.
     img_nums : :class:`numpy.ndarray`, optional
         Image number for each source.
+    plate_scale : float, optional
+        Plate scale of the images in arcsec per *binned* pixel, used to convert
+        the FWHM to arcsec.  This is the camera plate scale (see
+        :attr:`~pipnick.cameras.cameras.NickelCamera.plate_scale`) times the
+        binning.  If None, the FWHM is in pixels.
 
     Returns
     -------
@@ -368,26 +406,39 @@ def get_param_list(param_type, pars, shape, img_nums=None):
     :exc:`ValueError`
         If the input `param_type` is not 'fwhm', 'phi', 'ecc', or 'fwhm residuals'.
     """
+    # The FWHM color ranges were optimized for the 2024-06-26 data from the
+    # original Nickel camera, which have 0.37 arcsec pixels
+    ref_scale = 0.37
+    scale, units = (1.0, 'pixels') if plate_scale is None else (plate_scale, 'arcsec')
     if param_type == 'fwhm':
         # Calculate FWHM (average between semi-major and minor axes)
-        param_list = (FitMoffat2D.to_fwhm(pars[:, 3], pars[:, 6]) +
-                      FitMoffat2D.to_fwhm(pars[:, 4], pars[:, 6])) / 2 * plate_scale_approx
-        color_range = [1.5, 2.7]  # Optimized for Nickel 06-26-24 data
-        title = "FWHM (arcsec)"
+        param_list = (
+            FitMoffat2D.to_fwhm(pars[:, 3], pars[:, 6]) + FitMoffat2D.to_fwhm(
+                pars[:, 4], pars[:, 6]
+            )
+        ) / 2 * scale
+        color_range = [1.5 / ref_scale * scale, 2.7 / ref_scale * scale]
+        title = f"FWHM ({units})"
     elif param_type == 'fwhm residuals':
         # Calculate FWHM residual (relative to minimum FWHM in image)
-        fwhm_list = (FitMoffat2D.to_fwhm(pars[:, 3], pars[:, 6]) +
-                     FitMoffat2D.to_fwhm(pars[:, 4], pars[:, 6])) / 2
-        mins = {img_num: np.min(fwhm_list[img_nums == img_num])
-                for img_num in list(set(img_nums))}
-        param_list = np.array([fwhm_list[i] - mins[img_num]
-                               for i, img_num in enumerate(img_nums)]) * plate_scale_approx
-        color_range = [0.0, 0.36]
-        title = "FWHM Residuals (arcsec)"
+        fwhm_list = (
+            FitMoffat2D.to_fwhm(pars[:, 3], pars[:, 6]) + FitMoffat2D.to_fwhm(
+                pars[:, 4], pars[:, 6]
+            )
+        ) / 2
+        mins = {
+            img_num: np.min(fwhm_list[img_nums == img_num]) for img_num in list(set(img_nums))
+        }
+        param_list = np.array(
+            [fwhm_list[i] - mins[img_num] for i, img_num in enumerate(img_nums)]
+        ) * scale
+        color_range = [0.0, 0.36 / ref_scale * scale]
+        title = f"FWHM Residuals ({units})"
     elif param_type == 'phi':
         # Convert phi rotation angle relative to x-axis from the original phi
-        param_list = np.array([FitEllipticalMoffat2D.get_nice_phi(smooth_par)
-                               for smooth_par in pars])
+        param_list = np.array(
+            [FitEllipticalMoffat2D.get_nice_phi(smooth_par) for smooth_par in pars]
+        )
         color_range = [-45., 45.]
         title = "Phi Rotation Angle (deg)"
     elif param_type == 'ecc':
@@ -452,9 +503,10 @@ def psf_plot(plot_file, fit, fittype='ellip', show=False, plot_fit=True):
         ell_y += fit.par[1]  # Offset ellipse in y
             
         # Normalize the images for better visualization
-        norm = ImageNormalize(np.concatenate((stack, model, stack-model)),
-                              interval=ZScaleInterval(contrast=0.10),
-                              stretch=AsinhStretch())
+        norm = ImageNormalize(
+            np.concatenate((stack, model, stack-model)), interval=ZScaleInterval(contrast=0.10),
+            stretch=AsinhStretch()
+        )
 
         # Plot observed stack
         ax = fig.add_axes([0.03, 0.7, 0.2, 0.2])
@@ -488,8 +540,10 @@ def psf_plot(plot_file, fit, fittype='ellip', show=False, plot_fit=True):
             if isinstance(fit, FitMoffat2D):
                 models = [oned.evaluate(r_mod, amp, 0., fit.par[3], beta) + fit.par[5]]
             else:
-                models = [oned.evaluate(r_mod, amp, 0., fit.par[3], beta) + fit.par[7],
-                        oned.evaluate(r_mod, amp, 0., fit.par[4], beta) + fit.par[7]]
+                models = [
+                    oned.evaluate(r_mod, amp, 0., fit.par[3], beta) + fit.par[7],
+                    oned.evaluate(r_mod, amp, 0., fit.par[4], beta) + fit.par[7]
+                ]
         
         ax = fig.add_axes([0.66, 0.7, 0.3, 0.2])
         ax.minorticks_on()
@@ -503,17 +557,25 @@ def psf_plot(plot_file, fit, fittype='ellip', show=False, plot_fit=True):
         ax.scatter(r, stack.ravel(), marker='.', lw=0, s=30, alpha=0.5, color='k')
 
         if isinstance(fit, FitMoffat2D):
-            ax.text(0.95, 0.9, f'FWHM = {fwhm1:.1f} pix', ha='right',
-                    va='center', transform=ax.transAxes)
-            ax.text(0.95, 0.78, f'beta = {beta:.2f}', ha='right', va='center',
-                    transform=ax.transAxes)
+            ax.text(
+                0.95, 0.9, f'FWHM = {fwhm1:.1f} pix', ha='right', va='center',
+                transform=ax.transAxes
+            )
+            ax.text(
+                0.95, 0.78, f'beta = {beta:.2f}', ha='right', va='center', transform=ax.transAxes
+            )
         else:
-            ax.text(0.95, 0.9, f'FWHM_1 = {fwhm1:.1f} pix', ha='right',
-                    va='center', transform=ax.transAxes)
-            ax.text(0.95, 0.78, f'FWHM_2 = {fwhm2:.1f} pix', ha='right',
-                    va='center', transform=ax.transAxes)
-            ax.text(0.95, 0.66, f'beta = {beta:.2f}', ha='right', va='center',
-                    transform=ax.transAxes)
+            ax.text(
+                0.95, 0.9, f'FWHM_1 = {fwhm1:.1f} pix', ha='right', va='center',
+                transform=ax.transAxes
+            )
+            ax.text(
+                0.95, 0.78, f'FWHM_2 = {fwhm2:.1f} pix', ha='right', va='center',
+                transform=ax.transAxes
+            )
+            ax.text(
+                0.95, 0.66, f'beta = {beta:.2f}', ha='right', va='center', transform=ax.transAxes
+            )
         ax.text(0.5, -0.15, 'R [pix]', ha='center', va='top', transform=ax.transAxes)
             
         pdf.savefig()  # Save the figure to the PDF
@@ -533,9 +595,10 @@ def get_apertures(phot_data, fwhm, scale):
     return CircularAperture(np.transpose((x, y)), r=2 * fwhm * scale)
 
 
-def plot_sources(image, phot_data, fwhm, flux_name='flux_fit',
-                 x_name='x_fit', y_name='y_fit', label_name='group_id',
-                 scale=1):
+def plot_sources(
+    image, phot_data, fwhm, flux_name='flux_fit', x_name='x_fit', y_name='y_fit',
+    label_name='group_id', scale=1
+):
     """
     Plots sources from a photometric data table on a corresponding image, highlighting 
     the grouped/ungrouped sources.
@@ -582,8 +645,9 @@ def plot_sources(image, phot_data, fwhm, flux_name='flux_fit',
     # Plot the image and the good/bad sources
     plt.figure(figsize=(12,10))
 #    plt.title(image)
-    plt.imshow(_image, origin='lower', vmin=vmin, vmax=vmax,
-               cmap=cmap, interpolation='nearest')
+    plt.imshow(
+        _image, origin='lower', vmin=vmin, vmax=vmax, cmap=cmap, interpolation='nearest'
+    )
     plt.colorbar()
     single_apertures.plot(color='purple', lw=1.5*scale, alpha=1)
     group_apertures.plot(color='r', lw=1.5*scale, alpha=1)
@@ -592,9 +656,11 @@ def plot_sources(image, phot_data, fwhm, flux_name='flux_fit',
     y_offset = 3.5 * fwhm * scale
     _phot_data = phot_data[is_single]
     for i in range(nsingle):
-        plt.text(_phot_data[x_name][i], _phot_data[y_name][i]+y_offset, 
-                 f'{_phot_data[label_name][i]}: {_phot_data[flux_name][i]:.0f}',
-                 color='white', fontsize=8*scale, ha='center', va='center')
+        plt.text(
+            _phot_data[x_name][i], _phot_data[y_name][i]+y_offset,
+            f'{_phot_data[label_name][i]}: {_phot_data[flux_name][i]:.0f}', color='white',
+            fontsize=8*scale, ha='center', va='center'
+        )
     
     # Annotate grouped sources with label_name and flux_name values in one large stack
     _phot_data = phot_data[in_group]
@@ -604,8 +670,10 @@ def plot_sources(image, phot_data, fwhm, flux_name='flux_fit',
         group_x = np.median(group[x_name])
         group_y = np.median(group[y_name]) + y_offset
         for i in range(len(group)):
-            plt.text(group_x, group_y+i*20*scale, f'{id}: {group[flux_name][i]:.0f}',
-                     color='red', fontsize=8*scale, ha='center', va='center')
+            plt.text(
+                group_x, group_y+i*20*scale, f'{id}: {group[flux_name][i]:.0f}', color='red',
+                fontsize=8*scale, ha='center', va='center'
+            )
     
     # Show plot
 #    plt.gcf().set_dpi(300)

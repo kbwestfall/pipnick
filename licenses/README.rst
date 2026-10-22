@@ -27,8 +27,14 @@ PypeIt — ``PYPEIT_LICENSE.rst``
     ``pipnick/scripts/scriptbase.py``, and used as the template for this
     package's build and documentation configuration.
 
-PypeIt permits redistribution with attribution, so the adapted code may be
-shipped in the ``pipnick`` wheel; its license is included in the wheel's
+astropy — ``ASTROPY_LICENSE.rst``
+    BSD 3-Clause. https://github.com/astropy/astropy
+
+    ``EllipticalMoffat2DModel`` in ``pipnick/photometry/moffat.py`` is adapted
+    from ``Moffat2D`` in ``astropy/modeling/functional_models.py``.
+
+Both permit redistribution with attribution, so the adapted code may be
+shipped in the ``pipnick`` wheel; their licenses are included in the wheel's
 metadata alongside ``LICENSE.rst``.
 
 

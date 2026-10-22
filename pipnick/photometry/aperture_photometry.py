@@ -1,6 +1,7 @@
 import numpy as np
 
 from astropy.nddata import CCDData
+from astropy.table import MaskedColumn
 from photutils.aperture import CircularAperture
 from photutils.aperture import ApertureStats
 
@@ -50,18 +51,23 @@ def aperture_analysis(image, x, y, aper_size=8.0):
     all_data['flux_fit'].name = 'flux_psf'
     col_index = all_data.colnames.index('flux_psf') + 1
     
-    # Add the flux within apertures to the photometric data
-    all_data.add_column(aperstats.sum, name='flux_aper', index=col_index)
+    # Add the flux within apertures to the photometric data, masking sources
+    # with masked pixels, which aperture photometry cannot handle
+    has_masked_pixels = all_data['flags'] % 2 == 1
+    all_data.add_column(
+        MaskedColumn(aperstats.sum, mask=has_masked_pixels), name='flux_aper', index=col_index
+    )
     all_data['flux_aper'].info.format = '.3f'
-    
-    # Mark sources with masked pixels as NaN in the aperture flux
-    all_data['flux_aper'][all_data['flags'] % 2 == 1] = np.nan
-    log.info("Aperture photometry cannot handle masked pixels--sources with masked pixels "
-             "have flux_aper = nan")
-    
-    # Calculate the ratio of PSF flux to aperture flux and add it to the table
-    all_data.add_column(all_data['flux_psf'] / all_data['flux_aper'],
-                        name='ratio_flux', index=col_index + 1)
+    log.info(
+        "Aperture photometry cannot handle masked pixels--sources with masked pixels "
+        "have a masked flux_aper"
+    )
+
+    # Calculate the ratio of PSF flux to aperture flux and add it to the table;
+    # the ratio is masked where flux_aper is masked
+    all_data.add_column(
+        all_data['flux_psf'] / all_data['flux_aper'], name='ratio_flux', index=col_index + 1
+    )
     all_data['ratio_flux'].info.format = '.3f'
     
     # Log the results of the photometry
@@ -85,10 +91,11 @@ def format_table(phot_data):
         Formatted table containing a concise selection of columns.
     """
     # Specify the desired column order and names
-    colnames = ['group_id', 'group_size', 'flags', 'x_fit', 'y_fit', 
-                'flux_psf', 'flux_aper', 'ratio_flux', 'local_bkg', 
-                'x_err', 'y_err', 'flux_err', 'airmass', 'id',
-                'iter_detected', 'npixfit', 'qfit', 'cfit']
+    colnames = [
+        'group_id', 'group_size', 'flags', 'x_fit', 'y_fit', 'flux_psf', 'flux_aper', 'ratio_flux',
+        'local_bkg', 'x_err', 'y_err', 'flux_err', 'airmass', 'id', 'iter_detected', 'npixfit',
+        'qfit', 'cfit'
+    ]
     
     # Create a concise version of the data table
     concise_data = phot_data[colnames]

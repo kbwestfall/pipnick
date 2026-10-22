@@ -1,6 +1,7 @@
 # Remove directories
 prune .github
 prune build
+prune claude
 prune dist
 prune docs
 prune examples

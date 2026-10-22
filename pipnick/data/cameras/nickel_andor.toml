@@ -1,0 +1,145 @@
+# Configuration for the Nickel Andor camera (DZ936 CCD), commissioned in 2026.
+# See the pipnick.cameras module for the schema.
+#
+# All geometry and bad-pixel coordinates are in *unbinned*, 1-based (FITS)
+# detector pixels.  The header content of this camera is not yet final; new
+# standard keywords (e.g., EXPTIME, DATASEC, GAIN) are listed first in
+# [keywords] so that they are used as soon as they appear.
+
+[camera]
+name = "NickelAndor"
+description = "Nickel Andor camera (DZ936 CCD)"
+pixel_size = 13.5           # micron
+plate_scale = 0.1665        # arcsec per unbinned pixel (header CD matrix: 0.333 arcsec at 2x2)
+saturation = 65000          # ADU; observed maxima are ~65240 (1.0 MHz) and ~65140 (0.05 MHz)
+fwhm_guess = 1.85           # arcsec; typical seeing
+
+[identify]
+# All of these header keywords must be present and match the regular expression.
+CAMID = '^headmodel DZ936'
+
+[keywords]
+# Ordered lists of header keywords for each quantity; the first present wins.
+object = ["OBJECT"]
+frametype = ["IMAGETYP"]    # Not yet in the headers; see [frametypes.map]
+obstype = ["OBSTYPE"]       # 'DARK' when the shutter is closed
+exptime = ["EXPTIME", "XPOSURE", "EXPOSURE"]
+filter = ["FILTNAM", "FILTER"]
+airmass = ["AIRMASS"]
+ra = ["RA"]
+dec = ["DEC"]
+date = ["DATE-OBS", "DATE-BEG"]
+ccdsum = ["CCDSUM"]         # Binning as a 'nx ny' string, if present
+xbin = ["CDELT1U"]
+ybin = ["CDELT2U"]
+readspeed = ["AMPCONF"]
+gain = ["GAIN"]
+readnoise = ["RDNOISE"]
+datasec = ["DATASEC"]
+biassec = ["BIASSEC"]
+window = ["WINDOW"]         # Unbinned 'x1 x2 y1 y2' readout window
+temperature = ["CURRTEMP"]
+
+[geometry]
+# Full unbinned readout, including prescan and overscan: [rows, columns]
+shape = [2048, 2088]
+# Inclusive [first, last] unbinned pixel ranges, measured from the 2026
+# commissioning dome flats and biases at 1x1, 2x2, and 4x4 binning: unbinned
+# columns 1-19 are prescan, 20-2067 are data, and 2068-2088 are overscan.
+# Binned pixels that straddle these boundaries are excluded from both.
+data_columns = [20, 2067]
+data_rows = [1, 2048]
+# Columns used to measure the overscan level.  The first ~6 unbinned overscan
+# columns show charge trailing in illuminated frames, so they are skipped.
+overscan_columns = [2075, 2088]
+
+[[readout]]
+value = "1.0MHz"
+mode = "fast"
+gain = 1.0                  # e-/ADU; PLACEHOLDER, not yet measured
+readnoise = 10.0            # e-; PLACEHOLDER, not yet measured
+placeholder = true
+
+[[readout]]
+value = "0.05MHz"
+mode = "slow"
+gain = 1.0                  # e-/ADU; PLACEHOLDER, not yet measured
+readnoise = 10.0            # e-; PLACEHOLDER, not yet measured
+placeholder = true
+
+[bpm]
+# No bad pixels have been measured yet.  Partial pixels at the prescan and
+# overscan boundaries are already excluded by the geometry above.
+columns = []
+rows = []
+regions = []
+# file = ""                 # Optional archival unbinned bad-pixel mask image
+
+[quality]
+# Frames failing these checks are commented out of the metadata table.  The
+# temperature check uses the header; the others require reading the image
+# (pipnick_metadata --classify stats).  Levels are in ADU, measured from the
+# median of the data section.  Based on the 2026 commissioning data: the
+# detector runs at -79.9 C, and the bias level is ~300-304 ADU, including in
+# darks of up to 960 s.
+max_temperature = -70.0         # C
+bias_level = [280, 400]         # Expected range for closed-shutter frames
+bias_exptime_max = 1.0          # Frames mislabeled as biases can be biases up to this exposure time
+min_illumination = 1000         # Minimum level of a flat above bias_level
+max_saturated_fraction = 0.1    # Maximum fraction of saturated data pixels
+
+[frametypes]
+default = "science"
+
+# Explicit header frame-type values mapped to pipnick frame types; used only
+# when a [keywords] frametype keyword is present.
+[frametypes.map]
+bias = "bias"
+zero = "bias"
+dark = "dark"
+domeflat = "domeflat"
+skyflat = "skyflat"
+twilight = "skyflat"
+object = "science"
+science = "science"
+focus = "focus"
+pointing = "pointing"
+test = "test"
+
+# Rules are tested in order and the first match wins.  Each rule may test:
+# obstype and object (case-insensitive regular expressions), and
+# exptime_min/exptime_max (inclusive bounds in seconds).
+[[frametypes.rule]]
+# Closed shutter and (nearly) zero exposure; biases are never exactly 0 s
+frametype = "bias"
+obstype = '^DARK$'
+exptime_max = 1.0
+
+[[frametypes.rule]]
+frametype = "dark"
+obstype = '^DARK$'
+
+[[frametypes.rule]]
+# Labelled as a calibration, but the shutter was open
+frametype = "unknown"
+object = 'bias|dark'
+
+[[frametypes.rule]]
+frametype = "domeflat"
+object = 'dome ?flat'
+
+[[frametypes.rule]]
+frametype = "skyflat"
+object = '^flat$|sky ?flat|twilight'
+
+[[frametypes.rule]]
+frametype = "focus"
+object = 'focus'
+
+[[frametypes.rule]]
+frametype = "pointing"
+object = 'pointing'
+
+[[frametypes.rule]]
+frametype = "test"
+object = 'test'

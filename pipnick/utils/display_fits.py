@@ -9,7 +9,7 @@ from astropy.visualization import ZScaleInterval
 from astropy.nddata import CCDData
 
 from pipnick.utils.fits_class import Fits_Simple
-from pipnick.utils.dir_nav import unzip_directories
+from pipnick.utils.fits_class import unzip_directories
 
 
 def print_fits_info(image_path: str):

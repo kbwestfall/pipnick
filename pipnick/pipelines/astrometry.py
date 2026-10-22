@@ -7,16 +7,18 @@ from astroquery.astrometry_net import AstrometryNet
 from astroquery.exceptions import TimeoutError
 
 from pipnick import log
-from pipnick.utils.nickel_data import (bad_columns, ra_key, dec_key, fwhm_approx,
-                                       fov_size_approx)
-from pipnick.utils.dir_nav import organize_files
+from pipnick import cameras
+from pipnick.pkg.exceptions import PipnickDataModelError
+# TODO: organize_files no longer exists; the astrometry pipeline needs to be updated.
+from pipnick.metadata import organize_files
 
 ######################################
 ####  ASTROMETRY.NET CALIBRATION  ####
 ######################################
 
-def astrometry_all(maindir, api_key, use_table=False, resolve=False,
-                   excl_files=[], excl_objs=[], excl_filts=[]):
+def astrometry_all(
+    maindir, api_key, use_table=False, resolve=False, excl_files=[], excl_objs=[], excl_filts=[]
+):
     """
     Run astrometry.net calibration on all images in the specified directory.
 
@@ -57,8 +59,9 @@ def astrometry_all(maindir, api_key, use_table=False, resolve=False,
     reddir = maindir / 'reduced'
     
     # Organize files based on exclusion criteria and directory structure
-    file_df = organize_files(reddir, use_table, 'astrometry',
-                             excl_files, excl_objs, excl_filts)
+    file_df = organize_files(
+        reddir, use_table, 'astrometry', excl_files, excl_objs, excl_filts
+    )
     image_paths = file_df.paths
     
     # Prepare directories for processing
@@ -86,56 +89,85 @@ def astrometry_all(maindir, api_key, use_table=False, resolve=False,
     calibrated_fits_paths = []
     unsolved_submission_ids = []
     
-    def check_wcs_header(wcs_header, output_path):
-        if wcs_header:
-            log.info(f"Solution successful, saving WCS header to {output_path}")
-            wcs_header.tofile(output_path, overwrite=True)
-            calibrated_fits_paths.append(output_path)
-        else:
-            log.warning(f"Solution failed; skipping this image")
-    
     for image_path in mod_paths:
         
         output_path_stem = image_path.stem.split('_')[0]
         obj_dir = image_path.parent.name
         output_path = wcs_dir / obj_dir / f"{output_path_stem}_astro.fits"
         if not resolve and output_path.exists():
-            log.info(f"Returning local copy of {image_path.name}'s solution; "
-                     "astrometry.net not used")
+            log.info(
+                f"Returning local copy of {image_path.name}'s solution; "
+                "astrometry.net not used"
+            )
             calibrated_fits_paths.append(output_path)
             continue
         
-        log.info(f"Submitting image {image_path.name} to astrometry.net. This may take up "
-                 f"to {timeout} seconds")
+        # Get the image scale, field of view, and seeing from the camera
+        hdr = fits.getheader(image_path)
+        camera = cameras.identify_camera(hdr)
+        xbin, _ = camera.binning(hdr)
+        pixel_scale = camera.plate_scale * xbin         # arcsec per binned pixel
+        fov_size = hdr['NAXIS1'] * pixel_scale / 60     # image width in arcmin
+        fwhm = camera.fwhm_guess / pixel_scale          # binned pixels
+
+        log.info(
+            f"Submitting image {image_path.name} to astrometry.net. This may take up "
+            f"to {timeout} seconds"
+        )
         try:
-            wcs_header = ast.solve_from_image(image_path, fwhm=fwhm_approx,
-                                              ra_key=ra_key, dec_key=dec_key,
-                                              # Max error of RA/Dec guess, in deg
-                                              radius=fov_size_approx/60,
-                                              scale_units='arcminwidth',
-                                              scale_type='ul',
-                                              scale_lower=fov_size_approx*0.8,
-                                              scale_upper=fov_size_approx*1.2,
-                                              solve_timeout=timeout,
-                                              detect_threshold=8.0,
-                                              publicly_visible='n',
-                                              verbose=False)
-            check_wcs_header(wcs_header, output_path)
+            wcs_header = ast.solve_from_image(
+                image_path, fwhm=fwhm, ra_key=camera.header_keyword(hdr, 'ra'),
+                dec_key=camera.header_keyword(hdr, 'dec'),
+                # Max error of RA/Dec guess, in deg
+                radius=fov_size/60, scale_units='arcminwidth', scale_type='ul',
+                scale_lower=fov_size*0.8, scale_upper=fov_size*1.2, solve_timeout=timeout,
+                detect_threshold=8.0, publicly_visible='n', verbose=False
+            )
+            if _save_wcs_header(wcs_header, output_path):
+                calibrated_fits_paths.append(output_path)
         except TimeoutError as e:
-            log.info("No solution found on first try; will revisit after all images are "
-                     "submitted")
+            log.info(
+                "No solution found on first try; will revisit after all images are "
+                "submitted"
+            )
             unsolved_submission_ids.append(e.args[1])
         
     for submission_id in unsolved_submission_ids:
         try:
-            wcs_header = ast.monitor_submission(submission_id,
-                                                solve_timeout=120)
-            check_wcs_header(wcs_header, output_path)
+            wcs_header = ast.monitor_submission(
+                submission_id, solve_timeout=120
+            )
+            if _save_wcs_header(wcs_header, output_path):
+                calibrated_fits_paths.append(output_path)
         except TimeoutError:
             log.warning(f"No solution found on second try; skipping.")
     
     log.info('---- astrometry_all() call ended')
     return calibrated_fits_paths
+
+
+def _save_wcs_header(wcs_header, output_path):
+    """
+    Save an astrometric solution, if one was found.
+
+    Parameters
+    ----------
+    wcs_header : :class:`astropy.io.fits.Header`, dict
+        The solution returned by astrometry.net; empty if the solution failed.
+    output_path : :class:`pathlib.Path`
+        File for the solution.
+
+    Returns
+    -------
+    bool
+        True if the solution was saved.
+    """
+    if len(wcs_header) == 0:
+        log.warning("Solution failed; skipping this image")
+        return False
+    log.info(f"Solution successful, saving WCS header to {output_path}")
+    wcs_header.tofile(output_path, overwrite=True)
+    return True
 
 
 def make_cleaned_inputs(image_paths, mod_dir):
@@ -170,9 +202,14 @@ def make_cleaned_inputs(image_paths, mod_dir):
                 mask = mask.astype(bool)
                 data[mask] = 0
             except KeyError:
-                # If no mask in FITS file, set bad columns to 0
-                data[:, bad_columns] = 0
-                log.debug("No mask in FITS file--masking Nickel bad columns only")
+                # If no mask in FITS file, use the camera bad-pixel mask, which
+                # is only possible for raw (untrimmed) frames
+                try:
+                    data[cameras.identify_camera(hdul[0].header).bpm(hdul[0].header)] = 0
+                except PipnickDataModelError:
+                    log.warning(f"No mask available for {file.name}")
+                else:
+                    log.debug("No mask in FITS file--using the camera bad-pixel mask")
             # Save the modified FITS file to the output directory
             fits.writeto(mod_path, data, hdul[0].header, overwrite=True)
         mod_paths.append(mod_path)

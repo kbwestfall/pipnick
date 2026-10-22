@@ -11,8 +11,9 @@ from pipnick.utils.log import log_astropy_table
 ####  This pipeline is currently incomplete  ####
 #################################################
 
-def final_calib_all(maindir, use_table=False,
-                    excl_files=[], excl_objs=[], excl_filts=[]):
+def final_calib_all(
+    maindir, use_table=False, excl_files=[], excl_objs=[], excl_filts=[]
+):
     """
     Perform the final calibration step by converting pixel coordinates in
     photometric source catalogs (consolidated and unconsolidated) to
@@ -83,8 +84,9 @@ def convert_coords_all(photo_dir, astro_dir, final_calib_dir):
     """
     
     # Create a dictionary of astrometric calibration files indexed by object name
-    astro_calibs = {astro_calib.name.split('_')[0]: astro_calib
-                    for astro_calib in astro_dir.iterdir()}
+    astro_calibs = {
+        astro_calib.name.split('_')[0]: astro_calib for astro_calib in astro_dir.iterdir()
+    }
     astrophot_datas = {}
 
     # Iterate over all sub-directories in photo_dir
@@ -102,8 +104,10 @@ def convert_coords_all(photo_dir, astro_dir, final_calib_dir):
         Path.mkdir(astrophot_dir, exist_ok=True)
         Path.mkdir(output_dir, exist_ok=True)
         
-        log.info("Saving photometric source catalogs with sky coordinates (RA/Dec) to "
-                 f"{output_dir}")
+        log.info(
+            "Saving photometric source catalogs with sky coordinates (RA/Dec) to "
+            f"{output_dir}"
+        )
 
         result_datas = {}
         
@@ -113,8 +117,9 @@ def convert_coords_all(photo_dir, astro_dir, final_calib_dir):
             output_path = output_dir / (key + '_astrophotsrcs.csv')
             if key in astro_calibs.keys():
                 result_datas[key] = convert_coords(phot_data, output_path, astro_calibs[key]) 
-                result_datas[key].meta['image_path'] \
-                        = photo_dir.parent.parent / 'reduced' / obj_dir.name / (key + '_red.fits')
+                result_datas[key].meta['image_path'] = (
+                    photo_dir.parent.parent / 'reduced' / obj_dir.name / (key + '_red.fits')
+                )
             else:
                 log.warning(f"No astrometric solution found for image {key}; skipping")
         
@@ -157,9 +162,9 @@ def convert_coords(phot_data_inpath, phot_data_outpath, astrometric_img_path):
     world_coords = wcs.all_pix2world(x_coords, y_coords, 0)  # 0 specifies no origin offset
     
     # Create SkyCoord object for RA/Dec transformation
-    sky_coords = SkyCoord(ra=world_coords[0] * u.deg, 
-                          dec=world_coords[1] * u.deg, 
-                          frame='icrs', equinox='J2000')
+    sky_coords = SkyCoord(
+        ra=world_coords[0] * u.deg, dec=world_coords[1] * u.deg, frame='icrs', equinox='J2000'
+    )
     
     # Convert RA and Dec to HMS and DMS format strings
     ra = sky_coords.ra.to_string(unit=u.hourangle, sep=':', precision=2)
@@ -173,10 +178,11 @@ def convert_coords(phot_data_inpath, phot_data_outpath, astrometric_img_path):
     phot_data.add_column(sky_coords.dec, name='dec_deg', index=col_index + 3)
     
     # Format the table for consistency and readability
-    colnames = ['group_id', 'group_size', 'flags', 'ra_hms', 'dec_dms',
-                'flux_psf', 'flux_aper', 'ratio_flux', 'local_bkg',
-                'x_fit', 'y_fit', 'ra_deg', 'dec_deg', 'x_err', 'y_err', 'flux_err',
-                'airmass', 'id', 'iter_detected', 'npixfit', 'qfit', 'cfit']
+    colnames = [
+        'group_id', 'group_size', 'flags', 'ra_hms', 'dec_dms', 'flux_psf', 'flux_aper',
+        'ratio_flux', 'local_bkg', 'x_fit', 'y_fit', 'ra_deg', 'dec_deg', 'x_err', 'y_err',
+        'flux_err', 'airmass', 'id', 'iter_detected', 'npixfit', 'qfit', 'cfit'
+    ]
     phot_data = phot_data[colnames]
     
     # Save the updated catalog to the specified output path

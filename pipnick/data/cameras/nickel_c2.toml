@@ -1,0 +1,131 @@
+# Configuration for the original Nickel Direct Camera: a Loral 2Kx2K CCD read
+# out by the UCAM controller.  See the pipnick.cameras module for the schema.
+#
+# All geometry and bad-pixel coordinates are in *unbinned*, 1-based (FITS)
+# detector pixels.  Values derived from the 2024-06-24 data were taken at 2x2
+# binning, the only binning in that dataset.
+
+[camera]
+name = "NickelC2"
+description = "Nickel Direct Camera (Loral 2Kx2K CCD, UCAM controller)"
+pixel_size = 15.0           # micron
+plate_scale = 0.185         # arcsec per unbinned pixel (header CD matrix: 0.370 arcsec at 2x2)
+saturation = 65535          # ADU
+fwhm_guess = 1.85           # arcsec; typical seeing (5 pixels at 2x2 binning)
+
+[identify]
+# All of these header keywords must be present and match the regular expression.
+INSTRUME = '^Nickel Direct Camera$'
+DSENSOR = '^Loral'
+
+[keywords]
+# Ordered lists of header keywords for each quantity; the first present wins.
+object = ["OBJECT"]
+frametype = []              # No explicit frame-type keyword; see [frametypes]
+obstype = ["OBSTYPE"]
+exptime = ["EXPTIME"]
+filter = ["FILTNAM"]
+airmass = ["AIRMASS"]
+ra = ["RA"]
+dec = ["DEC"]
+date = ["DATE-OBS", "DATE-BEG"]
+ccdsum = ["CCDSUM"]         # Binning as a 'nx ny' string, if present
+xbin = ["CDELT1U"]          # Binning; negative for this camera, so the absolute value is used
+ybin = ["CDELT2U"]
+readspeed = ["READ-SPD"]
+gain = []                   # The header GAIN is a DCS gain index, not e-/ADU
+readnoise = ["RDNOISE"]
+datasec = ["DATASEC"]
+biassec = ["BIASSEC"]
+window = []
+temperature = ["TEMPDET"]
+
+[geometry]
+# Full unbinned readout, including overscan: [rows, columns]
+shape = [2048, 2112]
+# Inclusive [first, last] unbinned pixel ranges.
+data_columns = [1, 2048]
+data_rows = [1, 2048]
+# Columns used to measure the overscan level.  The headers give COVER = 32
+# binned overscan columns at 2x2 binning.
+overscan_columns = [2049, 2112]
+
+[[readout]]
+# READ-SPD = 80 for all science data in 2024 (10 only on failed readouts).  The
+# gain and read noise are the values previously documented in pipnick for "slow
+# readout, 2x2 binning"; that READ-SPD = 80 is the slow mode is assumed.
+value = "80"
+mode = "slow"
+gain = 1.8                  # e-/ADU
+readnoise = 10.7            # e-
+placeholder = false
+
+[bpm]
+# Bad columns and rows as inclusive [first, last] unbinned ranges.  These are
+# the legacy 2x2-binned bad columns (0-based 255, 256, 783, 784, 1002),
+# confirmed in the 2024 sky flats, plus the always-saturated first and last
+# data columns (0-based 0 and 1023 at 2x2), and the half-illuminated first row.
+columns = [[1, 2], [511, 514], [1567, 1570], [2005, 2006], [2047, 2048]]
+rows = [[1, 2]]
+# Blind corners, as polygons with (x, y) vertices in 1-based pixel coordinates
+# (pixel centers at integers).  Converted from the legacy 2x2-binned polygons.
+regions = [
+    [[0.5, 68.5], [70.5, 0.5], [0.5, 0.5]],
+    [[0.5, 1922.5], [130.5, 2050.5], [0.5, 2050.5]],
+]
+# file = ""                 # Optional archival unbinned bad-pixel mask image
+
+[quality]
+# Frames failing these checks are commented out of the metadata table.  The
+# temperature check uses the header; the others require reading the image
+# (pipnick_metadata --classify stats).  Levels are in ADU, measured from the
+# median of the data section.  Based on the 2024-06-24 data: the detector runs
+# at ~-110 C, and the bias level is ~937-980 ADU.
+max_temperature = -100.0        # C
+bias_level = [900, 1050]        # Expected range for closed-shutter frames
+bias_exptime_max = 0.0          # Frames mislabeled as biases can be biases up to this exposure time
+min_illumination = 1000         # Minimum level of a flat above bias_level
+max_saturated_fraction = 0.1    # Maximum fraction of saturated data pixels
+
+[frametypes]
+default = "science"
+
+# Explicit header frame-type values mapped to pipnick frame types; used only
+# when a [keywords] frametype keyword is present.
+[frametypes.map]
+
+# Rules are tested in order and the first match wins.  Each rule may test:
+# obstype and object (case-insensitive regular expressions), and
+# exptime_min/exptime_max (inclusive bounds in seconds).
+[[frametypes.rule]]
+frametype = "bias"
+exptime_max = 0.0
+
+[[frametypes.rule]]
+frametype = "dark"
+obstype = '^DARK$'
+
+[[frametypes.rule]]
+# Labelled as a calibration, but exposed: e.g., OBJECT = 'Bias' at 10 s
+frametype = "unknown"
+object = 'bias|dark'
+
+[[frametypes.rule]]
+frametype = "skyflat"
+object = '^flat$|sky ?flat|twilight'
+
+[[frametypes.rule]]
+frametype = "domeflat"
+object = 'dome ?flat'
+
+[[frametypes.rule]]
+frametype = "focus"
+object = '^focus'
+
+[[frametypes.rule]]
+frametype = "pointing"
+object = '^point'
+
+[[frametypes.rule]]
+frametype = "test"
+object = 'test'

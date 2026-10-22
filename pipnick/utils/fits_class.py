@@ -7,8 +7,8 @@ from pathlib import Path
 from typing import Union
 
 from pipnick import log
-from pipnick.utils.nickel_data import (ccd_shape, fov_shape)
-#from pipnick.utils.nickel_masks import get_masks_from_file
+from pipnick import cameras
+from pipnick.pkg.exceptions import PipnickDataModelError
 
 class Fits_Simple:
     """
@@ -45,7 +45,7 @@ class Fits_Simple:
         :class:`~pipnick.utils.fits_class.Fits_Simple`
             An instance of the Fits_Simple class.
         """
-        if args and isinstance(args[0], cls):
+        if len(args) > 0 and isinstance(args[0], cls):
             return args[0]
         return super(Fits_Simple, cls).__new__(cls)
 
@@ -124,12 +124,55 @@ class Fits_Simple:
                 try:
                     self._mask = hdul['MASK'].data
                 except KeyError:
-                    log.debug(f'No mask in FITS file {self.path.name}; returning default mask')
-                    if all(self.shape == ccd_shape):
-                        self._mask = get_masks_from_file('mask')
-                    elif all(self.shape == fov_shape):
-                        self._mask = get_masks_from_file('fov_mask')
+                    log.debug(
+                        f'No mask in FITS file {self.path.name}; returning the camera '
+                        'bad-pixel mask'
+                    )
+                    self._mask = self.camera_bpm()
         return self._mask
+
+    @property
+    def camera(self):
+        """
+        The camera used to obtain the image, identified from its header.
+
+        Returns
+        -------
+        camera : :class:`~pipnick.cameras.cameras.NickelCamera` or None
+            The camera, or None if it cannot be identified.
+        """
+        try:
+            return cameras.identify_camera(self.header)
+        except PipnickDataModelError:
+            return None
+
+    def camera_bpm(self):
+        """
+        The archival bad-pixel mask of the camera used to obtain the image.
+
+        Returns
+        -------
+        bpm : :class:`numpy.ndarray` or None
+            The bad-pixel mask, or None if the camera cannot be identified or
+            the image is not a raw frame (e.g., it has been trimmed).
+        """
+        camera = self.camera
+        if camera is None:
+            return None
+        try:
+            return camera.bpm(self.header)
+        except PipnickDataModelError:
+            return None
+
+    def _header_value(self, quantity, keyword):
+        """
+        Get a header quantity, using the camera keywords if the camera can be
+        identified, or the provided keyword otherwise.
+        """
+        camera = self.camera
+        if camera is not None:
+            return camera.header_value(self.header, quantity)
+        return self.header.get(keyword)
 
     @mask.setter
     def mask(self, new_mask):
@@ -147,8 +190,10 @@ class Fits_Simple:
             If the shape of the new mask does not match the shape of the data.
         """
         if new_mask.shape != self.shape:
-            raise ValueError(f"new_mask must have same shape as data {self.data.shape}. "
-                             f"new_mask.shape = {new_mask.shape}")
+            raise ValueError(
+                f"new_mask must have same shape as data {self.data.shape}. "
+                f"new_mask.shape = {new_mask.shape}"
+            )
         self._mask = new_mask
 
     @property
@@ -200,10 +245,7 @@ class Fits_Simple:
         object : str or None
             The object name from the FITS header, or None if not found.
         """
-        try:
-            return self.header["OBJECT"]
-        except KeyError:
-            return None
+        return self._header_value('object', 'OBJECT')
 
     @property
     def filtnam(self):
@@ -215,10 +257,7 @@ class Fits_Simple:
         filtnam : str or None
             The filter name from the FITS header, or None if not found.
         """
-        try:
-            return self.header["FILTNAM"]
-        except KeyError:
-            return None
+        return self._header_value('filter', 'FILTNAM')
 
     @property
     def exptime(self):
@@ -230,10 +269,7 @@ class Fits_Simple:
         exptime : float or None
             The exposure time from the FITS header, or None if not found.
         """
-        try:
-            return self.header["EXPTIME"]
-        except KeyError:
-            return None
+        return self._header_value('exptime', 'EXPTIME')
 
     @property
     def airmass(self):
@@ -245,10 +281,7 @@ class Fits_Simple:
         airmass : float or None
             The airmass value from the FITS header, or None if not found.
         """
-        try:
-            return self.header["AIRMASS"]
-        except KeyError:
-            return None
+        return self._header_value('airmass', 'AIRMASS')
 
     def __str__(self) -> str:
         """
@@ -289,3 +322,48 @@ class Fits_Simple:
             plt.gcf().set_dpi(300)
             plt.colorbar()
             plt.show()
+
+
+def unzip_directories(
+    path_list: list, output_format: str = 'Fits_Simple', allow_exceptions: bool = False
+) -> list:
+    """
+    Extract all files in a list of directories or files (or their subdirectories) and
+    return a list of image objects.
+
+    Parameters
+    ----------
+    path_list : list
+        A list of paths to directories or files that need to be unzipped.
+    output_format : str, optional
+        The format of the output objects. Can be 'Fits_Simple' (default) or 'Path'.
+    allow_exceptions : bool, optional
+        Whether to allow and handle exceptions for file-related errors such
+        as `KeyError` or `OSError`. Defaults to False.
+
+    Returns
+    -------
+    list
+        A list of image objects in the specified output format. The objects can be
+        instances of `Fits_Simple` or `Path`, depending on input `output_format`.
+    """
+    if output_format == 'Path':
+        output = Path
+    elif output_format == 'Fits_Simple':
+        output = Fits_Simple
+    
+    images = []
+    for elem_path in path_list:
+        elem_path = Path(elem_path)
+        if elem_path.is_dir():
+            for sub_elem_path in elem_path.iterdir():
+                images += unzip_directories([sub_elem_path], output_format, allow_exceptions)
+        elif elem_path.is_file():
+            if allow_exceptions:
+                try:
+                    images.append(output(elem_path))
+                except (KeyError, OSError):
+                    log.debug(f"unzip_directories() threw KeyError or OSError on {elem_path}")
+            else:
+                images.append(output(elem_path))
+    return images

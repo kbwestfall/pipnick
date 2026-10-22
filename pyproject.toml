@@ -6,7 +6,7 @@ authors = [
     { name = "Kyle B. Westfall", email = "westfall@ucolick.org" },
 ]
 license = "BSD-3-Clause"
-license-files = ["LICENSE.rst", "licenses/PYPEIT_LICENSE.rst"]
+license-files = ["LICENSE.rst", "licenses/PYPEIT_LICENSE.rst", "licenses/ASTROPY_LICENSE.rst"]
 description = "Photometric Pipeline for the Nickel Telescope"
 keywords = [
     "photometry",
@@ -86,6 +86,11 @@ build-backend = 'setuptools.build_meta'
 
 [tool.setuptools]
 include-package-data = true
+
+[tool.setuptools.package-data]
+# Listed explicitly so that the camera configurations are included even when
+# they are not tracked by git (setuptools_scm otherwise selects the data files)
+pipnick = ["data/cameras/*.toml"]
 
 [tool.setuptools.packages.find]
 # Without an explicit include, namespace-package discovery also picks up
