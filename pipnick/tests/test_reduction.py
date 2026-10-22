@@ -291,7 +291,9 @@ def test_reduce(night, tmp_path):
     assert hdr['EXPTIME'] == 30., 'The exposure time should be the median of the group'
 
     # The bias level is removed and the flat is normalized
-    data = fits.getdata(rdxdir / sci_name)
+    # NOTE: Memory mapping would keep the file open, and Windows does not allow
+    # an open file to be overwritten by the reprocessing below
+    data = fits.getdata(rdxdir / sci_name, memmap=False)
     assert np.allclose(np.median(data), 4700., rtol=0.01), (
         'The science frames should be bias-subtracted and flat-fielded'
     )
