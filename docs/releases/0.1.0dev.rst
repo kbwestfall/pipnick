@@ -33,6 +33,13 @@ Breaking Changes
   table, so that user edits to it are preserved; use ``pipnick_metadata
   --overwrite`` to rebuild it.
 
+- ``pipnick_reduce`` requires a per-setup metadata file (``-t``), written by
+  ``pipnick_metadata --split``; the ``--rawdir`` and ``--append`` options are
+  removed.  Reduced science images are named
+  ``<object>_C<comb_id>_<UT date>.fits`` instead of ``<raw file>_rdx.fits``.
+  ``reduce_all`` takes the metadata file as its first argument and returns the
+  paths to the reduced science images.
+
 Dependency Changes
 ------------------
 
@@ -54,6 +61,22 @@ Functionality/Performance Improvements and Additions
   quality checks.  The camera is identified automatically from the raw file
   headers.  The Andor gain and read noise are placeholders until they are
   measured.
+
+- ``pipnick_reduce`` combines frames in the groups set by the ``comb_id``
+  column, after checking that the groups give one bias, one dark per exposure
+  time, and one flat of each type per filter.  Combined darks
+  (``Dark_<exptime>s.fits``) are constructed, but not yet applied.  In the
+  names of the combined flats, a primed filter is written with a ``p``, e.g.,
+  ``SkyFlat_ip.fits`` for ``i'``.  Science
+  frames use the sky flat for their filter, or the dome flat if there is no
+  sky flat.  Science frames in the same group are scaled to their median
+  exposure time and combined without registration.
+
+- The header of each reduced image lists the raw frames and calibrations used
+  to construct it, and records its setup and combination group.  Rerunning
+  ``pipnick_reduce`` only reprocesses images whose raw frames or calibrations
+  have changed, and reports images that are no longer produced.  A reduction
+  directory can only hold the images from one setup.
 
 - ``pipnick_metadata`` identifies the instrument setup (camera, binning, read
   mode, and readout window) of each frame, checks the frame quality, and
