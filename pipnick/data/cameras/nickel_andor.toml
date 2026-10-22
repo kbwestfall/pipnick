@@ -11,7 +11,7 @@ name = "NickelAndor"
 description = "Nickel Andor camera (DZ936 CCD)"
 pixel_size = 13.5           # micron
 plate_scale = 0.1665        # arcsec per unbinned pixel (header CD matrix: 0.333 arcsec at 2x2)
-saturation = 65000          # ADU; observed maxima are ~65240 (1.0 MHz) and ~65140 (0.05 MHz)
+saturation = 65535          # ADU (2**16-1); observed maxima in 2026 data are ~65240 (1.0 MHz) and ~65140 (0.05 MHz)
 fwhm_guess = 1.85           # arcsec; typical seeing
 
 [identify]

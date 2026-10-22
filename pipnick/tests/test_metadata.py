@@ -187,7 +187,7 @@ def test_quality(tmp_path):
     # Too little light for a flat
     write_andor_image(tmp_path / 'n2.fits', 900)
     # Saturated
-    write_andor_image(tmp_path / 'n3.fits', 65500)
+    write_andor_image(tmp_path / 'n3.fits', 65535)
     # Empty image
     write_andor_image(tmp_path / 'n4.fits', 0)
     # A closed-shutter bias with a light leak

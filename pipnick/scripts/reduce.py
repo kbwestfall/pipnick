@@ -1,7 +1,7 @@
 """
 Perform reduction of raw astronomical data frames (overscan subtraction,
 bias subtraction, flat division, cosmic ray masking)
-""" 
+"""
 
 from pipnick.scripts import scriptbase
 
@@ -10,36 +10,29 @@ class Reduce(scriptbase.ScriptBase):
     @classmethod
     def get_parser(cls, width=None):
         parser = super().get_parser(
-            description='Perform basic image processing: (1) subtract & '
-                        'trim overscan, (2) subtract bias, and (3) '
-                        'divide flat',
+            description='Perform basic image processing: (1) subtract & trim overscan, (2) '
+                        'subtract bias, and (3) divide flat.  Frames are combined in the groups '
+                        'set by the comb_id column of a per-setup metadata file.  Rerunning the '
+                        'reduction only reprocesses the outputs whose raw frames or '
+                        'calibrations have changed.',
             width=width
         )
         parser.add_argument(
-            '-d', '--rawdir', type=str, default=None,
-            help='Path to parent directory with the raw data to be reduced.'
+            '-t', '--raw_table', required=True,
+            help='Per-setup metadata file for the raw frames to process, written by '
+                 'pipnick_metadata --split.  To add new frames, use pipnick_metadata --split '
+                 '--append and rerun the reduction.'
         )
         parser.add_argument(
             '-r', '--rdxdir', type=str,
-            help='Path for the reduced data.  If not provided, set to the parent '
-                 'directory of rawdir.'
-        )
-        parser.add_argument(
-            '-t', '--raw_table', default=None,
-            help='File with or for relevant metadata for the raw files to be '
-                 'processed by the data reduction script.'
+            help='Path for the reduced data, which can only hold the products of one setup.  '
+                 'If not provided, the path saved in the metadata file is used or, if there is '
+                 'none, the parent directory of the raw data directory.'
         )
 #        parser.add_argument('-d', '--display', action='store_true', help="Display reduced images")
         parser.add_argument(
             '-o', '--overwrite', default=False, action='store_true',
-            help='Overwrite any existing files'
-        )
-        parser.add_argument(
-            '-a', '--append', default=False, action='store_true',
-            help='Append new files to existing reduction.  This only appends new '
-                 'science observations!  New calibration frames are ignored, '
-                 'unless overwrite is set, which is identical to re-running the '
-                 'entire reduction again from scratch.'
+            help='Reprocess all outputs, even if they are up to date.'
         )
         return parser
 
@@ -52,10 +45,7 @@ class Reduce(scriptbase.ScriptBase):
         cls.init_log(args)
 
         # Reduce the images
-        metadata = reduce_all(
-            rawdir=args.rawdir, table=args.raw_table, rdxdir=args.rdxdir, overwrite=args.overwrite,
-            append=args.append
-        )
+        red_files = reduce_all(args.raw_table, rdxdir=args.rdxdir, overwrite=args.overwrite)
 
 #        # Display reduced images
 #        if args.display:

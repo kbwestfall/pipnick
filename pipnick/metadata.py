@@ -70,9 +70,9 @@ from pipnick.pkg.exceptions import PipnickDataModelError, PipnickPathError
 
 __all__ = [
     'metadata_columns', 'setup_keys', 'setup_file_keys', 'build_camera_datatable',
-    'assign_setups', 'setup_file_name', 'split_by_setup', 'find_setup_files', 'write_metadata',
-    'read_metadata', 'update_metadata_meta', 'summarize', 'build_metadata', 'frame_path',
-    'default_table_name', 'default_reduced_file_name'
+    'assign_setups', 'setup_tag', 'setup_file_name', 'split_by_setup', 'find_setup_files',
+    'write_metadata', 'read_metadata', 'update_metadata_meta', 'summarize', 'build_metadata',
+    'frame_path', 'default_table_name', 'default_reduced_file_name'
 ]
 
 metadata_columns = {
@@ -283,12 +283,33 @@ def assign_comb_ids(tbl, assign=None):
         tbl.add_column(Column(ids, name='comb_id'), index=tbl.colnames.index('frametype') + 1)
 
 
+def setup_tag(definition):
+    """
+    Construct the tag that identifies a setup in file names and headers.
+
+    Parameters
+    ----------
+    definition : dict
+        The setup definition; see :func:`assign_setups`.
+
+    Returns
+    -------
+    str
+        The tag, ``<xbin>x<ybin>_<readmode>_<window_name>``, e.g.,
+        ``2x2_fast_full``.
+    """
+    return (
+        f'{definition["xbin"]}x{definition["ybin"]}_{definition["readmode"]}_'
+        f'{definition["window_name"]}'
+    )
+
+
 def setup_file_name(base, definition):
     """
     Construct the name of the metadata file for one setup.
 
-    The name is ``<stem>_<xbin>x<ybin>_<readmode>_<window_name><suffix>``,
-    where ``stem`` and ``suffix`` are those of ``base``.
+    The name is ``<stem>_<tag><suffix>``, where ``stem`` and ``suffix`` are
+    those of ``base`` and ``tag`` is from :func:`setup_tag`.
 
     Parameters
     ----------
@@ -303,11 +324,7 @@ def setup_file_name(base, definition):
         The file name, e.g., ``n2_2x2_fast_full.ecsv``.
     """
     _base = Path(base)
-    tag = (
-        f'{definition["xbin"]}x{definition["ybin"]}_{definition["readmode"]}_'
-        f'{definition["window_name"]}'
-    )
-    return _base.with_name(f'{_base.stem}_{tag}{_base.suffix}')
+    return _base.with_name(f'{_base.stem}_{setup_tag(definition)}{_base.suffix}')
 
 
 def split_by_setup(tbl, commented):
