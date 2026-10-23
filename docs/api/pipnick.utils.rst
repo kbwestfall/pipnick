@@ -7,6 +7,7 @@ Submodules
 .. toctree::
    :maxdepth: 4
 
+   pipnick.utils.combiner
    pipnick.utils.display_fits
    pipnick.utils.fits_class
    pipnick.utils.graphs
