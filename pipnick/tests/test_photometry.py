@@ -355,9 +355,12 @@ def test_pixel_errors(tmp_path, caplog):
     )
     assert np.isclose(ratio, 2., rtol=0.05), 'The flux errors should scale with the pixel errors'
 
-    # Without pixel errors, the photometry still runs
-    with fits.open(image) as hdu:
-        fits.HDUList([hdu[0].copy(), hdu['MASK'].copy()]).writeto(image, overwrite=True)
+    # Without pixel errors, the photometry still runs.
+    # NOTE: The file must be closed before it is overwritten; Windows does not
+    # allow an open file to be replaced.
+    with fits.open(image, memmap=False) as hdu:
+        hdus = fits.HDUList([hdu[0].copy(), hdu['MASK'].copy()])
+    hdus.writeto(image, overwrite=True)
     caplog.clear()
     photometry_all(table, rdxdir=rdxdir, overwrite=True)
     assert 'has no uncertainty' in caplog.text, 'A missing uncertainty should be reported'

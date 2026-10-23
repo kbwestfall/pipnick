@@ -62,19 +62,19 @@ data_rows = [1, 2048]
 # columns show charge trailing in illuminated frames, so they are skipped.
 overscan_columns = [2075, 2088]
 
+# The gain and read noise are from the performance report provided by Andor
+# with the camera.
 [[readout]]
 value = "1.0MHz"
 mode = "fast"
-gain = 1.0                  # e-/ADU; PLACEHOLDER, not yet measured
-readnoise = 10.0            # e-; PLACEHOLDER, not yet measured
-placeholder = true
+gain = 0.91                 # e-/ADU
+readnoise = 6.09            # e-
 
 [[readout]]
 value = "0.05MHz"
 mode = "slow"
-gain = 1.0                  # e-/ADU; PLACEHOLDER, not yet measured
-readnoise = 10.0            # e-; PLACEHOLDER, not yet measured
-placeholder = true
+gain = 0.92                 # e-/ADU
+readnoise = 2.70            # e-
 
 [bpm]
 # No bad pixels have been measured yet.  Partial pixels at the prescan and

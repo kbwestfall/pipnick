@@ -955,11 +955,6 @@ def init_ccddata(frame, bpm=None, saturation=None, gain=None, readnoise=None):
     else:
         ccd.meta['camera'] = camera.name
         readout = camera.readout(ccd.header)
-        if readout.placeholder:
-            log.warning(
-                f'The {camera.name} gain and read noise for the {readout.mode} readout '
-                'are placeholders.'
-            )
 
     # Mask bad pixels
     _bpm = camera.bpm(ccd.header) if bpm is None and camera is not None else bpm

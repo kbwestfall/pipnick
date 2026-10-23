@@ -80,8 +80,10 @@ Functionality/Performance Improvements and Additions
   header keywords provide each quantity, the detector geometry, the readout
   properties, the archival bad-pixel mask, the frame-type rules, and the
   quality checks.  The camera is identified automatically from the raw file
-  headers.  The Andor gain and read noise are placeholders until they are
-  measured.
+  headers.  The gain and read noise of each readout are the nominal values:
+  for the original camera, from the Lick Observatory documentation (slow
+  readout only); for the Andor camera, from the performance report provided
+  with the camera.
 
 - ``pipnick_reduce`` combines frames in the groups set by the ``comb_id``
   column, after checking that the groups give one bias, one dark per exposure

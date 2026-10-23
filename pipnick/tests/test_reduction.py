@@ -294,8 +294,11 @@ def test_reduce(night, tmp_path):
     # NOTE: Memory mapping would keep the file open, and Windows does not allow
     # an open file to be overwritten by the reprocessing below
     data = fits.getdata(rdxdir / sci_name, memmap=False)
-    assert np.allclose(np.median(data), 4700., rtol=0.01), (
-        'The science frames should be bias-subtracted and flat-fielded'
+    gain = cameras.get_camera('NickelAndor').readout(
+        fits.getheader(tmp_path / 'raw' / 'n5011.fits')
+    ).gain
+    assert np.allclose(np.median(data), 4700. * gain, rtol=0.01), (
+        'The science frames should be bias-subtracted, flat-fielded, and in electrons'
     )
 
     # Rerunning does not reprocess anything
@@ -506,21 +509,25 @@ def test_uncertainty(night, tmp_path):
     reduce_all(night, rdxdir=rdxdir)
     cid = comb_id(night, 'n5011.fits')
 
-    # The Andor read noise (a placeholder, with a gain of 1) and the number of
-    # binned overscan columns averaged in each row
+    # The Andor gain and read noise, and the number of binned overscan columns
+    # averaged in each row
     raw = tmp_path / 'raw' / 'n5011.fits'
     camera = cameras.get_camera('NickelAndor')
-    readnoise = camera.readout(fits.getheader(raw)).readnoise
+    readout = camera.readout(fits.getheader(raw))
+    readnoise = readout.readnoise
     _, biassec = camera.sections(fits.getheader(raw))
     x1, x2 = (int(v) for v in biassec.strip('[]').split(',')[0].split(':'))
     var_rn = readnoise**2 * (1 + 1 / (x2 - x1 + 1))
 
     # The synthetic frames have no noise, so the uncertainties follow exactly
-    # from the read noise and the counts: 3 biases at the overscan level; 2
-    # sky flats with 14700 counts; and 2 science frames with 4700 counts
+    # from the read noise and the counts (in electrons): 3 biases at the
+    # overscan level; 2 sky flats with 14700 ADU; and 2 science frames with
+    # 4700 ADU
+    flat = 14700. * readout.gain
+    science = 4700. * readout.gain
     var_bias = var_rn / 3
-    var_flat = (var_rn + var_bias + 14700.) / 2
-    var_frame = var_rn + var_bias + 4700. + 4700.**2 * var_flat / 14700.**2
+    var_flat = (var_rn + var_bias + flat) / 2
+    var_frame = var_rn + var_bias + science + science**2 * var_flat / flat**2
     expected = {
         'Bias.fits': np.sqrt(var_bias),
         f'M11_V_V_C{cid:03d}_2026-08-20.fits': np.sqrt(var_frame / 2)

@@ -50,9 +50,8 @@ binned and windowed equivalents for a given frame are derived from its header.
     One entry per readout setting.  ``value`` is matched against the header
     ``readspeed`` keyword; ``mode`` is the generic name of the setting (e.g.,
     ``'slow'`` or ``'fast'``); ``gain`` (e-/ADU) and ``readnoise`` (e-) are
-    used unless the header provides them; ``placeholder`` flags values that
-    have not been measured; and ``saturation`` optionally overrides the camera
-    value.
+    used unless the header provides them; and ``saturation`` optionally
+    overrides the camera value.
 
 ``[bpm]``
     The archival bad-pixel mask: ``columns`` and ``rows`` (lists of inclusive
@@ -123,11 +122,6 @@ class Readout:
     saturation: float
     """
     Saturation level in ADU.
-    """
-
-    placeholder: bool
-    """
-    The gain and read noise are placeholders that have not been measured.
     """
 
 
@@ -486,15 +480,9 @@ class NickelCamera:
                     break
         gain = self.header_value(hdr, 'gain', default=entry.get('gain'))
         readnoise = self.header_value(hdr, 'readnoise', default=entry.get('readnoise'))
-        # The values are only placeholders if they come from the configuration
-        placeholder = (
-            entry.get('placeholder', False)
-            and self.header_keyword(hdr, 'gain') is None
-            and self.header_keyword(hdr, 'readnoise') is None
-        )
         return Readout(
             mode=entry.get('mode', 'unknown'), gain=gain, readnoise=readnoise,
-            saturation=entry.get('saturation', self.saturation), placeholder=placeholder
+            saturation=entry.get('saturation', self.saturation)
         )
 
     @staticmethod
