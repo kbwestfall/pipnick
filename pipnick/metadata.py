@@ -72,7 +72,7 @@ __all__ = [
     'metadata_columns', 'setup_keys', 'setup_file_keys', 'build_camera_datatable',
     'assign_setups', 'setup_tag', 'setup_file_name', 'split_by_setup', 'find_setup_files',
     'write_metadata', 'read_metadata', 'update_metadata_meta', 'summarize', 'build_metadata',
-    'frame_path', 'default_table_name', 'default_reduced_file_name'
+    'frame_path', 'default_table_name'
 ]
 
 metadata_columns = {
@@ -443,6 +443,12 @@ def build_camera_datatable(
     """
     Find data files in a directory and construct a table with their metadata.
 
+    The metadata are taken from the file headers (see
+    :func:`~pipnick.cameras.cameras.NickelCamera.metadata`).  If a header does
+    not provide the airmass, it is computed from the coordinates and the date
+    (see :func:`~pipnick.cameras.cameras.NickelCamera.compute_airmass`), and
+    ``airmass computed`` is added to the ``note`` column.
+
     Parameters
     ----------
     root : str, :class:`pathlib.Path`
@@ -524,6 +530,13 @@ def build_camera_datatable(
             row = {'file': f.name, **cam.metadata(hdr)}
             data = hdu[0].data if classify == 'stats' else None
             row['frametype'], reject, notes = cam.assess(hdr, row['frametype'], data=data)
+        if row['airmass'] is None:
+            # Compute the airmass if the header does not provide it
+            row['airmass'] = cam.compute_airmass(
+                row['ra'], row['dec'], row['date'], exptime=row['exptime']
+            )
+            if row['airmass'] is not None:
+                notes.append('airmass computed')
         row['note'] = '; '.join(notes)
         rows.append(row)
         rejected.append(reject)
@@ -1023,19 +1036,3 @@ def default_table_name(camera, name):
     dtime = datetime.datetime.now(datetime.UTC).strftime('%Y-%m-%dT%H:%M:%S')
     return f'{camera}_{dtime}_{name}.tbl'
 
-
-def default_reduced_file_name(raw_frame):
-    """
-    Return the default name of a reduced image based on the name of raw file.
-
-    Parameters
-    ----------
-    raw_frame : :class:`pathlib.Path`
-        Path to the raw file.
-
-    Returns
-    -------
-    str
-        Name for the reduced data file.
-    """
-    return f'{raw_frame.stem}_rdx.fits'

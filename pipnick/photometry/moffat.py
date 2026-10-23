@@ -9,8 +9,6 @@ Fit objects to model PSFs.
     <https://www.astropy.org>`__ (BSD 3-Clause); see ``licenses/README.rst``.
 """
 
-from IPython import embed
-
 import numpy as np
 from scipy import optimize
 
@@ -75,8 +73,9 @@ class FitMoffat2D:
             # Use moments to calculate the center, peak value, and width
             par[0] = np.ma.sum(self.x * c_bkg)/np.ma.sum(c_bkg)
             par[1] = np.ma.sum(self.y * c_bkg)/np.ma.sum(c_bkg)
-            # Set the amplitude to be the value at the image center
-            par[2] = c_bkg[int(np.round(par[0])), int(np.round(par[1]))]
+            # Set the amplitude to be the value at the image center (the
+            # image is indexed by row, y, then column, x)
+            par[2] = c_bkg[int(np.round(par[1])), int(np.round(par[0]))]
         else:
             # Set the parameters based on the image center
             par[0] = self.x[self.shape[0]//2, self.shape[1]//2]
@@ -301,7 +300,7 @@ class FitEllipticalMoffat2D:
             Initial parameter guesses: (x0, y0, amplitude, gamma1, gamma2, phi,
             alpha, background).
         """
-        par = np.zeros(6, dtype=float)
+        par = np.zeros(8, dtype=float)
         # Clip high values to guess the background
         par[7] = sigma_clipped_stats(self.c, sigma_lower=3., sigma_upper=1.)[1]
         c_bkg = self.c - par[7]
@@ -309,8 +308,9 @@ class FitEllipticalMoffat2D:
             # Use moments to calculate the center, peak value, and width
             par[0] = np.ma.sum(self.x * c_bkg)/np.ma.sum(c_bkg)
             par[1] = np.ma.sum(self.y * c_bkg)/np.ma.sum(c_bkg)
-            # Set the amplitude to be the value at the image center
-            par[2] = c_bkg[int(np.round(par[0])), int(np.round(par[1]))]
+            # Set the amplitude to be the value at the image center (the
+            # image is indexed by row, y, then column, x)
+            par[2] = c_bkg[int(np.round(par[1])), int(np.round(par[0]))]
         else:
             # Set the parameters based on the image center
             par[0] = self.x[self.shape[0]//2, self.shape[1]//2]
@@ -321,7 +321,7 @@ class FitEllipticalMoffat2D:
         # Set the width based on the first moment of the radius
         r = np.sqrt((self.x-par[0])**2 + (self.y-par[1])**2)
         fwhm = 2 * np.ma.sum(r * c_bkg)/np.ma.sum(c_bkg)
-        par[3] = self.to_gamma(fwhm, par[4])
+        par[3] = self.to_gamma(fwhm, par[6])
         # Guess it's circular
         par[4] = par[3]
         # And that the rotation angle is 0.
@@ -722,12 +722,33 @@ class EllipticalMoffat2DModel(Fittable2DModel):
     @property
     def fwhm(self):
         """
-        Moffat full width at half maximum.
-        Derivation of the formula is available in
+        Moffat full width at half maximum: the mean of the FWHM along the two
+        axes.  Derivation of the formula is available in
         `this notebook by Yoonsoo Bach
         <https://nbviewer.jupyter.org/github/ysbach/AO_2017/blob/master/04_Ground_Based_Concept.ipynb#1.2.-Moffat>`_.
         """
-        return 2.0 * np.abs(self.gamma) * np.sqrt(2.0 ** (1.0 / self.alpha) - 1.0)
+        gamma = (np.abs(self.gamma1) + np.abs(self.gamma2)) / 2
+        return 2.0 * gamma * np.sqrt(2.0 ** (1.0 / self.alpha) - 1.0)
+
+    def bounding_box(self, factor=10.0):
+        """
+        Return the bounding box of the model, used by ``photutils`` to set the
+        region over which the model is evaluated.
+
+        Parameters
+        ----------
+        factor : float, optional
+            The half-size of the box in units of the larger FWHM along the two
+            axes.
+
+        Returns
+        -------
+        tuple
+            The ``((y_low, y_high), (x_low, x_high))`` limits of the box.
+        """
+        gamma = max(np.abs(self.gamma1), np.abs(self.gamma2))
+        delta = factor * 2.0 * gamma * np.sqrt(2.0 ** (1.0 / self.alpha) - 1.0)
+        return ((self.y_0 - delta, self.y_0 + delta), (self.x_0 - delta, self.x_0 + delta))
 
     @staticmethod
     def evaluate(x, y, amplitude, x_0, y_0, gamma1, gamma2, phi, alpha):
@@ -809,3 +830,80 @@ class EllipticalMoffat2DModel(Fittable2DModel):
             "gamma2": inputs_unit[self.inputs[0]],
             "amplitude": outputs_unit[self.outputs[0]],
         }
+
+
+class EllipticalMoffatPSF(Fittable2DModel):
+    r"""
+    Two dimensional elliptical Moffat point-spread function, normalized by its
+    total flux, for PSF photometry with ``photutils``.
+
+    This is :class:`EllipticalMoffat2DModel` parameterized by the total flux,
+    :math:`F`, instead of the amplitude, :math:`A = F (\alpha - 1) / (\pi
+    \gamma_1 \gamma_2)`, analogous to :class:`photutils.psf.MoffatPSF` for the
+    circular Moffat function.  The shape parameters (``gamma1``, ``gamma2``,
+    ``phi``, and ``alpha``) are fixed by default, so that only the flux and
+    position are fit.
+
+    Parameters
+    ----------
+    flux : float
+        Total flux of the model.
+    x_0 : float
+        x position of the maximum of the model.
+    y_0 : float
+        y position of the maximum of the model.
+    gamma1 : float
+        Core width in the 1st direction of the model.
+    gamma2 : float
+        Core width in the 2nd direction of the model.
+    phi : float
+        Rotation angle of the model (rad).
+    alpha : float
+        Power index of the model; must be larger than 1.
+    """
+
+    flux = Parameter(default=1, description="Total flux of the model")
+    x_0 = Parameter(default=0, description="X position of the maximum of the model")
+    y_0 = Parameter(default=0, description="Y position of the maximum of the model")
+    gamma1 = Parameter(default=1, fixed=True, description="Core width in the 1st direction")
+    gamma2 = Parameter(default=1, fixed=True, description="Core width in the 2nd direction")
+    phi = Parameter(default=0, fixed=True, description="Rotation angle of the model (rad)")
+    alpha = Parameter(default=2, fixed=True, description="Power index of the model")
+
+    @staticmethod
+    def evaluate(x, y, flux, x_0, y_0, gamma1, gamma2, phi, alpha):
+        """
+        Evaluate the model; see :meth:`EllipticalMoffat2DModel.evaluate`.
+        """
+        amplitude = flux * (alpha - 1) / (np.pi * np.abs(gamma1 * gamma2))
+        return EllipticalMoffat2DModel.evaluate(
+            x, y, amplitude, x_0, y_0, gamma1, gamma2, phi, alpha
+        )
+
+    @property
+    def fwhm(self):
+        """
+        The mean of the FWHM along the two axes.
+        """
+        gamma = (np.abs(self.gamma1) + np.abs(self.gamma2)) / 2
+        return 2.0 * gamma * np.sqrt(2.0 ** (1.0 / self.alpha) - 1.0)
+
+    def bounding_box(self, factor=10.0):
+        """
+        Return the bounding box of the model, used by ``photutils`` to set the
+        region over which the model is evaluated.
+
+        Parameters
+        ----------
+        factor : float, optional
+            The half-size of the box in units of the larger FWHM along the two
+            axes.
+
+        Returns
+        -------
+        tuple
+            The ``((y_low, y_high), (x_low, x_high))`` limits of the box.
+        """
+        gamma = max(np.abs(self.gamma1), np.abs(self.gamma2))
+        delta = factor * 2.0 * gamma * np.sqrt(2.0 ** (1.0 / self.alpha) - 1.0)
+        return ((self.y_0 - delta, self.y_0 + delta), (self.x_0 - delta, self.x_0 + delta))

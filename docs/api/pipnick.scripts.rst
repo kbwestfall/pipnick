@@ -9,7 +9,7 @@ Submodules
 
    pipnick.scripts.astrometry
    pipnick.scripts.metadata
-   pipnick.scripts.photometry_script
+   pipnick.scripts.photometry
    pipnick.scripts.reduce
    pipnick.scripts.scriptbase
    pipnick.scripts.version

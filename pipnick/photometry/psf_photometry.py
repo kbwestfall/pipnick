@@ -1,236 +1,231 @@
-from pathlib import Path
+"""
+Point-spread-function (PSF) photometry.
 
-from IPython import embed
+The PSF of an image is modeled as a 2D Moffat function fit to a stack of
+bright, isolated sources (:func:`build_moffat_psf_model`), and the sources in
+the image are measured by fitting this PSF with ``photutils``
+(:func:`psf_analysis`).
+"""
 
 import numpy as np
-from scipy.spatial import KDTree
 
-from astropy.table import Table
-from astropy.nddata import CCDData
-from astropy.modeling.fitting import LevMarLSQFitter
-from astropy.modeling.functional_models import Moffat2D
-from photutils.detection import IRAFStarFinder
-from photutils.psf import IterativePSFPhotometry, make_psf_model, MoffatPSF
-from photutils.background import MMMBackground, MADStdBackgroundRMS, LocalBackground
-from photutils.psf import SourceGrouper
+from astropy.modeling.fitting import TRFLSQFitter
+from photutils.background import (
+    Background2D, LocalBackground, MADStdBackgroundRMS, MMMBackground
+)
+from photutils.detection import DAOStarFinder
+from photutils.psf import IterativePSFPhotometry, MoffatPSF, SourceGrouper
 
 from pipnick import log
-from pipnick.utils.fits_class import Fits_Simple
-from pipnick.utils.log import log_astropy_table
-from pipnick.photometry.moffat import FitMoffat2D, FitEllipticalMoffat2D, EllipticalMoffat2DModel
 from pipnick.photometry import starfind
-from pipnick.photometry.fit import fit_psf_single, fit_psf_stack, psf_plot, plot_sources
+from pipnick.photometry.moffat import EllipticalMoffatPSF, FitEllipticalMoffat2D, FitMoffat2D
 
 
-#np.set_printoptions(edgeitems=100)
-
-def build_moffat_psf_model(image, thresh=15.0, fwhm=7., fittype='circ', pdf_file=None):
+def build_moffat_psf_model(
+    image, thresh=15.0, fwhm=7., fittype='circ', stack='mean', pdf_file=None
+):
     """
     Use well-detected and well-separated sources to model the image PSF as a
     2D Moffat function.
 
+    Sources are detected and selected with
+    :func:`~pipnick.photometry.starfind.detect_sources`, background-subtracted
+    stamps are extracted around them
+    (:func:`~pipnick.photometry.starfind.extract_stamps`), and the stamps with
+    less than 1% masked pixels are stacked and fit.
+
     Parameters
     ----------
-    image : str, :class:`astropy.nddata.CCDData`
-        Image for PSF analysis.
+    image : str, :class:`~pathlib.Path`, :class:`~astropy.nddata.CCDData`, array-like
+        Image for PSF analysis; see
+        :func:`~pipnick.photometry.starfind.as_masked_array`.
     thresh : float, optional
         Detection threshold in units of background standard deviation.
     fwhm : float, optional
-        Initial estimate of the FWHM
-    mode : str, optional
-        Mode for PSF fitting; see
-        :class:`photutils.psf.IterativePSFPhotometry`.
+        Initial estimate of the FWHM in pixels.
     fittype : str, optional
-        Type of PSF fit to use ('circ' for circular, 'ellip' for elliptical).
+        Type of PSF fit to use: ``'circ'`` for circular or ``'ellip'`` for
+        elliptical.
+    stack : str, optional
+        How the stamps are stacked: ``'mean'`` or ``'median'``.
+    pdf_file : str, :class:`pathlib.Path`, optional
+        If provided, plot the stacked stamps to this file; see
+        :func:`~pipnick.photometry.starfind.plot_stamps`.
 
     Returns
     -------
-    stack : :class:`numpy.ma.MaskedArray`
-        The stacked source image
-    par : :class:`numpy.ndarray`
-        The best-fit model parameters
-    model : :class:`numpy.ndarray`
-        The best-fit model sampled at each pixel of the image stamps
+    fit : object
+        The fit to the stack, a :class:`~pipnick.photometry.moffat.FitMoffat2D`
+        or :class:`~pipnick.photometry.moffat.FitEllipticalMoffat2D` object.
+        The stack, best-fit parameters, and model are ``fit.c``, ``fit.par``,
+        and ``fit.model()``.
+    nstack : int
+        The number of stacked sources.
+
+    Raises
+    ------
+    ValueError
+        Raised if ``fittype`` or ``stack`` is not valid, or if no sources are
+        good enough to model the PSF.
     """
-    # Read the image if necessary
-    _image = image if isinstance(image, CCDData) else CCDData.read(image)
+    if fittype not in ['circ', 'ellip']:
+        raise ValueError(f'Unknown fit type {fittype}; must be circ or ellip.')
+    if stack not in ['mean', 'median']:
+        raise ValueError(f'Unknown stacking method {stack}; must be mean or median.')
+    _image = starfind.as_masked_array(image)
     source_data = starfind.detect_sources(_image, thresh=thresh, fwhm=fwhm)
     log.info(f'Found {len(source_data)} well-separated sources with well-detected fluxes.')
 
     log.info('Extracting image stamps.')
-    bkg, stamps = starfind.extract_stamps(_image, source_data)
+    _, stamps = starfind.extract_stamps(_image, source_data)
     npix_stamp = np.prod(stamps.shape[1:])
     mask_fraction = np.sum(np.ma.getmaskarray(stamps), axis=(1,2)) / npix_stamp
     indx = source_data['good'].data & (mask_fraction < 0.01)
-    log.info(f'Found {np.sum(indx)} good sources to stack for the PSF measurement.')
+    nstack = int(np.sum(indx))
+    log.info(f'Found {nstack} good sources to stack for the PSF measurement.')
+    if nstack == 0:
+        raise ValueError('No sources are good enough to model the PSF.')
 
     if pdf_file is not None:
         starfind.plot_stamps(stamps[indx], pdf_file, vmin=None, vmax=None)
 
-    # TODO: mean or median?
-    stack = np.ma.mean(stamps[indx], axis=0)
-
-    if fittype == 'circ':
-        fitter = FitMoffat2D(stack) 
-    elif fittype == 'ellip':
-        fitter = FitEllipticalMoffat2D(stack)
+    if stack == 'mean':
+        stacked = np.ma.mean(stamps[indx], axis=0)
     else:
-        log.error(f'Unknown fit type {fittype}')
+        stacked = np.ma.median(stamps[indx], axis=0)
+    fit = FitMoffat2D(stacked) if fittype == 'circ' else FitEllipticalMoffat2D(stacked)
+    fit.fit()
+    return fit, nstack
 
-    fitter.fit()
-    return stack, fitter.par, fitter.model()
 
-
-def psf_analysis(image, thresh=10.0, guess_fwhm=7., mode='all', fittype='circ', show=False):
+def subtract_background(data, mask=None, box_size=64):
     """
-    Perform PSF photometry on a given image, including source detection and PSF fitting.
+    Subtract a smooth, 2D background from an image.
 
-    This function uses a Moffat function to identify sources in the image,
-    generate stamps, fit PSF models, calculate flux, and optionally plot results.
+    The background is measured with :class:`photutils.background.Background2D`
+    in boxes of ``box_size`` pixels, ignoring masked pixels.  The source
+    detection used by the PSF photometry assumes background-subtracted data.
 
     Parameters
     ----------
-    image : str, :class:`astropy.nddata.CCDData`
-        Image for PSF analysis.
-    thresh : float, optional
-        Detection threshold in units of background standard deviation.
-    guess_fwhm : float, optional
-        Initial guess for the FWHM of the PSF in pixels
-    mode : str, optional
-        Mode for PSF fitting; see
-        :class:`photutils.psf.IterativePSFPhotometry`.
-    fittype : str, optional
-        Type of PSF fit to use ('circ' for circular, 'ellip' for elliptical). Default is 'circ'.
-    show : bool, optional
-        Show the image with the sources marked
+    data : :class:`numpy.ndarray`
+        The image data.
+    mask : :class:`numpy.ndarray`, optional
+        Boolean array selecting the pixels to ignore.
+    box_size : int, optional
+        The size of the boxes used to measure the background.
 
     Returns
     -------
     :class:`numpy.ndarray`
-        Best-fit parameters for the PSF used for the photometry
-    :class:`astropy.table.Table`
-        Table containing the results of the PSF photometry
+        The background-subtracted data.
     """
-    _image = image if isinstance(image, CCDData) else CCDData.read(image)
-    psf_stack, moffat_par, moffat_model = build_moffat_psf_model(
-        _image, thresh=thresh, fwhm=guess_fwhm, fittype=fittype
-    )
-    fit_fwhm = process_par(moffat_par, fittype=fittype)
-    log.info(f'Measured Moffat PSF FWHM = {fit_fwhm:.1f} pixels')
+    bkg = Background2D(data, box_size, mask=mask)
+    return data - bkg.background
 
-    # ----------------------------------------------------------------------
-    # Attempt to improve the source detection by improving the FWHM estimate
-    # ----------------------------------------------------------------------
-    aper_size = fit_fwhm * 1.8  # Set aperture size based on FWHM
-    local_bkg_range = (3 * fit_fwhm, 6 * fit_fwhm)  # Update background range
-    win = int(np.ceil(2 * fit_fwhm))  # Calculate window size for fitting
+
+def psf_analysis(
+    image, error=None, thresh=10.0, guess_fwhm=7., mode='all', fittype='circ', stack='mean',
+    min_sep=1., group_sep=2., psf_thresh=15.
+):
+    """
+    Perform PSF photometry on an image, including source detection and PSF
+    fitting.
+
+    The PSF is modeled with :func:`build_moffat_psf_model`.  A smooth
+    background is subtracted (:func:`subtract_background`), and the sources
+    are found (with :class:`photutils.detection.DAOStarFinder`) and fit with
+    :class:`photutils.psf.IterativePSFPhotometry`, with the PSF shape fixed and
+    the flux and position of each source free.
+    Sources closer than ``group_sep`` FWHM are fit simultaneously.
+
+    Parameters
+    ----------
+    image : str, :class:`~pathlib.Path`, :class:`~astropy.nddata.CCDData`, array-like
+        Image for PSF analysis; see
+        :func:`~pipnick.photometry.starfind.as_masked_array`.
+    error : :class:`numpy.ndarray`, optional
+        The 1-sigma error in each pixel, used to weight the fits and to
+        compute the flux errors.
+    thresh : float, optional
+        Detection threshold in units of the background standard deviation.
+    guess_fwhm : float, optional
+        Initial guess for the FWHM of the PSF in pixels.
+    mode : str, optional
+        Mode for the iterative PSF fitting (``'all'`` or ``'new'``); see
+        :class:`photutils.psf.IterativePSFPhotometry`.
+    fittype : str, optional
+        Type of PSF fit to use: ``'circ'`` for circular or ``'ellip'`` for
+        elliptical.
+    stack : str, optional
+        How the stamps used to model the PSF are stacked; see
+        :func:`build_moffat_psf_model`.
+    min_sep : float, optional
+        The minimum separation of detected sources, in units of the FWHM.
+    group_sep : float, optional
+        Sources closer than this, in units of the FWHM, are fit
+        simultaneously; see :class:`photutils.psf.SourceGrouper`.
+    psf_thresh : float, optional
+        Detection threshold, in units of the background standard deviation,
+        for the sources used to model the PSF.
+
+    Returns
+    -------
+    fit : object
+        The fit to the PSF, a :class:`~pipnick.photometry.moffat.FitMoffat2D`
+        or :class:`~pipnick.photometry.moffat.FitEllipticalMoffat2D` object;
+        see :func:`build_moffat_psf_model`.
+    nstack : int
+        The number of sources used to model the PSF.
+    fwhm : float
+        The FWHM of the PSF in pixels; see :func:`process_par`.
+    phot_data : :class:`astropy.table.Table`
+        The results of the PSF photometry; see
+        :class:`photutils.psf.IterativePSFPhotometry`.  Failed fits have NaN
+        values, which callers must mask.
+    data : :class:`numpy.ndarray`
+        The background-subtracted image used for the photometry, with masked
+        pixels set to 0.
+    """
+    _image = starfind.as_masked_array(image)
+    mask = np.ma.getmaskarray(_image)
+    fit, nstack = build_moffat_psf_model(
+        _image, thresh=psf_thresh, fwhm=guess_fwhm, fittype=fittype, stack=stack
+    )
+    fwhm = process_par(fit.par, fittype=fittype)
+    log.info(f'Measured Moffat PSF FWHM = {fwhm:.2f} pixels from {nstack} sources.')
+
+    # Scales set by the FWHM
+    aper_size = fwhm * 1.8
+    local_bkg_range = (3 * fwhm, 6 * fwhm)
+    win = int(np.ceil(2 * fwhm))
     if win % 2 == 0:
         win += 1  # Ensure window size is odd
 
-    # Background estimation and source finding
-    bkgrms = MADStdBackgroundRMS()
-    std = bkgrms(_image)
+    data = subtract_background(_image.filled(0.), mask=mask)
+    # A robust estimate of the background noise
+    std = MADStdBackgroundRMS()(np.ma.MaskedArray(data, mask=mask))
 
-    # Source finder
-    iraffind = IRAFStarFinder(fwhm=fit_fwhm, threshold=thresh * std, minsep_fwhm=0.1)
-    # TODO: Make this a parameter
-    grouper = SourceGrouper(min_separation=2 * fit_fwhm)  # Grouping algorithm
-    mmm_bkg = MMMBackground()  # Background estimator
-    local_bkg = LocalBackground(*local_bkg_range, bkg_estimator=mmm_bkg)  # Local background
-    fitter = LevMarLSQFitter()  # Optimization algorithm
+    # NOTE: DAOStarFinder applies a matched filter before thresholding;
+    # IRAFStarFinder does not, and so detects many more spurious sources
+    finder = DAOStarFinder(threshold=thresh * std, fwhm=fwhm, min_separation=min_sep * fwhm)
+    grouper = SourceGrouper(min_separation=group_sep * fwhm)
+    local_bkg = LocalBackground(*local_bkg_range, bkg_estimator=MMMBackground())
 
-    # Define the PSF model
+    # The PSF model, with its shape fixed by the fit to the stack
     if fittype == 'circ':
-        moffat_psf = MoffatPSF(alpha=moffat_par[3], beta=moffat_par[4])
-#        moffat_psf = Moffat2D(gamma=moffat_par[3], alpha=moffat_par[4])
-#        moffat_psf = make_psf_model(moffat_psf)
-    elif fittype == 'ellip':
-        # TODO: Make this into a "PSF" model similar to "MoffatPSF"
-        moffat_psf = EllipticalMoffat2DModel(
-            gamma1=moffat_par[3], gamma2=moffat_par[4], phi=moffat_par[5], alpha=moffat_par[6]
+        psf_model = MoffatPSF(alpha=fit.par[3], beta=fit.par[4])
+    else:
+        psf_model = EllipticalMoffatPSF(
+            gamma1=fit.par[3], gamma2=fit.par[4], phi=fit.par[5], alpha=fit.par[6]
         )
-        moffat_psf = make_psf_model(moffat_psf)
 
-    # Create the photometry object
     phot = IterativePSFPhotometry(
-        finder=iraffind, grouper=grouper, localbkg_estimator=local_bkg, psf_model=moffat_psf,
-        fitter=fitter, fit_shape=win, aperture_radius=aper_size, mode=mode
+        psf_model, win, finder, grouper=grouper, local_bkg_estimator=local_bkg,
+        fitter=TRFLSQFitter(), aperture_radius=aper_size, mode=mode
     )
-    
-    # Perform the fitting and collect photometric data
-    phot_data = phot(data=_image.data, mask=_image.mask)
-    phot_data['airmass'] = np.full(len(phot_data), _image.header['AIRMASS'], dtype=float)
-
-    if show:
-        plot_sources(_image, phot_data, fit_fwhm)
-
-    return moffat_par, phot_data
-
-
-# def plot_groups(phot_data, source_coords, source_fits, base):
-#     """
-#     Show stamp images, side profiles, and PSF fits of sources in groups
-#     identified in the photometric data.
-# 
-#     Parameters
-#     ----------
-#     phot_data : `astropy.table.Table`
-#         Table containing photometric data of detected sources.
-#     source_coords : `numpy.ndarray`
-#         Coordinates of the sources from initial fitting.
-#     source_fits : list
-#         List of fitted source models.
-#     base : Path
-#         Base path for output plots.
-#     """
-#     group_data = phot_data[phot_data['group_size'] > 1]  # Filter groups with multiple sources
-#     group_ids = list(sorted(set(group_data['group_id'])))  # Unique group IDs
-# 
-#     # Show plots for each group ID
-#     for id in group_ids:
-#         log.warning(f"Group {id} has multiple fitted PSFs: displaying original source")
-#         group = phot_data[phot_data['group_id'] == id]
-#         
-#         # Match coordinates of the group center to original source coordinates
-#         group_x = np.median(group['x_fit'])
-#         group_y = np.median(group['y_fit'])
-#         matching_indices = match_coords((group_x, group_y), source_coords, 2.0)
-#         if len(matching_indices) == 0:
-#             matching_indices = match_coords((group_x, group_y), source_coords, 4.0)
-#             if len(matching_indices) == 0:
-#                 log.warning("No nearby source found to display")
-#         if len(matching_indices) > 1:
-#             log.info(f"Multiple nearby sources that could match this group; displaying all")
-#         
-#         # Display plots for all potential matching sources
-#         for index in matching_indices:
-#             matching_fit = source_fits[index]
-#             plot_file = Path(f'{str(base)}_src{index+1}.psf.pdf').resolve()
-#             psf_plot(plot_file, matching_fit, show=True, plot_fit=True)
-# 
-# 
-# def match_coords(target, search_space, max_dist=2.0):
-#     """
-#     Match target coordinates to a search space using KDTree.
-# 
-#     Parameters
-#     ----------
-#     target : tuple
-#         Target coordinates to match.
-#     search_space : `numpy.ndarray`
-#         Array of coordinates to search within.
-#     max_dist : float, optional
-#         Maximum distance for matching. Default is 2.0.
-# 
-#     Returns
-#     -------
-#     list
-#         List of indices in the search space that are within max_dist of the target.
-#     """
-#     search_tree = KDTree(search_space)  # Create KDTree for fast searching
-#     indices = search_tree.query_ball_point(target, max_dist)  # Find nearby points
-#     log.debug(f"Search found indices {indices} within {max_dist} of {target}")
-#     return indices
+    phot_data = phot(data, mask=mask, error=error)
+    return fit, nstack, fwhm, phot_data, data
 
 
 def gamma_to_fwhm(gamma, alpha):
@@ -252,125 +247,88 @@ def gamma_to_fwhm(gamma, alpha):
     return 2 * gamma * np.sqrt(2**(1/alpha) - 1)
 
 
-#def discrete_moffat_integral(par, fittype, step_size=1.0):
-#    """
-#    Calculate the integral of a Moffat function over a discrete grid.
-#
-#    Parameters
-#    ----------
-#    par : array-like
-#        Parameters for the Moffat model.
-#    fittype : str
-#        Type of Moffat fit ('circ' or 'ellip').
-#    step_size : float, optional
-#        Size of the grid step for integration. Default is 1.0.
-#
-#    Returns
-#    -------
-#    float
-#        Total flux integral over the grid.
-#    """
-#    
-#    # Calculate the start and end points for the grid
-#    grid_size = 10
-#    half_size = grid_size // 2
-#    x_start, x_end = -half_size + step_size / 2, half_size - step_size / 2
-#    y_start, y_end = half_size - step_size / 2, -half_size + step_size / 2
-#    x_coords = np.arange(x_start, x_end + step_size, step_size)
-#    y_coords = np.arange(y_start, y_end - step_size, -step_size)
-#    grid_x, grid_y = np.meshgrid(x_coords, y_coords)
-#
-#    # Calculate flux in each pixel based on the fit type
-#    if fittype == 'circ':
-#        pixel_fluxes = Moffat2D.evaluate(grid_x, grid_y, par[2], 0, 0, par[3], par[4])
-#    elif fittype == 'ellip':
-#        pixel_fluxes = EllipticalMoffat2DModel.evaluate(grid_x, grid_y, par[2], 0, 0,
-#                                                             par[3], par[4], par[5], par[6])
-#    pixel_fluxes *= step_size**2  # Scale by the area of each pixel
-#    return np.sum(pixel_fluxes)  # Return total flux
-
-
 def process_par(par, fittype):
     """
-    Process fit parameters, obtain FWHM, and log relevant information.
+    Return the FWHM of a Moffat PSF model.
 
     Parameters
     ----------
     par : array-like
-        Parameters for the Moffat model.
+        Parameters for the Moffat model; see
+        :class:`~pipnick.photometry.moffat.FitMoffat2D` and
+        :class:`~pipnick.photometry.moffat.FitEllipticalMoffat2D`.
     fittype : str
-        Type of Moffat fit ('circ' or 'ellip').
+        Type of Moffat fit (``'circ'`` or ``'ellip'``).
 
     Returns
     -------
     float
-        The calculated FWHM based on the fit parameters.
+        The FWHM in pixels; for the elliptical model, the mean of the FWHM
+        along the two axes.
+
+    Raises
+    ------
+    ValueError
+        Raised if ``fittype`` is not valid.
     """
     if fittype == 'circ':
         return gamma_to_fwhm(par[3], par[4])
     if fittype == 'ellip':
         return (gamma_to_fwhm(par[3], par[6]) + gamma_to_fwhm(par[4], par[6])) / 2
-    log.error(f'Unknown fit type {fittype}')
+    raise ValueError(f'Unknown fit type {fittype}; must be circ or ellip.')
 
 
-def consolidate_groups(phot_data, preserve=[]):
+def consolidate_groups(phot_data, preserve=None):
     """
     Consolidate groups of sources in photometric source into one source.
 
-    This function combines data for sources that are identified as belonging 
+    This function combines data for sources that are identified as belonging
     to the same group by summing fluxes and weighted-averaging other parameters.
 
     Parameters
     ----------
     phot_data : :class:`astropy.table.Table`
-        Table containing photometric data of detected sources.
+        Table containing photometric data of detected sources; see
+        :func:`psf_analysis`.
     preserve : list, optional
-        List of group IDs to preserve during consolidation. Default is an empty list.
+        List of group IDs to preserve during consolidation.
 
     Returns
     -------
     :class:`astropy.table.Table`
         A new table containing consolidated photometric data.
     """
-    new_data = phot_data.copy()
-    group_data = new_data[new_data['group_size'] > 1]  # Filter groups with multiple sources
+    _preserve = [] if preserve is None else preserve
+    group_data = phot_data[phot_data['group_size'] > 1]
     # Exclude preserved groups
-    group_data = group_data.copy()[np.logical_not(np.isin(group_data['group_id'], preserve))]
+    group_data = group_data[np.logical_not(np.isin(group_data['group_id'], _preserve))]
 
-    group_ids = list(sorted(set(group_data['group_id'])))  # Unique group IDs
-    log.info(f"Consolidating groups {group_ids}")
-    log.info(f"Preserving groups {preserve}")
+    group_ids = sorted(set(group_data['group_id']))
+    log.info(f'Consolidating groups {group_ids}')
 
     # Start with non-group data
-    new_data = phot_data.copy()[~np.isin(phot_data['group_id'], group_ids)]
-    
+    new_data = phot_data[np.logical_not(np.isin(phot_data['group_id'], group_ids))]
+
     # Consolidate data for each group
+    weighted = [
+        'local_bkg', 'x_init', 'y_init', 'flux_init', 'x_fit', 'y_fit', 'qfit', 'cfit',
+        'reduced_chi2'
+    ]
+    summed = ['flux_fit', 'x_err', 'y_err', 'flux_err', 'n_pixels_fit']
     for id in group_ids:
         group = group_data[group_data['group_id'] == id]
-        new_row = {
-            'id': id,
-            'group_id': id,
-            'group_size': group['group_size'][0],
-            'iter_detected': group['iter_detected'][-1],
-            'local_bkg': np.average(group['local_bkg'], weights=abs(group['flux_fit'])),
-            'x_init': np.average(group['x_init'], weights=abs(group['flux_fit'])),
-            'y_init': np.average(group['y_init'], weights=abs(group['flux_fit'])),
-            'flux_init': np.average(group['flux_init'], weights=abs(group['flux_fit'])),
-            'x_fit': np.average(group['x_fit'], weights=abs(group['flux_fit'])),
-            'y_fit': np.average(group['y_fit'], weights=abs(group['flux_fit'])),
-            'flux_fit': np.sum(group['flux_fit']),
-            'x_err': np.sum(group['x_err']),
-            'y_err': np.sum(group['y_err']),
-            'flux_err': np.sum(group['flux_err']),
-            'airmass': group['airmass'][0],
-            'npixfit': np.sum(group['npixfit']),
-            'qfit': np.average(group['qfit'], weights=abs(group['flux_fit'])),
-            'cfit': np.average(group['cfit'], weights=abs(group['flux_fit'])),
-            'flags': np.bitwise_or.reduce(group['flags'])  # Combine flags using bitwise OR
-        }
-        new_data.add_row(new_row)  # Add new row for consolidated group
-    
-    new_data.sort('group_id')  # Sort consolidated data by group ID
-#    table_str = log_astropy_table(new_data)  # Log consolidated data
-#    log.debug(f"Consolidated sources: \n{table_str}")
-    return new_data  # Return consolidated data
+        weights = np.absolute(group['flux_fit'])
+        new_row = {'id': id, 'group_id': id, 'group_size': group['group_size'][0]}
+        for name in group.colnames:
+            if name in weighted:
+                new_row[name] = np.average(group[name], weights=weights)
+            elif name in summed:
+                new_row[name] = np.sum(group[name])
+            elif name == 'iter_detected':
+                new_row[name] = group[name][-1]
+            elif name == 'flags':
+                new_row[name] = np.bitwise_or.reduce(group[name])
+        new_data.add_row(new_row)
+
+    new_data.sort('group_id')
+    return new_data

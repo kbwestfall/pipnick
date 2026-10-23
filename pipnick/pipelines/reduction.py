@@ -13,13 +13,11 @@ import hashlib
 import re
 import warnings
 
-from IPython import embed
-
 import numpy as np
 
 from astropy.coordinates import SkyCoord
 from astropy.io import fits
-from astropy.nddata import CCDData
+from astropy.nddata import CCDData, StdDevUncertainty
 from astropy.stats import sigma_clip, sigma_clipped_stats
 from astropy.wcs.wcs import FITSFixedWarning
 from astropy import units
@@ -27,6 +25,7 @@ import ccdproc
 
 from pipnick import cameras
 from pipnick.pkg.exceptions import PipnickDataModelError, PipnickPathError
+from pipnick.utils.combiner import Combiner
 from pipnick.metadata import build_metadata, frame_path, setup_tag, update_metadata_meta
 from pipnick import log
 
@@ -39,6 +38,10 @@ def reduce_all(table, rdxdir=None, overwrite=False):
     The processing steps use :func:`ccdproc.subtract_overscan`,
     :func:`ccdproc.trim_image`, :func:`ccdproc.subtract_bias`,
     :func:`ccdproc.flat_correct`, and :func:`ccdproc.cosmicray_lacosmic`.
+    The uncertainty of each pixel is propagated through the processing (see
+    :func:`process_frame`) and the combination of frames (see
+    :func:`combine_frames`), and is written to the ``UNCERT`` extension of
+    each output.
 
     The frames are reduced in the combination groups set by the ``comb_id``
     column of the metadata table; see :func:`check_comb_groups` for the rules
@@ -62,8 +65,8 @@ def reduce_all(table, rdxdir=None, overwrite=False):
           after scaling them to the median exposure time of the group.
 
     The metadata table, not the raw headers, is the authority for the object,
-    filter, exposure time, and coordinates, so that edits to the table (e.g.,
-    a corrected object name) propagate to the outputs.  These values are
+    filter, exposure time, coordinates, and airmass, so that edits to the
+    table (e.g., a corrected object name) propagate to the outputs.  These values are
     written to the output headers, and any raw header value that differs is
     kept in an ``ORIG*`` keyword (e.g., ``ORIGOBJ``); see
     :func:`_apply_table_values`.
@@ -493,7 +496,7 @@ def _group_object(metadata, indx):
     return max(objects, key=objects.count)
 
 
-def _table_values(metadata, indx, frametype):
+def table_values(metadata, indx, frametype):
     """
     Return the metadata table values to write to the header of an output.
 
@@ -513,10 +516,12 @@ def _table_values(metadata, indx, frametype):
     -------
     dict
         The values keyed by the quantity (``'filter'`` and ``'exptime'`` for
-        all frame types, and ``'object'``, ``'ra'``, and ``'dec'`` for science
-        frames).  Unknown values are None.  The object is the most common in
-        the group (see :func:`_group_object`), the exposure time is the
-        median, and the other values are from the earliest frame.
+        all frame types, and ``'object'``, ``'ra'``, ``'dec'``, and
+        ``'airmass'`` for science frames).  Unknown values are None.  The
+        object is the most common in the group (see :func:`_group_object`),
+        the exposure time is the median, the airmass is the mean (of the
+        frames with an airmass), and the other values are from the earliest
+        frame.
     """
     exptimes = [_exptime(metadata, i) for i in indx]
     values = {
@@ -525,6 +530,9 @@ def _table_values(metadata, indx, frametype):
     }
     if frametype == 'science':
         values['object'] = _group_object(metadata, indx)
+        airmass = [_masked_to_none(metadata['airmass'][i]) for i in indx]
+        airmass = [float(a) for a in airmass if a is not None]
+        values['airmass'] = None if len(airmass) == 0 else float(np.mean(airmass))
         values['ra'] = _masked_to_none(metadata['ra'][indx[0]])
         values['dec'] = _masked_to_none(metadata['dec'][indx[0]])
     return values
@@ -533,7 +541,7 @@ def _table_values(metadata, indx, frametype):
 def _table_hash(values):
     """
     Return a hash of the metadata table values written to the header of an
-    output (see :func:`_table_values`), used to determine if they have changed.
+    output (see :func:`table_values`), used to determine if they have changed.
 
     The hash is the first 16 hexadecimal digits of the SHA-1 hash of the
     sorted ``quantity=value`` pairs, separated by newlines.
@@ -549,10 +557,10 @@ def _apply_table_values(ccd, values, camera):
     Each value is written to the camera keyword for its quantity found in the
     header (e.g., ``FILTNAM`` for the filter of the original Nickel camera),
     and to the standard keyword (``OBJECT``, ``FILTER``, ``EXPTIME``, ``RA``,
-    or ``DEC``) if that is different.  If the header value differs from the
-    table value, the header value is saved to ``ORIGOBJ``, ``ORIGFILT``,
-    ``ORIGEXP``, ``ORIGRA``, or ``ORIGDEC``.  Unknown (None) table values are
-    not written.
+    ``DEC``, or ``AIRMASS``) if that is different.  If the header value
+    differs from the table value, the header value is saved to ``ORIGOBJ``,
+    ``ORIGFILT``, ``ORIGEXP``, ``ORIGRA``, ``ORIGDEC``, or ``ORIGAIR``.
+    Unknown (None) table values are not written.
 
     Parameters
     ----------
@@ -560,13 +568,14 @@ def _apply_table_values(ccd, values, camera):
         The output image, with a :class:`astropy.io.fits.Header` as its
         ``meta``.  Modified in place.
     values : dict
-        The table values; see :func:`_table_values`.
+        The table values; see :func:`table_values`.
     camera : :class:`~pipnick.cameras.cameras.NickelCamera`
         The camera used to obtain the data.
     """
     keys = {
         'object': ('OBJECT', 'ORIGOBJ'), 'filter': ('FILTER', 'ORIGFILT'),
-        'exptime': ('EXPTIME', 'ORIGEXP'), 'ra': ('RA', 'ORIGRA'), 'dec': ('DEC', 'ORIGDEC')
+        'exptime': ('EXPTIME', 'ORIGEXP'), 'ra': ('RA', 'ORIGRA'), 'dec': ('DEC', 'ORIGDEC'),
+        'airmass': ('AIRMASS', 'ORIGAIR')
     }
     for quantity, value in values.items():
         if value is None:
@@ -988,14 +997,32 @@ def init_ccddata(frame, bpm=None, saturation=None, gain=None, readnoise=None):
     return ccd
 
 
-def process_frame(raw_frame, bias=None, flat=None, flag_cosmics=True):
-    """
+def process_frame(raw_frame, bias=None, flat=None, flag_cosmics=True, photon_noise=True):
+    r"""
     Perform basic image processing
 
     This includes overscan subtraction, trimming, bias subtraction, and
     field-flattening.  The mean overscan level (in ADU), the size of the
     trimmed image, and the number of pixels affected by cosmic rays are
     logged, and the overscan level is saved to the ``PNOSCAN`` header keyword.
+
+    The uncertainty of each pixel is propagated through the processing:
+
+        - After the overscan subtraction, the variance is the read noise,
+          :math:`\sigma_{\rm RN}^2`, plus the error in the subtracted overscan
+          level, :math:`\sigma_{\rm RN}^2 / N_{\rm os}`.  The overscan level
+          of each row is the mean of its :math:`N_{\rm os}` overscan pixels
+          (see :func:`ccdproc.subtract_overscan`), so this error is the same
+          for all the pixels in a row.  Without an overscan region, the
+          variance is :math:`\sigma_{\rm RN}^2`.
+        - The bias subtraction adds the variance of the bias image.
+        - If ``photon_noise`` is True, the Poisson variance of the
+          bias-subtracted counts (in electrons, and not less than 0) is
+          added.
+        - The field-flattening propagates the uncertainties of the image and
+          the flat.
+
+    The uncertainty is not set if the read noise is unknown.
 
     Parameters
     ----------
@@ -1007,6 +1034,9 @@ def process_frame(raw_frame, bias=None, flat=None, flag_cosmics=True):
         Image to use for the bias subtraction
     flat : :class:`astropy.nddata.CCDData`, optional
         Image to use for the field-flattening
+    photon_noise : bool, optional
+        Include the Poisson noise of the counts in the uncertainty.  This
+        should be False for biases, which have no photons.
 
     Returns
     -------
@@ -1015,6 +1045,10 @@ def process_frame(raw_frame, bias=None, flat=None, flag_cosmics=True):
     """
 #    warnings.simplefilter("error", RuntimeWarning)
     ccd = init_ccddata(raw_frame)
+    readnoise = ccd.meta.get('PROCRN')
+    # The number of overscan pixels averaged to set the overscan level of each
+    # row; 0 if there is no overscan subtraction
+    noverscan = 0
     if 'camera' not in ccd.meta:
         log.warning('Unknown camera; cannot determine the overscan and data sections!')
     else:
@@ -1022,7 +1056,9 @@ def process_frame(raw_frame, bias=None, flat=None, flag_cosmics=True):
         if biassec is None:
             log.warning('Frame has no overscan region.')
         else:
-            level = _masked_mean(ccdproc.trim_image(ccd, fits_section=biassec))
+            overscan = ccdproc.trim_image(ccd, fits_section=biassec)
+            noverscan = overscan.shape[1]
+            level = _masked_mean(overscan)
             if ccd.meta['PROCGAIN'] is not None:
                 level /= ccd.meta['PROCGAIN']
             ccd.meta['PNOSCAN'] = (level, 'Mean overscan level (ADU)')
@@ -1030,9 +1066,20 @@ def process_frame(raw_frame, bias=None, flat=None, flag_cosmics=True):
             ccd = ccdproc.subtract_overscan(ccd, fits_section=biassec, overscan_axis=1)
         ccd = ccdproc.trim_image(ccd, fits_section=datasec)
         log.info(f'Trimmed image to {ccd.shape[1]} x {ccd.shape[0]} (columns x rows).')
+    if readnoise is None:
+        log.warning('Unknown read noise; the uncertainty of the image is not set.')
+    else:
+        # Read noise, including the error in the subtracted overscan level
+        variance = readnoise**2 * (1 + (0. if noverscan == 0 else 1 / noverscan))
+        ccd.uncertainty = StdDevUncertainty(np.full(ccd.shape, np.sqrt(variance)))
     if bias is not None:
         log.info('Subtracting super bias')
         ccd = ccdproc.subtract_bias(ccd, bias)
+    if photon_noise and ccd.uncertainty is not None:
+        sigma = np.asarray(ccd.uncertainty.array)
+        ccd.uncertainty = StdDevUncertainty(
+            np.sqrt(sigma**2 + np.clip(np.asarray(ccd.data), 0., None))
+        )
     if flat is not None:
         log.info('Applying flat-field correction')
         ccd = ccdproc.flat_correct(ccd, flat)
@@ -1054,7 +1101,7 @@ def _masked_mean(ccd):
     return float(np.ma.mean(data))
 
 
-def process_frames(raw_frames, bias=None, flat=None, flag_cosmics=True):
+def process_frames(raw_frames, bias=None, flat=None, flag_cosmics=True, photon_noise=True):
     """
     Perform basic image processing of a list of frames; see
     :func:`process_frame`.
@@ -1077,7 +1124,9 @@ def process_frames(raw_frames, bias=None, flat=None, flag_cosmics=True):
     """
     # TODO: For *many* images, this may be too memory intensive.
     return [
-        process_frame(frame, bias=bias, flat=flat, flag_cosmics=flag_cosmics)
+        process_frame(
+            frame, bias=bias, flat=flat, flag_cosmics=flag_cosmics, photon_noise=photon_noise
+        )
         for frame in raw_frames
     ]
 
@@ -1090,6 +1139,13 @@ def combine_frames(frames, scale=None):
     combined frame are those of the first frame, with ``NCOMBINE`` set to the
     number of frames.  A single frame is returned without combination (but
     with any scaling applied).
+
+    The uncertainty of the combined frame is propagated from the
+    uncertainties of the (scaled) frames that are not rejected at each pixel;
+    see :class:`~pipnick.utils.combiner.Combiner`.  If any frame has no
+    uncertainty, the ``ccdproc`` default is used instead: the standard
+    deviation of the combined values divided by the square root of their
+    number.
 
     Parameters
     ----------
@@ -1113,7 +1169,7 @@ def combine_frames(frames, scale=None):
         combined = _frames[0]
     else:
         log.info('Identifying outliers using sigma clipping')
-        combiner = ccdproc.Combiner(_frames)
+        combiner = Combiner(_frames)
 
         old_n_masked = 0
         new_n_masked = 1
@@ -1129,7 +1185,15 @@ def combine_frames(frames, scale=None):
             new_n_masked = combiner.data_arr.mask.sum()
 
         log.info('Creating sigma-clipped average image.')
-        combined = combiner.average_combine(scale_func=np.ma.mean)
+        propagate = combiner.uncertainty_arr is not None
+        if not propagate:
+            log.warning(
+                'Not all frames have uncertainties; the uncertainty of the combined frame is '
+                'the scatter of the combined values.'
+            )
+        combined = combiner.average_combine(
+            scale_func=np.ma.mean, propagate_uncertainty=propagate
+        )
 
     # TODO: Fill the masked regions?
     combined.meta = meta
@@ -1226,7 +1290,7 @@ def _reduce_calibration(product, metadata, raw, tag, overwrite, camera, bias=Non
     raw_hash = _raw_hash(files)
     calib = {'file': product['file'], 'hash': raw_hash, 'ccd': None}
     calibs = {} if frametype == 'bias' else {'bias': bias}
-    values = _table_values(metadata, product['indx'], frametype)
+    values = table_values(metadata, product['indx'], frametype)
     table_hash = _table_hash(values)
     update, reason = _needs_update(
         product['file'], tag, raw_hash, table_hash, _calib_hashes(calibs), overwrite
@@ -1236,7 +1300,10 @@ def _reduce_calibration(product, metadata, raw, tag, overwrite, camera, bias=Non
         return calib
 
     log.info(f'Reprocessing {product["file"].name} ({reason}) from {len(files)} frames.')
-    frames = process_frames(files, bias=_calibration_data(calibs.get('bias')), flag_cosmics=False)
+    frames = process_frames(
+        files, bias=_calibration_data(calibs.get('bias')), flag_cosmics=False,
+        photon_noise=frametype != 'bias'
+    )
     if frametype == 'bias':
         _report_bias_stats(frames, files)
     scale = None
@@ -1293,7 +1360,7 @@ def _reduce_science(product, metadata, raw, tag, overwrite, camera, bias=None, f
     files = [raw[i] for i in indx]
     raw_hash = _raw_hash(files)
     calibs = {'bias': bias, 'flat': flat}
-    values = _table_values(metadata, indx, 'science')
+    values = table_values(metadata, indx, 'science')
     table_hash = _table_hash(values)
     update, reason = _needs_update(
         product['file'], tag, raw_hash, table_hash, _calib_hashes(calibs), overwrite

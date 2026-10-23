@@ -13,6 +13,15 @@ plate_scale = 0.185         # arcsec per unbinned pixel (header CD matrix: 0.370
 saturation = 65535          # ADU
 fwhm_guess = 1.85           # arcsec; typical seeing (5 pixels at 2x2 binning)
 
+[observatory]
+# The Lick Observatory site, used to compute airmasses missing from the headers.
+# These are the values of astropy's EarthLocation.of_site('Lick Observatory'),
+# stored here because that function downloads astropy's site registry.
+name = "Lick Observatory"
+longitude = -121.636667     # deg, east positive
+latitude = 37.343333        # deg
+height = 1290.0             # m
+
 [identify]
 # All of these header keywords must be present and match the regular expression.
 INSTRUME = '^Nickel Direct Camera$'

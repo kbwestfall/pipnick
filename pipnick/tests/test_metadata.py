@@ -4,10 +4,13 @@ Tests for the metadata table, using synthetic FITS files.
 
 import numpy as np
 import pytest
+from astropy.coordinates import EarthLocation
 from astropy.io import fits
 from astropy.table import Table
+from astropy.time import Time
+from astropy.utils import iers
 
-from pipnick import metadata
+from pipnick import cameras, metadata
 from pipnick.pkg.exceptions import PipnickDataModelError, PipnickPathError
 
 
@@ -95,6 +98,51 @@ def test_missing_values(tmp_path):
     assert tbl['airmass'].mask[0] and tbl['date'].mask[0] and tbl['mjd'].mask[0], (
         'Quantities missing from the header should be masked'
     )
+
+
+def test_computed_airmass(tmp_path):
+    write_c2(tmp_path / 'd1001.fits')
+    with fits.open(tmp_path / 'd1001.fits', mode='update') as hdu:
+        del hdu[0].header['AIRMASS']
+    tbl, _ = metadata.build_camera_datatable(tmp_path)
+    expected = cameras.get_camera('NickelC2').compute_airmass(
+        '17:58:33.4', '66:37:59', '2024-06-27T05:37:01.28', exptime=60.
+    )
+    assert np.isclose(tbl['airmass'][0], expected), (
+        'A missing airmass should be computed from the coordinates and the date'
+    )
+    assert 'airmass computed' in tbl['note'][0], 'A computed airmass should be noted'
+
+
+def test_compute_airmass():
+    camera = cameras.get_camera('NickelC2')
+    location = camera.location
+    time = Time('2024-06-27T05:00:00', scale='utc')
+    with iers.conf.set_temp('auto_download', False):
+        lst = time.sidereal_time('apparent', longitude=location.lon)
+    zenith = camera.compute_airmass(lst.deg, location.lat.deg, time.isot)
+    assert np.isclose(zenith, 1., atol=1e-3), 'The airmass at the zenith should be 1'
+    assert camera.compute_airmass('12:00:00', '-80:00:00', time.isot) is None, (
+        'The airmass of a target below the horizon should be None'
+    )
+    assert camera.compute_airmass('not', 'valid', time.isot) is None, (
+        'The airmass of invalid coordinates should be None'
+    )
+    assert camera.compute_airmass('12:00:00', '30:00:00', None) is None, (
+        'The airmass without a date should be None'
+    )
+
+
+@pytest.mark.remote_data
+def test_observatory_location():
+    # The configured location should match astropy's site registry, which
+    # requires a download (and so only runs with --remote-data)
+    site = EarthLocation.of_site('Lick Observatory')
+    for name in cameras.available_cameras():
+        location = cameras.get_camera(name).location
+        assert location.separation_3d(site).to('m').value < 10., (
+            f'The {name} observatory location should match astropy\'s Lick Observatory'
+        )
 
 
 def test_setups(tmp_path):

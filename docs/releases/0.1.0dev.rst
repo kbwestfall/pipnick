@@ -48,6 +48,19 @@ Breaking Changes
   ``--excl_files``, ``--excl_objs``, and ``--excl_filts`` options are removed.
   The script module is renamed ``pipnick.scripts.astrometry``.
 
+- ``pipnick_photometry`` takes the per-setup metadata file used by
+  ``pipnick_reduce`` (``-t``) and writes an ECSV source table for each image to
+  the ``photometry`` subdirectory of the reduction directory, instead of CSV
+  tables; the ``-p`` option is removed, and the detection threshold is set
+  with ``--thresh`` (was ``-s``).  The script module is renamed
+  ``pipnick.scripts.photometry``.
+
+- Removed ``pipnick.pipelines.final_calib``; the photometry source tables now
+  include the celestial coordinates.  Removed
+  ``pipnick.metadata.default_reduced_file_name`` and the unused stamp-fitting
+  functions in ``pipnick.photometry.fit`` (``fit_psf_stack``,
+  ``fit_psf_single``, ``fit_psf_generic``, and ``get_graphable_pars``).
+
 Dependency Changes
 ------------------
 
@@ -87,10 +100,24 @@ Functionality/Performance Improvements and Additions
   directory can only hold the images from one setup.
 
 - The metadata table, rather than the raw headers, sets the object, filter,
-  exposure time, and coordinates of the reduced images, so that edits to the
-  table propagate to the reduced images and their headers.  Raw header values
-  that differ are kept in ``ORIG*`` keywords (e.g., ``ORIGOBJ``), and edited
-  table values trigger reprocessing.
+  exposure time, coordinates, and airmass of the reduced images, so that edits
+  to the table propagate to the reduced images and their headers.  Raw header
+  values that differ are kept in ``ORIG*`` keywords (e.g., ``ORIGOBJ``), and
+  edited table values trigger reprocessing.  The airmass of a combined image
+  is the mean of its frames.
+
+- ``pipnick_reduce`` propagates the uncertainty of each pixel: the read noise
+  (including the error in the subtracted overscan level), the Poisson noise
+  of the counts, and the uncertainties of the bias and the flat.  When frames
+  are combined, their uncertainties are propagated, instead of being replaced
+  by the scatter of the combined values; see ``pipnick.utils.combiner``.
+  Previously, the uncertainty of a single-frame science image was that of
+  the calibrations only, and the uncertainty of a combined image was
+  estimated from the scatter of just a few frames.
+
+- ``pipnick_metadata`` computes the airmass of frames whose headers do not
+  provide it, from the coordinates, the time of the observation, and the
+  observatory location in the camera configuration, using ``astropy``.
 
 - ``pipnick_reduce`` logs the number of saturated pixels in each frame, the
   mean overscan level, the size of the trimmed image, the number of pixels
@@ -167,6 +194,25 @@ Functionality/Performance Improvements and Additions
 - The image PSF is now modeled as a 2D Moffat function fit to a stack of bright,
   isolated sources, which is then used for the PSF photometry.
 
+- ``pipnick_photometry`` works with ``photutils`` 3: it subtracts a 2D
+  background before detecting sources, detects them with ``DAOStarFinder``,
+  weights the fits by the propagated pixel errors, removes sources whose fits
+  are not credible, and measures aperture fluxes with errors.  The source
+  tables always provide the pixel coordinates, and provide the celestial
+  coordinates if the image has an astrometric solution from
+  ``pipnick_astrometry`` (masked otherwise).  They also provide instrumental
+  magnitudes, and record the PSF model and the image metadata (including the
+  airmass from the metadata table).  Reruns only measure images that, or
+  whose settings, have changed, and only update the coordinates of images
+  whose astrometric solution has changed.  A summary is written to
+  ``photometry/summary.ecsv``.  New options: ``--images``, ``--qa``,
+  ``--psf_thresh``, ``--fwhm``, ``--stack``, ``--min_sep``, ``--group_sep``,
+  and ``--aper_radius``.
+
+- Added ``pipnick.photometry.moffat.EllipticalMoffatPSF``, a flux-normalized
+  elliptical Moffat PSF model for ``photutils``, replacing the deprecated
+  ``photutils.psf.make_psf_model``.
+
 - Added ``pipnick_version``, which reports the installed version of
   ``pipnick`` and its key dependencies.
 
@@ -193,6 +239,8 @@ Documentation Updates
 - Rewrote the astrometry documentation for the new ``pipnick_astrometry``,
   including the handling of coordinate frames.
 
+- Rewrote the photometry documentation for the new ``pipnick_photometry``.
+
 - Docstrings are NumPy style and rendered by ``numpydoc``, with types
   cross-referenced to the numpy, astropy, matplotlib, photutils, and ccdproc
   documentation through ``intersphinx``.
@@ -203,6 +251,15 @@ Documentation Updates
 
 Bug Fixes
 ---------
+
+- The PSF photometry found many duplicate detections of each star, because
+  the minimum separation of detected sources was 0.1 FWHM; it is now 1 FWHM
+  (``--min_sep``).
+
+- Fixed the initial guess of ``FitEllipticalMoffat2D`` (which had too few
+  parameters and used the wrong power index), the indexing of the peak in the
+  initial guesses of both Moffat fitters, and
+  ``EllipticalMoffat2DModel.fwhm``.
 
 - ``pipnick/pipelines`` is now a proper package, so the pipelines are included
   in built wheels.

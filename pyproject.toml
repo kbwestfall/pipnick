@@ -75,7 +75,7 @@ pipnick_version = "pipnick.scripts.version:Version.entry_point"
 pipnick_metadata = "pipnick.scripts.metadata:MetaData.entry_point"
 pipnick_reduce = "pipnick.scripts.reduce:Reduce.entry_point"
 pipnick_astrometry = "pipnick.scripts.astrometry:Astrometry.entry_point"
-pipnick_photometry = "pipnick.scripts.photometry_script:PhotometryPipeline.entry_point"
+pipnick_photometry = "pipnick.scripts.photometry:Photometry.entry_point"
 
 [build-system]
 requires = [
