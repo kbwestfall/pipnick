@@ -10,6 +10,7 @@ Submodules
    pipnick.astrometry.detect
    pipnick.astrometry.fit
    pipnick.astrometry.match
+   pipnick.astrometry.qa
    pipnick.astrometry.services
 
 Module contents

@@ -356,7 +356,7 @@ def unzip_directories(
     for elem_path in path_list:
         elem_path = Path(elem_path)
         if elem_path.is_dir():
-            for sub_elem_path in elem_path.iterdir():
+            for sub_elem_path in sorted(elem_path.iterdir()):
                 images += unzip_directories([sub_elem_path], output_format, allow_exceptions)
         elif elem_path.is_file():
             if allow_exceptions:

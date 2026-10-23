@@ -137,7 +137,9 @@ class FakeSolver:
         return self._result(name)
 
     def solve_image(self, path, hints):
-        data = fits.getdata(path)
+        # NOTE: Memory mapping would keep the file open, and Windows does not
+        # allow the pipeline to delete it
+        data = fits.getdata(path, memmap=False)
         self.calls.append(('image', path, data))
         return self._result(self.uploaded)
 
@@ -453,10 +455,14 @@ def test_reference_changed(tmp_path, caplog):
     table, rdxdir, truth, coords, flux = write_field(tmp_path)
     solver = FakeSolver(truth, coords)
     astrometry_all(table, rdxdir=rdxdir, solver=solver, catalog=FakeCatalog(coords, flux))
+    # NOTE: The order of glob is platform-dependent, so the files are sorted
     bootstrapped = [
-        p for p in rdxdir.glob('*.fits') if fits.getheader(p)['PNASTMTH'] == 'bootstrap'
+        p for p in sorted(rdxdir.glob('*.fits')) if fits.getheader(p)['PNASTMTH'] == 'bootstrap'
     ]
     ref = rdxdir / fits.getheader(bootstrapped[0])['PNASTREF']
+    # The reference may itself be bootstrapped; it gets a new (user) solution
+    dependents = [p for p in bootstrapped if p != ref]
+    assert len(dependents) > 0, 'At least one image should depend on the changed reference'
 
     # A new solution for the reference makes its dependents out of date
     wcs = fit.wcs_from_header(fits.getheader(ref))
@@ -465,7 +471,7 @@ def test_reference_changed(tmp_path, caplog):
     caplog.clear()
     astrometry_all(table, rdxdir=rdxdir, solver=solver, catalog=FakeCatalog(coords, flux))
     assert 'reference solution for' in caplog.text, 'The changed reference should be noticed'
-    for p in bootstrapped:
+    for p in dependents:
         hdr = fits.getheader(p)
         assert hdr['PNASTRH'] == fits.getheader(rdxdir / hdr['PNASTREF'])['PNASTWH'], (
             'The dependents should be solved again from the current reference solution'

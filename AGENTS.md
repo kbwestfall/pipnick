@@ -90,6 +90,12 @@
 - Configuration files are **TOML**, read with the standard-library `tomllib`.
 - Adapted code carries an attribution note in its module docstring naming the
   source project and file.
+- **Always sort directory listings.** The order of the files returned by
+  `Path.glob`, `Path.rglob`, and `Path.iterdir` depends on the platform and
+  file system (e.g., it differs between macOS and Linux), so wrap them in
+  `sorted(...)` to ensure a deterministic order. The only exception is when
+  the order cannot matter, e.g., counting the files or deleting all of them.
+- **Use `pathlib`, not `os.path`,** for paths and file-system operations.
 
 ## Environment
 
@@ -101,6 +107,12 @@ the GNU one. The differences that actually bite:
 | `sed` | No `\b` word boundary, and `-i` requires an explicit backup suffix (`sed -i ''`). For anything beyond a literal substitution, use Python instead. |
 | `grep` | Use `-E` for extended regular expressions; `\b` is unreliable. |
 | `date`, `stat`, `readlink` | Different flags from the GNU versions. |
+
+**The interactive shell aliases `mv`, `cp`, and `rm`** to `mv -i`, `cp -i`, and
+`rm -i`, so they prompt before overwriting or deleting, and a command run by an
+agent waits forever for an answer. In shell commands and
+scripts, call the binaries directly with the force flag (`/bin/mv -f`,
+`/bin/cp -f`, `/bin/rm -f`), or use Python (`pathlib`, `shutil`) instead.
 
 Python itself is installed via Homebrew.
 
