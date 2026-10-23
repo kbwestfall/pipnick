@@ -85,15 +85,18 @@ def convert_coords_all(photo_dir, astro_dir, final_calib_dir):
     
     # Create a dictionary of astrometric calibration files indexed by object name
     astro_calibs = {
-        astro_calib.name.split('_')[0]: astro_calib for astro_calib in astro_dir.iterdir()
+        astro_calib.name.split('_')[0]: astro_calib
+        for astro_calib in sorted(astro_dir.iterdir())
     }
     astrophot_datas = {}
 
     # Iterate over all sub-directories in photo_dir
-    for obj_dir in photo_dir.iterdir():
+    for obj_dir in sorted(photo_dir.iterdir()):
         
         # Create a dictionary of photometric source files indexed by object name
-        phot_datas = {phot_data.name.split('_')[0]: phot_data for phot_data in obj_dir.iterdir()}
+        phot_datas = {
+            phot_data.name.split('_')[0]: phot_data for phot_data in sorted(obj_dir.iterdir())
+        }
 
         # Set output directory based on whether the input directory is consolidated
         if photo_dir.name == 'consolidated':

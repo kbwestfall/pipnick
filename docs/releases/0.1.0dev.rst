@@ -40,6 +40,14 @@ Breaking Changes
   ``reduce_all`` takes the metadata file as its first argument and returns the
   paths to the reduced science images.
 
+- ``pipnick_astrometry`` takes the per-setup metadata file used by
+  ``pipnick_reduce`` (``-t``) and writes the astrometric solutions to the
+  headers of the reduced images.  The API key is no longer a command-line
+  argument; it is read from the ``ASTROMETRY_NET_API_KEY`` environment variable
+  or the ``astroquery`` configuration.  The ``maindir``, ``--use_table``,
+  ``--excl_files``, ``--excl_objs``, and ``--excl_filts`` options are removed.
+  The script module is renamed ``pipnick.scripts.astrometry``.
+
 Dependency Changes
 ------------------
 
@@ -91,6 +99,48 @@ Functionality/Performance Improvements and Additions
 
 - The Nickel Andor saturation level is now 65535 ADU.
 
+- ``pipnick_astrometry`` minimizes submissions to astrometry.net.  Images are
+  grouped by pointing; one image per group is solved, and the others are
+  solved by matching their sources to it.  Groups without a solved image are
+  solved from an overlapping solved image or by matching to the Gaia DR3
+  catalog (queries are cached), and only images that cannot be solved this way
+  are submitted.  Submissions send a list of locally detected sources by
+  default (``--upload_image`` uploads the masked image instead), and their
+  results, including failures and pending jobs, are cached so that images are
+  not resubmitted after they are rewritten by ``pipnick_reduce``.  New options:
+  ``--resolve``, ``--upload_image``, ``--dry_run``, ``--max_submissions``,
+  ``--group_radius``, ``--min_matches``, ``--max_rms``, ``--search``,
+  ``--wide_search``, ``--wide_min_matches``, ``--images``, ``--qa``,
+  ``--max_sources``, ``--detect_thresh``, and ``--fwhm``.
+
+- ``pipnick_astrometry`` logs a summary of the solution of each image, with
+  the reason any image is not solved and a suggestion, and writes it to
+  ``astrometry/summary.ecsv``.  It also logs the numbers of matched sources
+  when a match fails, the measured telescope pointing offset, warnings for
+  images with few detected sources, and (at debug level) the details of every
+  match.  The documentation has a troubleshooting section.
+
+- Images whose pointing in the metadata table is incorrect (e.g., a stale
+  pointing in the raw header) are solved by matching to Gaia with a wide
+  search, and the pointing error is reported.  Alternatively, the pointing
+  can be corrected in the metadata table and the reduction rerun.
+
+- The astrometry.net solutions and Gaia query results are saved exactly as
+  returned, with separate indices of the submissions and queries, and are
+  only modified when they are used.  Gaia is queried through the
+  ``astroquery`` TAP client, so that importing ``pipnick`` does not contact
+  the Gaia archive.
+
+- All astrometric solutions are in the ICRS.  astrometry.net labels its
+  solutions as FK5 (J2000), and they are relabeled as ICRS (see
+  ``pipnick.astrometry.services.icrs_header``).
+
+- Added ``pipnick.astrometry``, with source detection and matching, WCS
+  fitting from matched pixel and sky coordinates (``fit_wcs``), and the
+  interfaces to astrometry.net and Gaia.
+  ``pipnick.pipelines.astrometry.apply_wcs`` writes a solution, e.g., one fit
+  to user-provided coordinates, to a reduced image.
+
 - ``pipnick_metadata`` identifies the instrument setup (camera, binning, read
   mode, and readout window) of each frame, checks the frame quality, and
   comments out frames that fail the checks.  ``--classify stats`` adds checks
@@ -125,6 +175,9 @@ Functionality/Performance Improvements and Additions
 Under-the-hood Improvements
 ---------------------------
 
+- The tests block internet access (``remote_data_strict``), and replace every
+  method that would contact astrometry.net or the Gaia archive.
+
 - Packaging now uses ``pyproject.toml`` only; ``setup.cfg``, ``setup.py``, and
   ``requirements.txt`` are removed.  The version is set by ``setuptools_scm``
   and written to ``pipnick/pkg/version.py``.
@@ -136,6 +189,9 @@ Under-the-hood Improvements
 
 Documentation Updates
 ---------------------
+
+- Rewrote the astrometry documentation for the new ``pipnick_astrometry``,
+  including the handling of coordinate frames.
 
 - Docstrings are NumPy style and rendered by ``numpydoc``, with types
   cross-referenced to the numpy, astropy, matplotlib, photutils, and ccdproc

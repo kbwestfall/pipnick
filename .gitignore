@@ -175,3 +175,6 @@ testing
 *.tbl
 # tox working directories
 .tmp/
+
+# vim recovery files
+*.swp
