@@ -1,190 +1,138 @@
 Point-Source and Aperture Photometry
 ====================================
 
-This tutorial demonstrates how to use the `photometry_all()` function
-to perform photometric analysis on images that have undergone basic reduction.
-Point-source photometry is performed using photutils.
+``pipnick_photometry`` measures the sources in each reduced science image with
+point-spread-function (PSF) and aperture photometry, and writes a source table
+for each image.  It does not require an astrometric solution: the pixel
+coordinates of the sources are always provided, and their celestial
+coordinates are provided for images with a solution from
+``pipnick_astrometry`` (see :doc:`astrometry`).
 
 Overview
 --------
 
-The `photometry_all()` function extracts and analyzes sources from
-images and stores the results in `.csv` tables. These tables contain
-data such as source positions and fluxes. Fluxes are calculated using PSF
-photometry as well as aperture photometry. The function can also detect
-multiple sources in one group, but groups can be consolidated.
+For each image:
 
-The astrometry and photometry pipelines are independent and can usually
-run simultaneously. However, conflicts may arise if both pipelines attempt
-to access the same file concurrently.
+1. **Model the PSF.**  Bright, isolated stars are detected, background-
+   subtracted cutouts around them are stacked (``--stack``, mean by default),
+   and a circular or elliptical (``--fittype``) Moffat function is fit to the
+   stack.  The fit sets the FWHM used for all the scales below.
 
+2. **Subtract the background.**  A smooth, 2D background is subtracted
+   from the image.
 
-Using the Command-Line Script
+3. **PSF photometry.**  Sources are detected above ``--thresh`` times the
+   background noise (with ``photutils``' ``DAOStarFinder``), no closer than
+   ``--min_sep`` FWHM to each other, and their fluxes and positions are fit
+   with the PSF, its shape fixed.  Sources closer than ``--group_sep`` FWHM are
+   fit together, and detection and fitting are repeated on the residual image
+   (``photutils``' ``IterativePSFPhotometry``; see ``--mode``).  With
+   ``--group``, sources fit together are consolidated into one.
+
+4. **Vet the sources.**  Sources whose fits failed, whose fitted positions
+   are outside the image or moved more than one FWHM from where they were
+   detected, or whose fitted fluxes are not positive are removed.  These are
+   typically spurious detections in the residuals of bright stars.
+
+5. **Aperture photometry.**  The background-subtracted flux in a circular
+   aperture of radius ``--aper_radius`` FWHM is measured at the position of
+   each source.
+
+The pixel errors used to weight the fits and compute the flux errors are the
+uncertainties propagated by ``pipnick_reduce`` (the ``UNCERT`` extension of
+the reduced image): the read noise (including the error in the subtracted
+overscan level), the Poisson noise of the counts, and the uncertainties of the
+bias and the flat, propagated through the combination of frames.  The object,
+filter, exposure time, and airmass are taken from the metadata table.
+
+Using the command-line script
 -----------------------------
 
-For command-line usage, you can run the `pipnick_photometry`
-script, which provides flexible options for executing photometric analysis.
+.. code-block:: console
 
-**Basic Use**
+   pipnick_photometry -t n1_2x2_slow_full.ecsv
 
-To execute the script, use the following command:
+The options are:
 
-.. code::
+- ``-t``, ``--raw_table``: The per-setup metadata file used to reduce the
+  images (required).
+- ``-r``, ``--rdxdir``: The reduction directory.  If not provided, the
+  directory saved in the metadata file is used.
+- ``--images``: Only measure these images, given by file name (with or without
+  the extension) or combination group (``comb_id``).
+- ``-o``, ``--overwrite``: Measure the images again, even if they are up to
+  date.
+- ``--qa``: Write QA figures for each measured image to ``photometry/qa``: the
+  PSF model (``<image>_psf.png``: the stacked stars, the model, the residuals,
+  and the radial profile) and the measured sources (``<image>_sources.png``).
+- ``--thresh``: The source detection threshold, as a multiple of the
+  background noise (default 8).
+- ``--psf_thresh``: The detection threshold for the stars used to model the
+  PSF (default 15).
+- ``--fwhm``: The initial guess for the FWHM in arcsec (default: typical for
+  the camera).
+- ``--fittype``: The PSF model, ``circ`` (default) or ``ellip``.
+- ``--stack``: How the PSF stars are stacked, ``mean`` (default) or
+  ``median``.
+- ``--mode``: The iterative fitting mode, ``all`` (default) or ``new``.
+- ``--min_sep``, ``--group_sep``: The minimum separation of detected sources,
+  and the separation below which sources are fit together, in FWHM (defaults
+  1 and 2).
+- ``--group``: Consolidate the sources fit together into single sources.
+- ``--aper_radius``: The radius of the photometric apertures in FWHM (default
+  2).
 
-   pipnick_photometry <maindir> [options]
+Rerunning the script is cheap: an image is measured again only if it changed
+(e.g., it was reduced again) or the settings changed.  If only its
+astrometric solution changed, for example because ``pipnick_astrometry`` was
+run after ``pipnick_photometry``, only the celestial coordinates are updated.
 
-Replace `<maindir>` with the path to the directory containing all data.
-The reduced directory containing images to be calibrated must be
-at /maindir/reduced/.
+Outputs
+-------
 
-Once you have run this script the first time, an ASCII Astropy table of
-all files in /maindir/reduced/ will be saved for reference at 
-/maindir/astrometry_files.tbl. You may 'comment out' files to be
-ignored in future runs with a `#`.
+The source table for each image is ``photometry/<image>_phot.ecsv`` in the
+reduction directory, with these columns:
 
-.. code::
+- ``id``, ``group_id``, ``group_size``, ``iter_detected``: The source, the
+  group of sources fit together, and the iteration in which it was detected.
+- ``x``, ``y``, ``x_err``, ``y_err``: The 0-based pixel coordinates.  These
+  are always provided.
+- ``ra``, ``dec``: The ICRS coordinates in degrees, if the image has an
+  astrometric solution from ``pipnick_astrometry``, and masked otherwise.  The
+  nominal WCS that the reduced images inherit from the raw headers is never
+  used.
+- ``flux_psf``, ``flux_psf_err``: The PSF flux in electrons.
+- ``flux_aper``, ``flux_aper_err``: The aperture flux in electrons, masked if
+  the aperture includes masked pixels or extends beyond the image.
+- ``mag_inst``, ``mag_inst_err``: The instrumental magnitude,
+  :math:`-2.5 \log_{10}(f / t)` for the PSF flux :math:`f` and the exposure
+  time :math:`t`.
+- ``local_bkg``, ``qfit``, ``cfit``, ``reduced_chi2``, ``flags``: The local
+  background and the fit-quality measures and flags of ``photutils``.
 
-  pipnick_photometry <maindir> -t [options]
+Values that cannot be measured are masked.  The table metadata record the
+image and its object, filter, exposure time, airmass, and MJD; the PSF model
+(type, parameters, FWHM in pixels and arcsec, and the number of stars used);
+the number of sources removed by the vetting; the settings; and the
+provenance of the image and its astrometric solution.
 
-Toggle on use_table with `-t` to ignore all 'commented-out' files in the table.
+``photometry/summary.ecsv``, also logged, summarizes each image: its status
+(``measured``, ``up to date``, ``coordinates updated``, ``missing``, or
+``failed``), the number of sources, the FWHM, the number of PSF stars, and the
+astrometric solution method (``none`` if the coordinates are masked).
 
-**Using Optional Arguments**
+The instrumental magnitudes are not calibrated; ``pipnick.photometry.calibrate``
+provides the functions to determine and apply a photometric calibration from
+standard stars.
 
-- `-t` or `--use_table` (flag, optional)
-  Whether to use the table file to automatically exclude files that have been commented-out.
+Using the pipeline in Python
+----------------------------
 
-- `--excl_files` (list, optional):
-  List of file stem substrings to exclude (exact match not necessary).
+.. code-block:: python
 
-- `--excl_objs` (list, optional):
-  List of object substrings to exclude (exact match not necessary).
+   from pipnick.pipelines.photometry import photometry_all
 
-- `--excl_filts` (list, optional):
-  List of filter substrings to exclude (exact match not necessary).
+   tables = photometry_all('n1_2x2_slow_full.ecsv', qa=True)
 
-- `-th` or `--thresh` (float, optional)
-  Threshold for source detection. The default is 8.0.
-
-- `-g` or `--group` (flag, optional)
-  Consolidates groups of sources detected together into one source.
-
-- `-f` or `--fittype` (str, optional)
-  Type of Moffat fit to use. Options are 'circ' (default) or 'ellip'.
-
-- `-pf` or `--plot_final` (flag, optional)
-  Displays images with sources and fluxes labeled.
-
-- `-pi` or `--plot_inters` (flag, optional)
-  Displays images with initial sources and source groups to determine
-  by inspection which groups are valid.
-
-- `-vv` or `--very_verbose` (flag, optional)
-  Enables the most detailed logging. Overrides verbosity settings provided via `--verbosity`.
-
-- `--verbosity` (int, optional)
-  Sets the level of verbosity for logging. Acceptable values are 1 (CRITICAL),
-  2 (ERROR), 3 (WARNING), 4 (INFO, default), and 5 (DEBUG). Overrides `--verbose`.
-
-For example:
-
-.. code::
-
-   pipnick_photometry 'path/to/maindir' -t -th 10.0 -g -f ellip -pf -pi
-
-
-Using the Photometry Function
------------------------------
-
-The same code can be run in a Python module with the same functionality.
-To run the `photometry_all()` function, follow these steps:
-
-**Basic Use**
-
-1. **Import the Function**
-
-   First, import the `photometry_all()` function from the
-   `pipnick` package.
-
-   .. code:: python
-
-      from pipnick.pipelines.photometry import photometry_all
-
-2. **Initialize Logging**
-
-   Set up a logger to capture output from the function. You can
-   configure the verbosity level to 'DEBUG', 'INFO', 'WARNING',
-   'ERROR', or 'CRITICAL'. Logs are displayed in the terminal or
-   console and are always saved to a `.log` file at the 'DEBUG' level.
-
-   .. code:: python
-
-      import logging
-      from pipnick.convenience.log import adjust_global_logger
-
-      adjust_global_logger('INFO', __name__)
-      logger = logging.getLogger(__name__)
-
-3. **Specify the Image Directory**
-
-   Define the "main" directory containing all data. The reduced directory
-   contains images to be calibrated, and must be at /maindir/reduced/.
-   The .csv source tables will be saved to a directory called
-   /maindir/photometric/[unconsolidated or consolidated] in the same
-   parent as /maindir/reduced/. Tables will be organized by object name.
-
-   .. code:: python
-
-      maindir = 'path/to/data/'
-
-4. **Run the Photometry Pipeline**
-
-   Use the `photometry_all()` function to process the images.
-   
-   With default parameters, this call: 
-    - Performs photometry on all images in /maindir/reduced/
-    - Uses the default detection threshold (8.0 = detect only sources brighter than 8.0 x background STD)
-    - Uses a circular Moffat fit
-    - Preserves source groups
-    - Uses the photutils setting mode = 'all' (recommended not to change--see https://photutils.readthedocs.io/en/stable/api/photutils.psf.IterativePSFPhotometry.html)
-
-   It saves .csv source tables to /maindir/photometric/unconsolidated/,
-   organized by object name.
-
-   As with the reduction pipeline, this call also creates an ascii Astropy
-   table, but of all files in /maindir/reduced/ at /maindir/astrometry_files.tbl,
-   commenting out any files that were excluded.
-
-   .. code:: python
-
-      src_catalog_paths = photometry_all(maindir)
-
-5. **Customizing Parameters**
-
-   You can customize the function's behavior with various parameters.
-   
-   This example:
-    - Uses the table produced by the first call to determine file exclusions
-    - Additionally excludes any files using the ``'B'`` filter
-    - Uses an elliptical Moffat fit
-    - Consolidates groups of sources into one source
-    - Generates matplotlib plots showing all detected sources & their fluxes
-    - Generates matplotlib plots showing cutouts of all source groups to manually determine if a group should be consolidated
-
-   .. code:: python
-
-      src_catalog_paths = photometry_all(maindir, use_table=True, excl_filts=['B'],
-                                         thresh=15.0, group=True, fittype='ellip',
-                                         plot_final=True, plot_inters=True)
-
-Viewing Results
----------------
-
-If possible, you should run final calibrations using the
-``pipnick.pipelines.final_calib`` module before exporting these
-.csv files for further analysis.
-
-The output `.csv` files contain tables of detected sources with their
-positions and fluxes. These tables are organized by object name and
-saved in the specified output directory. If plotting options were
-enabled, Matplotlib plots will show detected sources and source groups
-for further inspection.
+See :func:`~pipnick.pipelines.photometry.photometry_all` for the full set of
+parameters.

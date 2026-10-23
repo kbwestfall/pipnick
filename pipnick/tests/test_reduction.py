@@ -294,8 +294,11 @@ def test_reduce(night, tmp_path):
     # NOTE: Memory mapping would keep the file open, and Windows does not allow
     # an open file to be overwritten by the reprocessing below
     data = fits.getdata(rdxdir / sci_name, memmap=False)
-    assert np.allclose(np.median(data), 4700., rtol=0.01), (
-        'The science frames should be bias-subtracted and flat-fielded'
+    gain = cameras.get_camera('NickelAndor').readout(
+        fits.getheader(tmp_path / 'raw' / 'n5011.fits')
+    ).gain
+    assert np.allclose(np.median(data), 4700. * gain, rtol=0.01), (
+        'The science frames should be bias-subtracted, flat-fielded, and in electrons'
     )
 
     # Rerunning does not reprocess anything
@@ -470,3 +473,68 @@ def test_reduce_table_edits(night, tmp_path, caplog):
     assert [f for f in final if final[f] != after.get(f)] == [new_name], (
         'Only the science output with the edited frame should be reprocessed'
     )
+
+
+def test_reduce_airmass(night, tmp_path):
+    rdxdir = tmp_path / 'rdx'
+    reduce_all(night, rdxdir=rdxdir)
+    cid = comb_id(night, 'n5011.fits')
+    name = f'M11_V_V_C{cid:03d}_2026-08-20.fits'
+    tbl = metadata.read_metadata(night)
+    airmass = tbl['airmass'][np.isin(tbl['file'], ['n5011.fits', 'n5012.fits'])]
+    assert np.isclose(fits.getheader(rdxdir / name)['AIRMASS'], np.mean(airmass)), (
+        'The airmass of a combined image should be the mean of its frames'
+    )
+
+    # An edited airmass is propagated
+    set_column(night, ['n5011.fits', 'n5012.fits'], 'airmass', 1.5)
+    before = mtimes(rdxdir)
+    reduce_all(night, rdxdir=rdxdir)
+    after = mtimes(rdxdir)
+    assert [f for f in after if after[f] != before[f]] == [name], (
+        'Editing the airmass should reprocess only the science image'
+    )
+    hdr = fits.getheader(rdxdir / name)
+    assert hdr['AIRMASS'] == 1.5, 'The edited airmass should be in the header'
+    # The synthetic raw frames have no airmass (it is computed for the
+    # metadata table), so there is no original value to keep
+    assert 'ORIGAIR' not in hdr, 'There is no raw header airmass to keep'
+    assert 'airmass computed' in tbl['note'][tbl['file'] == 'n5011.fits'][0], (
+        'The airmass of the synthetic frames should be computed'
+    )
+
+
+def test_uncertainty(night, tmp_path):
+    rdxdir = tmp_path / 'rdx'
+    reduce_all(night, rdxdir=rdxdir)
+    cid = comb_id(night, 'n5011.fits')
+
+    # The Andor gain and read noise, and the number of binned overscan columns
+    # averaged in each row
+    raw = tmp_path / 'raw' / 'n5011.fits'
+    camera = cameras.get_camera('NickelAndor')
+    readout = camera.readout(fits.getheader(raw))
+    readnoise = readout.readnoise
+    _, biassec = camera.sections(fits.getheader(raw))
+    x1, x2 = (int(v) for v in biassec.strip('[]').split(',')[0].split(':'))
+    var_rn = readnoise**2 * (1 + 1 / (x2 - x1 + 1))
+
+    # The synthetic frames have no noise, so the uncertainties follow exactly
+    # from the read noise and the counts (in electrons): 3 biases at the
+    # overscan level; 2 sky flats with 14700 ADU; and 2 science frames with
+    # 4700 ADU
+    flat = 14700. * readout.gain
+    science = 4700. * readout.gain
+    var_bias = var_rn / 3
+    var_flat = (var_rn + var_bias + flat) / 2
+    var_frame = var_rn + var_bias + science + science**2 * var_flat / flat**2
+    expected = {
+        'Bias.fits': np.sqrt(var_bias),
+        f'M11_V_V_C{cid:03d}_2026-08-20.fits': np.sqrt(var_frame / 2)
+    }
+    for name, sigma in expected.items():
+        ccd = CCDData.read(rdxdir / name)
+        assert np.allclose(np.median(ccd.uncertainty.array), sigma, rtol=1e-3), (
+            f'The uncertainty of {name} should be propagated from the read noise, the overscan, '
+            'the counts, and the calibrations'
+        )

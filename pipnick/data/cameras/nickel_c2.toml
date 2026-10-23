@@ -13,6 +13,15 @@ plate_scale = 0.185         # arcsec per unbinned pixel (header CD matrix: 0.370
 saturation = 65535          # ADU
 fwhm_guess = 1.85           # arcsec; typical seeing (5 pixels at 2x2 binning)
 
+[observatory]
+# The Lick Observatory site, used to compute airmasses missing from the headers.
+# These are the values of astropy's EarthLocation.of_site('Lick Observatory'),
+# stored here because that function downloads astropy's site registry.
+name = "Lick Observatory"
+longitude = -121.636667     # deg, east positive
+latitude = 37.343333        # deg
+height = 1290.0             # m
+
 [identify]
 # All of these header keywords must be present and match the regular expression.
 INSTRUME = '^Nickel Direct Camera$'
@@ -51,14 +60,16 @@ data_rows = [1, 2048]
 overscan_columns = [2049, 2112]
 
 [[readout]]
-# READ-SPD = 80 for all science data in 2024 (10 only on failed readouts).  The
-# gain and read noise are the values previously documented in pipnick for "slow
-# readout, 2x2 binning"; that READ-SPD = 80 is the slow mode is assumed.
+# READ-SPD = 80 for all science data in 2024 (10 only on failed readouts); that
+# READ-SPD = 80 is the slow mode is assumed.  The gain and read noise are the
+# nominal values for the slow readout from the Lick Observatory documentation.
+# NOTE: The nominal fast readout has a gain of 1.9 e-/ADU and a read noise of
+# 38.7 e-, but it is not defined here because the READ-SPD value that selects it
+# is not known.
 value = "80"
 mode = "slow"
 gain = 1.8                  # e-/ADU
-readnoise = 10.7            # e-
-placeholder = false
+readnoise = 9.7             # e-
 
 [bpm]
 # Bad columns and rows as inclusive [first, last] unbinned ranges.  These are

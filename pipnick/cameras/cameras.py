@@ -20,6 +20,12 @@ binned and windowed equivalents for a given frame are derived from its header.
     (micron), ``plate_scale`` (arcsec per unbinned pixel), ``saturation``
     (ADU), and ``fwhm_guess`` (arcsec).
 
+``[observatory]``
+    The observatory site (optional): ``name``, ``longitude`` (deg, east
+    positive), ``latitude`` (deg), and ``height`` (m); see
+    :attr:`NickelCamera.location`.  Used to compute airmasses missing from the
+    headers; see :meth:`NickelCamera.compute_airmass`.
+
 ``[identify]``
     Header keywords mapped to regular expressions.  A header is from this
     camera if all of the keywords are present and match.
@@ -44,9 +50,8 @@ binned and windowed equivalents for a given frame are derived from its header.
     One entry per readout setting.  ``value`` is matched against the header
     ``readspeed`` keyword; ``mode`` is the generic name of the setting (e.g.,
     ``'slow'`` or ``'fast'``); ``gain`` (e-/ADU) and ``readnoise`` (e-) are
-    used unless the header provides them; ``placeholder`` flags values that
-    have not been measured; and ``saturation`` optionally overrides the camera
-    value.
+    used unless the header provides them; and ``saturation`` optionally
+    overrides the camera value.
 
 ``[bpm]``
     The archival bad-pixel mask: ``columns`` and ``rows`` (lists of inclusive
@@ -78,7 +83,11 @@ import re
 import tomllib
 
 import numpy as np
+from astropy import units
+from astropy.coordinates import AltAz, EarthLocation, SkyCoord
 from astropy.io import fits
+from astropy.time import Time
+from astropy.utils import iers
 
 from pipnick.pkg.exceptions import PipnickDataModelError, PipnickParameterError
 from pipnick.utils import masking
@@ -113,11 +122,6 @@ class Readout:
     saturation: float
     """
     Saturation level in ADU.
-    """
-
-    placeholder: bool
-    """
-    The gain and read noise are placeholders that have not been measured.
     """
 
 
@@ -238,6 +242,76 @@ class NickelCamera:
         A guess for the seeing FWHM in arcsec.
         """
         return self.config['camera'].get('fwhm_guess')
+
+    @property
+    def location(self):
+        """
+        The location of the observatory, as a
+        :class:`astropy.coordinates.EarthLocation`, or None if the
+        configuration has no ``[observatory]`` section.
+
+        The location is constructed from the geodetic coordinates in the
+        configuration, instead of with
+        :meth:`astropy.coordinates.EarthLocation.of_site`, which downloads
+        astropy's registry of sites.
+        """
+        if 'observatory' not in self.config:
+            return None
+        obs = self.config['observatory']
+        return EarthLocation.from_geodetic(
+            lon=obs['longitude'] * units.deg, lat=obs['latitude'] * units.deg,
+            height=obs['height'] * units.m
+        )
+
+    def compute_airmass(self, ra, dec, date, exptime=None):
+        r"""
+        Compute the airmass of an observation.
+
+        The airmass is :math:`\sec z` at the middle of the exposure, computed
+        by transforming the coordinates to the
+        :class:`astropy.coordinates.AltAz` frame at the observatory (see
+        :attr:`location`).  The transformation never contacts the network:
+        astropy's automatic download of the IERS Earth-orientation data is
+        disabled, and its bundled data are used even if they do not cover the
+        date.  The resulting error (less than a second in UT1-UTC) is
+        negligible for the airmass.
+
+        Parameters
+        ----------
+        ra, dec : str, float
+            The coordinates, as sexagesimal strings (hours and degrees) or
+            degrees.
+        date : str
+            The (ISO) start time of the observation.
+        exptime : float, optional
+            The exposure time in seconds, used to compute the airmass at the
+            middle of the exposure.
+
+        Returns
+        -------
+        float, None
+            The airmass, or None if it cannot be computed (e.g., no observatory
+            location, missing or invalid coordinates or date, or the target
+            is below the horizon).
+        """
+        if self.location is None or ra is None or dec is None or date is None:
+            return None
+        try:
+            unit = (units.hourangle, units.deg) if isinstance(ra, str) else units.deg
+            coords = SkyCoord(ra, dec, unit=unit)
+            time = Time(date, format='isot', scale='utc')
+        except ValueError:
+            return None
+        if exptime is not None:
+            time = time + exptime / 2 * units.s
+        with (
+            iers.conf.set_temp('auto_download', False),
+            iers.conf.set_temp('iers_degraded_accuracy', 'ignore')
+        ):
+            altaz = coords.transform_to(AltAz(obstime=time, location=self.location))
+        if altaz.alt.deg <= 0:
+            return None
+        return float(altaz.secz)
 
     @property
     def shape(self):
@@ -406,15 +480,9 @@ class NickelCamera:
                     break
         gain = self.header_value(hdr, 'gain', default=entry.get('gain'))
         readnoise = self.header_value(hdr, 'readnoise', default=entry.get('readnoise'))
-        # The values are only placeholders if they come from the configuration
-        placeholder = (
-            entry.get('placeholder', False)
-            and self.header_keyword(hdr, 'gain') is None
-            and self.header_keyword(hdr, 'readnoise') is None
-        )
         return Readout(
             mode=entry.get('mode', 'unknown'), gain=gain, readnoise=readnoise,
-            saturation=entry.get('saturation', self.saturation), placeholder=placeholder
+            saturation=entry.get('saturation', self.saturation)
         )
 
     @staticmethod

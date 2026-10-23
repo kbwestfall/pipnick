@@ -14,6 +14,15 @@ plate_scale = 0.1665        # arcsec per unbinned pixel (header CD matrix: 0.333
 saturation = 65535          # ADU (2**16-1); observed maxima in 2026 data are ~65240 (1.0 MHz) and ~65140 (0.05 MHz)
 fwhm_guess = 1.85           # arcsec; typical seeing
 
+[observatory]
+# The Lick Observatory site, used to compute airmasses missing from the headers.
+# These are the values of astropy's EarthLocation.of_site('Lick Observatory'),
+# stored here because that function downloads astropy's site registry.
+name = "Lick Observatory"
+longitude = -121.636667     # deg, east positive
+latitude = 37.343333        # deg
+height = 1290.0             # m
+
 [identify]
 # All of these header keywords must be present and match the regular expression.
 CAMID = '^headmodel DZ936'
@@ -53,19 +62,19 @@ data_rows = [1, 2048]
 # columns show charge trailing in illuminated frames, so they are skipped.
 overscan_columns = [2075, 2088]
 
+# The gain and read noise are from the performance report provided by Andor
+# with the camera.
 [[readout]]
 value = "1.0MHz"
 mode = "fast"
-gain = 1.0                  # e-/ADU; PLACEHOLDER, not yet measured
-readnoise = 10.0            # e-; PLACEHOLDER, not yet measured
-placeholder = true
+gain = 0.91                 # e-/ADU
+readnoise = 6.09            # e-
 
 [[readout]]
 value = "0.05MHz"
 mode = "slow"
-gain = 1.0                  # e-/ADU; PLACEHOLDER, not yet measured
-readnoise = 10.0            # e-; PLACEHOLDER, not yet measured
-placeholder = true
+gain = 0.92                 # e-/ADU
+readnoise = 2.70            # e-
 
 [bpm]
 # No bad pixels have been measured yet.  Partial pixels at the prescan and

@@ -8,7 +8,6 @@ Submodules
    :maxdepth: 4
 
    pipnick.pipelines.astrometry
-   pipnick.pipelines.final_calib
    pipnick.pipelines.photometry
    pipnick.pipelines.reduction
 

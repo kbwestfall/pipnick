@@ -125,11 +125,8 @@ def test_readout():
     andor = cameras.get_camera('NickelAndor')
 
     readout = c2.readout(c2_header())
-    assert readout.mode == 'slow' and readout.gain == 1.8 and readout.readnoise == 10.7, (
+    assert readout.mode == 'slow' and readout.gain == 1.8 and readout.readnoise == 9.7, (
         'READ-SPD = 80 should select the slow readout of the original camera'
-    )
-    assert readout.placeholder is False, (
-        'The original camera readout values are not placeholders'
     )
     assert c2.readout(c2_header(GAIN=1)).gain == 1.8, (
         'The original camera GAIN keyword is a DCS gain index and must not be used'
@@ -138,12 +135,13 @@ def test_readout():
         'An undefined readout setting should have the unknown mode'
     )
 
-    assert andor.readout(andor_header()).mode == 'fast', (
+    readout = andor.readout(andor_header())
+    assert readout.mode == 'fast' and readout.gain == 0.91 and readout.readnoise == 6.09, (
         'AMPCONF = 1.0MHz should select the fast Andor readout'
     )
     readout = andor.readout(andor_header(AMPCONF='0.05MHz'))
-    assert readout.mode == 'slow' and readout.placeholder is True, (
-        'AMPCONF = 0.05MHz should select the slow Andor readout, which has placeholder values'
+    assert readout.mode == 'slow' and readout.gain == 0.92 and readout.readnoise == 2.70, (
+        'AMPCONF = 0.05MHz should select the slow Andor readout'
     )
     assert readout.saturation == andor.saturation, (
         'The readout saturation should default to the camera saturation'
@@ -151,9 +149,6 @@ def test_readout():
     readout = andor.readout(andor_header(GAIN=2.5, RDNOISE=4.0))
     assert readout.gain == 2.5 and readout.readnoise == 4.0, (
         'Header gain and read noise should take precedence over the configuration'
-    )
-    assert readout.placeholder is False, (
-        'Header gain and read noise are not placeholders'
     )
 
 
