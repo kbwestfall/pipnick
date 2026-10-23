@@ -9,7 +9,9 @@ Submodules
 
    pipnick.photometry.aperture_photometry
    pipnick.photometry.calibrate
+   pipnick.photometry.extinction
    pipnick.photometry.fit
+   pipnick.photometry.landolt
    pipnick.photometry.moffat
    pipnick.photometry.psf_photometry
    pipnick.photometry.starfind

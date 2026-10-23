@@ -61,6 +61,15 @@ Breaking Changes
   functions in ``pipnick.photometry.fit`` (``fit_psf_stack``,
   ``fit_psf_single``, ``fit_psf_generic``, and ``get_graphable_pars``).
 
+- ``pipnick.photometry.calibrate`` is rewritten: the calibration terms are
+  selected by name, can be fixed, and the fit returns the covariance.
+  ``photometric_calibration_coefficients``,
+  ``photometric_calibration_coefficients_iterej``,
+  ``calibration_design_matrix``, ``apparent_mag``, and
+  ``apply_photometric_calibration`` are replaced by ``fit_calibration``,
+  ``reject_outliers``, ``design_matrix``, ``zero_point``, and
+  ``iterate_colors``.
+
 Dependency Changes
 ------------------
 
@@ -70,6 +79,9 @@ Dependency Changes
   photutils 3.x PSF-photometry interface.
 
 - Requires ``numpy>=2.0`` and ``astropy>=7.0``.
+
+- Requires ``speclite>=0.20``, for the filter responses used to compute the
+  nominal extinction.
 
 Functionality/Performance Improvements and Additions
 ----------------------------------------------------
@@ -220,6 +232,34 @@ Functionality/Performance Improvements and Additions
 
 - Added package-specific exceptions in ``pipnick.pkg.exceptions``.
 
+- Added ``pipnick_calibrate``, which finds the Landolt standards in the
+  photometry source tables by their celestial coordinates and fits the
+  photometric calibration (zero point, extinction, and color terms, selected
+  with ``--terms`` and optionally fixed with ``--fix``) of each band and
+  night, with outlier rejection and checks of the numbers of stars and the
+  airmass and color ranges.  Standards contaminated by a neighbor within their
+  aperture are excluded; faint sources detected in the residuals of their PSF
+  fits are not counted as neighbors.  The calibration is written to an editable TOML
+  file, which is kept on rerun if edited.  The residuals of the standards,
+  their leave-one-out residuals, and the drift of the zero point with time
+  are reported, with optional QA figures.  ``--apply`` writes calibrated
+  source tables and records the calibration in the image headers.
+
+- If the standards of a band do not span enough airmass to measure the
+  extinction, ``pipnick_calibrate`` uses the nominal extinction, and records
+  this in the calibration file, the image headers, the residual table, the QA
+  figures, and the summary (``--no_fallback`` disables it).
+
+- Added the Landolt (2009, 2013) UBVRI standard-star catalog
+  (``pipnick/data/catalogs/landolt.ecsv``) and ``pipnick.photometry.landolt``
+  to read and match it.
+
+- Added the Mt. Hamilton extinction curve
+  (``pipnick/data/extinction/mthamextinct.dat``, from PypeIt) and
+  ``pipnick.photometry.extinction``, which computes the nominal extinction of
+  each band.  The camera configurations name the extinction curve of the
+  observatory (``extinction`` in ``[observatory]``).
+
 Under-the-hood Improvements
 ---------------------------
 
@@ -242,6 +282,8 @@ Documentation Updates
   including the handling of coordinate frames.
 
 - Rewrote the photometry documentation for the new ``pipnick_photometry``.
+
+- Added documentation for ``pipnick_calibrate``.
 
 - Docstrings are NumPy style and rendered by ``numpydoc``, with types
   cross-referenced to the numpy, astropy, matplotlib, photutils, and ccdproc

@@ -8,6 +8,7 @@ Submodules
    :maxdepth: 4
 
    pipnick.scripts.astrometry
+   pipnick.scripts.calibrate
    pipnick.scripts.metadata
    pipnick.scripts.photometry
    pipnick.scripts.reduce

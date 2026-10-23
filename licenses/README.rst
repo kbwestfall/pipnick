@@ -38,6 +38,21 @@ shipped in the ``pipnick`` wheel; their licenses are included in the wheel's
 metadata alongside ``LICENSE.rst``.
 
 
+Distributed data
+----------------
+
+PypeIt — ``PYPEIT_LICENSE.rst``
+    ``pipnick/data/extinction/mthamextinct.dat`` (the Mt. Hamilton extinction
+    curve) is copied unchanged from ``pypeit/data/extinction/mthamextinct.dat``.
+
+Landolt standard stars
+    ``pipnick/data/catalogs/landolt.ecsv`` is derived from the VizieR catalogs
+    ``J/AJ/137/4186`` (Landolt 2009) and ``J/AJ/146/131`` (Landolt 2013),
+    retrieved from the CDS.  The papers and VizieR are cited in the file's
+    metadata and in ``pipnick.photometry.landolt``, with the acknowledgement
+    requested by the CDS.
+
+
 Dependencies
 ------------
 
@@ -75,6 +90,6 @@ Two consequences follow:
    ``pipnick/utils/graphs.py``.
 
 All other dependencies (astropy, astroquery, ccdproc, IPython, matplotlib,
-numpy, pandas, photutils, requests, scikit-image, and scipy) carry permissive
-licenses — BSD, Apache-2.0, PSF, or equivalent — that impose no conditions on
-``pipnick``.
+numpy, pandas, photutils, requests, scikit-image, scipy, and speclite) carry
+permissive licenses — BSD, Apache-2.0, PSF, or equivalent — that impose no
+conditions on ``pipnick``.

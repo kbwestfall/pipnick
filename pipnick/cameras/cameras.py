@@ -24,7 +24,10 @@ binned and windowed equivalents for a given frame are derived from its header.
     The observatory site (optional): ``name``, ``longitude`` (deg, east
     positive), ``latitude`` (deg), and ``height`` (m); see
     :attr:`NickelCamera.location`.  Used to compute airmasses missing from the
-    headers; see :meth:`NickelCamera.compute_airmass`.
+    headers; see :meth:`NickelCamera.compute_airmass`.  ``extinction``
+    (optional) names the nominal extinction curve of the site in
+    ``pipnick/data/extinction``; see :attr:`NickelCamera.extinction_file` and
+    :mod:`pipnick.photometry.extinction`.
 
 ``[identify]``
     Header keywords mapped to regular expressions.  A header is from this
@@ -242,6 +245,15 @@ class NickelCamera:
         A guess for the seeing FWHM in arcsec.
         """
         return self.config['camera'].get('fwhm_guess')
+
+    @property
+    def extinction_file(self):
+        """
+        The name of the nominal extinction curve of the observatory, in
+        ``pipnick/data/extinction``, or None if the configuration does not
+        provide one; see :mod:`pipnick.photometry.extinction`.
+        """
+        return self.config.get('observatory', {}).get('extinction')
 
     @property
     def location(self):

@@ -21,6 +21,9 @@ name = "Lick Observatory"
 longitude = -121.636667     # deg, east positive
 latitude = 37.343333        # deg
 height = 1290.0             # m
+# The nominal extinction curve of the site, in pipnick/data/extinction; see
+# pipnick.photometry.extinction
+extinction = "mthamextinct.dat"
 
 [identify]
 # All of these header keywords must be present and match the regular expression.
