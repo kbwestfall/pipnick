@@ -1,337 +1,484 @@
+r"""
+Photometric calibration.
+
+The calibration of each band relates the instrumental magnitudes, :math:`m`,
+to the known (catalog) magnitudes, :math:`M`, of standard stars:
+
+.. math::
+
+    m - M = \sum_t k_t\ x_t,
+
+where the terms :math:`x_t` are selected by name (see
+:func:`design_matrix`) from
+
+    - ``zp``: the zero point, :math:`x = 1`;
+    - ``airmass``: the extinction, :math:`x = X`;
+    - ``color``: the color term, :math:`x = C`;
+    - ``color2``: the quadratic color term, :math:`x = C^2`;
+    - ``airmass_color``: the color dependence of the extinction,
+      :math:`x = X C`;
+
+for the airmass :math:`X` and the (catalog) color :math:`C`.  The
+instrumental magnitudes are :math:`m = -2.5\log_{10}(f / t)`, for the flux
+:math:`f` in electrons and the exposure time :math:`t`, so the zero point
+applies to count rates in electrons per second.
+
+The coefficients are found by weighted linear least squares, following the
+matrix-inversion method of Harris et al. (1981, PASP, 93, 507).  Any term can
+be fixed at a given value, in which case it is subtracted before the fit.
+The errors of the coefficients (and those propagated from them) are
+statistical only: fixed terms have no error, and the systematic error they
+introduce is not included.
+"""
+
+from dataclasses import dataclass
+
 import numpy as np
-from scipy import linalg
 
 from astropy import stats
+from scipy import linalg
+
+from pipnick.pkg.exceptions import PipnickParameterError
+
+# The terms of the calibration model, in the order used by the design matrix
+CALIBRATION_TERMS = ('zp', 'airmass', 'color', 'color2', 'airmass_color')
 
 
-def photometric_calibration_coefficients_iterej(
-    mag_c, mag_i, airmass, color_defs, order=2, weights=None, gpm=None, rej=3., maxiter=3
-):
-    r"""
-    Iteratively determine the photometric calibration coefficients by
-    fitting the data and then rejecting outliers.
-
-    Procedure:
-
-        - Determine the best-fitting coefficients using
-          :func:`photometric_calibration_coefficients`.
-        - Use :func:`apply_photometric_calibration` to apply the
-          coefficents to the instrumental magnitudes.
-        - Reject outliers; see ``rej``.
-        - Repeat until either no points are rejected or the maximum
-          number of iterations is reached.
+def check_terms(terms):
+    """
+    Check and order the terms of a calibration model.
 
     Parameters
     ----------
-    mag_c : :class:`numpy.ndarray`
-        Known catalog stellar magnitudes.  Shape must match ``mag_i``.
-    mag_i : :class:`numpy.ndarray`
-        Measured instrumental magnitudes, :math:`-2.5\log_{10}(f)` with
-        :math:`f` in counts.  Shape is :math:`(N_{\rm obs}, N_{\rm
-        band})`, where :math:`N_{\rm obs}` is the number of independent
-        observations and :math:`N_{\rm band}` is the number of broadband
-        filters used.
-    airmass : :class:`numpy.ndarray`
-        Airmass of each observation.  Shape must match ``mag_i``.
-    color_defs : :class:`numpy.ndarray`
-        An array indicating how to construct the color used for
-        calibrating each magnitude.  Shape must be :math:`(N_{\rm band},
-        2)`.  The array contents provide the column indices in ``mag_c``
-        and ``mag_i`` for constructing the color.  E.g.,
-        ``color_defs=np.array([[0,1],[2,1], ... ]) means use
-        ``mag_c[:,0]-mag_c[:,1]`` to construct the color used to
-        calibrate the fluxes in ``mag_i[:,0]``, use
-        ``mag_c[:,2]-mag_c[:,1]`` to construct the color used to
-        calibrate the fluxes in ``mag_i[:,1]``, etc.
-    order : int, optional
-        Order of the color terms.  Order=1 adopts only linear terms; see
-        :func:`photometric_calibration_coefficients`.
-    weights : :class:`numpy.ndarray`, optional
-        Weights for each measured magnitude.  If None, weights are
-        uniform.  Shape must match ``mag_i``.
-    gpm : :class:`numpy.ndarray`, optional
-        Boolean flag selecting valid measurements.  Shape must match
-        ``mag_i``.
-    rej : float, optional
-        Number of standard deviations used for rejecting data points
-        during each iteration.
-    maxiter : int, optional
-        Maximum number of fit/rejection iterations.
+    terms : list
+        The names of the terms; see :data:`CALIBRATION_TERMS`.  The zero
+        point (``zp``) is required.
 
     Returns
     -------
-    coeff : :class:`numpy.ndarray`
-        Best-fit calibration coefficients; one set per broadband filter.
-    app_mag : :class:`numpy.ndarray`
-        Apparent magnitudes constructed by combining the instrumental
-        magnitudes with the calibration coefficients.  See
-        :func:`apply_photometric_calibration`.  Shape matches ``mag_i``.
-    gpm : :class:`numpy.ndarray`
-        A boolean array selecting the data used during the calibration.
-        Shape matches ``mag_i``.
-
-    """
-    # Define the good-point mask
-    _gpm = np.ones_like(mag_i.shape, dtype=bool) if gpm is None else gpm
-    # ... and its inverse
-    mask = np.logical_not(_gpm)
-    # ... and the starting number of points reject
-    nrej = np.sum(mask)
-
-    # Number of observations and magnitudes
-    nobs, nmags = mag_i.shape
-    # Instantiate the array used to hold the calibration coefficients
-    coeff = np.empty(nmags, dtype=object)
-
-    # Loop until no points are rejected or the maximum number of
-    # iterations is reached
-    j = 0
-    while j < maxiter:
-        # Calibrate each band independently
-        for i in range(nmags):
-            color = np.squeeze(-np.diff(mag_c[:,color_defs[i]], axis=1))
-            gpm_i = _gpm[:,i] & _gpm[:,color_defs[i][0]] & _gpm[:,color_defs[i][1]]
-            coeff[i] = photometric_calibration_coefficients(
-                mag_c[:,i], color, mag_i[:,i], airmass[:,i], order=order, weights=weights,
-                gpm=gpm_i
-            )
-        # Apply the calibration to get the calibrated magnitudes
-        app_mag = apply_photometric_calibration(mag_i, airmass, coeff, color_defs, gpm=_gpm)
-        # Get the difference between the catalog and calibrated
-        # magnitudes, and clip at the requested level
-        dmag = stats.sigma_clip(np.ma.MaskedArray(mag_c - app_mag, mask=mask), sigma=rej, axis=0)
-        # Update the mask
-        mask = np.ma.getmaskarray(dmag)
-        # ... determine if any new points were rejected, and break the
-        # loop, if not
-        if np.sum(mask) - nrej == 0:
-            break
-        # Update the good-point mask
-        _gpm = np.logical_not(mask)
-        # ... the number of rejections
-        nrej = np.sum(mask)
-        # ... and increment the iteration counter
-        j += 1
-
-    return coeff, app_mag, _gpm
-
-
-def photometric_calibration_coefficients(
-    mag_c, color_c, mag_i, airmass, order=2, weights=None, gpm=None
-):
-    r"""
-    Determine photometric calibration coefficients.
-
-    Method assumes calibrations of the form
-
-    .. math::
-
-        m - M = k_0 + k_1\ X + k_2\ X C + \sum k_{n+2} C^n
-
-    where :math:`M` are the known apparent magnitudes (``mag_c``),
-    :math:`C` are the known colors used for calibration (``color_c``),
-    :math:`m` are the measured instrumental magnitudes, :math:`X` is the
-    airmass of each observation, and :math:`n\geq1` is the order.
-
-    The approach uses the matrix inversion (linear least-squares) method
-    of Harris et al. (1981).
-
-    Parameters
-    ----------
-    mag_c : :class:`numpy.ndarray`
-        Known catalog stellar magnitudes
-    color_c : :class:`numpy.ndarray`
-        Known catalog stellar colors
-    mag_i : :class:`numpy.ndarray`
-        Measured instrumental magnitudes, :math:`-2.5\log_{10}(f)` with
-        :math:`f` in counts.
-    airmass : :class:`numpy.ndarray`
-        Airmass of each observation.
-    order : int, optional
-        Order of the color terms.  Order=1 adopts only linear terms.
-        To include quadratic terms, set ``order=2``, etc.
-    weights : :class:`numpy.ndarray`, optional
-        Weights for each measured magnitude.  If None, weights are
-        uniform.
-    gpm : :class:`numpy.ndarray`, optional
-        Boolean flag selection valid measurements.
-
-    Returns
-    -------
-    :class:`numpy.ndarray`
-        Returns the series of :math:`n+3` coefficients, where :math:`n`
-        is the fit ``order``.
-    """
-    # Setup the boolean mask use to select good measurements
-    _gpm = np.ones(mag_i.size, dtype=bool) if gpm is None else gpm
-    # Set the number of good measurements
-    ngood = np.sum(_gpm)
-    # Setup the weights
-    _wgt = np.ones(ngood, dtype=float) if weights is None else weights[_gpm]
-    # Eqn. 3.2 from Harris et al. (1981) for x_ij
-    x = calibration_design_matrix(airmass[_gpm], color_c[_gpm], order)
-    # Eqn. 3.10 from Harris et al. (1981) for W_ik
-    W = np.dot(_wgt[None,:] * x, x.T)
-    # Eqn. 3.9 from Harris et al. (1981) for r_k
-    r = np.dot(_wgt[None,:] * x, mag_i[_gpm] - mag_c[_gpm])
-    # Eqn. 3.8 from Harris et al. (1981) for a
-    return linalg.solve(W, r)
-
-
-def calibration_design_matrix(airmass, color, order=2):
-    """
-    Construct the design matrix used for photometric calibration.
-
-    This follows eqn. 3.2 from Harris et al. (1981) for x_ij.
-
-    Parameters
-    ----------
-
-    airmass : :class:`numpy.ndarray`
-        1D array with the airmass of each observation
-    color : :class:`numpy.ndarray`
-        1D array with the stellar colors
-    order : int, optional
-        Order of the color terms.  Order=1 adopts only linear terms.
-        To include quadratic terms, set ``order=2``, etc.
-   
-    Returns
-    -------
-    x : :class:`numpy.ndarray`
-        The result for eqn. 3.2 from Harris et al. (1981) for x_ij.
-    """
-    x = [np.ones_like(airmass), airmass, airmass*color, color] 
-    if order > 1:
-        x += [color**i for i in range(2,order+1)]
-    return np.stack(x)
-
-
-def apparent_mag(mag_i, color, airmass, coeffs):
-    r"""
-    Calculate the apparent magnitudes given the relevant measurements
-    and the calibration coefficients.
-
-    This is equivalent to the first equation in the equations sets 2.9
-    and 3.1 from Harris et al. (1981).
-
-    Parameters
-    ----------
-    mag_i : :class:`numpy.ndarray`
-        1D vector with the measured instrumental magnitudes,
-        :math:`-2.5\log_{10}(f)` with :math:`f` in counts.
-    color : :class:`numpy.ndarray`
-        Known catalog stellar colors, *not* the instrumental colors.
-    airmass : :class:`numpy.ndarray`
-        Airmass of each observation.
-    coeffs : :class:`numpy.ndarray`
-        1D array with the calibration coefficients.  The order of the
-        fit is 3 less than the length of this array; i.e., this should
-        contain 5 coefficients for an order-2 fit.
-    
-    Returns
-    -------
-    :class:`numpy.ndarray`
-        1D vector with the calibrated apparent magnitudes.
-    """
-    x = calibration_design_matrix(airmass, color, len(coeffs)-3)
-    return mag_i - np.dot(coeffs, x)
-
-
-def apply_photometric_calibration(
-    mag, airmass, coeff, color_defs, atol=1e-2, maxiter=10, gpm=None
-):
-    r"""
-    Apply photometric calibration coefficients to a set of observations.
-
-    The photometric calibration coefficients are defined by a *known*
-    set of stellar colors.  Therefore, this function runs iteratively.
-    The first guess at the colors use the instrumental magnitudes.  For
-    each iteration, the colors are updated based on the apparent
-    magnitudes measured in the previous iteration, and the apparent
-    magnitudes are recalculated.  These iterations proceed until the rms
-    difference between the original and updated colors is less than
-    ``atol`` or the maximum number of iterations (``maxiter``) as been
-    reached.
-
-    Parameters
-    ----------
-    mag : :class:`numpy.ndarray`
-        The instrumental magnitudes to calibrate, where
-        :math:`-2.5\log_{10}(f)` with :math:`f` in counts.  Shape is
-        :math:`(N_{\rm obs}, N_{\rm band})`, where :math:`N_{\rm obs}`
-        is the number of independent observations and :math:`N_{\rm
-        band}` is the number of broadband filters used.
-    airmass : :class:`numpy.ndarray`
-        Airmass of each observation.  Shape must match ``mag``.
-    coeff : :class:`numpy.ndarray`
-        Best-fit calibration coefficients; one set per broadband filter.
-    color_defs : :class:`numpy.ndarray`
-        An array indicating how to construct the color used for
-        calibrating each magnitude.  Shape must be :math:`(N_{\rm band},
-        2)`.  The array contents provide the column indices in ``mag_c``
-        and ``mag_i`` for constructing the color.  E.g.,
-        ``color_defs=np.array([[0,1],[2,1], ... ]) means use
-        ``mag_c[:,0]-mag_c[:,1]`` to construct the color used to
-        calibrate the fluxes in ``mag_i[:,0]``, use
-        ``mag_c[:,2]-mag_c[:,1]`` to construct the color used to
-        calibrate the fluxes in ``mag_i[:,1]``, etc.
-    atol : float, optional
-        The absolute tolerance for the RMS difference between the
-        original and updated colors; see function description.
-    maxiter : int, optional
-        Maximum number of update iterations.
-    gpm : :class:`numpy.ndarray`, optional
-        Boolean flag selecting valid measurements.  Shape must match
-        ``mag``.
-
-    Returns
-    -------
-    app_mag : :class:`numpy.ndarray`
-        Calibrated apparent magnitudes.  Shape matches ``mag``.
+    list
+        The terms, in the order of :data:`CALIBRATION_TERMS`.
 
     Raises
     ------
-    :exc:`ValueError`
-        Raised if input arrays have inappropriate/mismatching shapes.
-
+    :exc:`~pipnick.pkg.exceptions.PipnickParameterError`
+        Raised if a term is unknown or repeated, or the zero point is missing.
     """
-    # Check the input
-    if mag.shape != airmass.shape:
-        raise ValueError('Shape of mag and airmass arrays must match.')
-    nobs, nmag = mag.shape
-    if len(coeff) != nmag:
-        raise ValueError('Must provide one set of coefficients for each magniude.')
-    if color_defs.shape != (nmag, 2):
-        raise ValueError('Must define a color used by each magnitude.')
-
-    # Calculate the colors
-    color = np.column_stack([-np.diff(mag[:,c], axis=1) for c in color_defs])
-
-    # Ensure all magnitudes are valid for each measurement
-    # TODO: Actually only need to make sure each color (magnitude pair) is valid...
-    if gpm is not None:
-        _gpm = np.all(gpm, axis=1)
-
-    # Iteratively calculate the apparent mags until the colors are as close as specified.
-    rms = atol + 1.
-    i = 0
-    while rms > atol and i < maxiter:
-        # Calculate all the apparent mags
-        app_mag = np.column_stack(
-            [apparent_mag(m, c, a, k) for m, c, a, k in zip(mag.T, color.T, airmass.T, coeff)]
+    unknown = [t for t in terms if t not in CALIBRATION_TERMS]
+    if len(unknown) > 0:
+        raise PipnickParameterError(
+            f'Unknown calibration terms: {", ".join(unknown)}.  Options are: '
+            f'{", ".join(CALIBRATION_TERMS)}.'
         )
-        # Get the updated color
-        updated_color = np.column_stack([-np.diff(app_mag[:,c], axis=1) for c in color_defs])
-        # Get the RMS difference with the old color
-        if gpm is None:
-            rms = np.sqrt(np.mean((color-updated_color)**2))
-        else:
-            rms = np.sqrt(np.mean((color[_gpm]-updated_color[_gpm])**2))
-        # Save the updated value
-        color = updated_color
-        # Increment the iteration counter
-        i += 1
-    # Return the apparent magnitudes
-    return app_mag
+    if len(set(terms)) != len(terms):
+        raise PipnickParameterError(f'Calibration terms are repeated: {", ".join(terms)}.')
+    if 'zp' not in terms:
+        raise PipnickParameterError('The calibration must include the zero point (zp).')
+    return [t for t in CALIBRATION_TERMS if t in terms]
 
 
+def design_matrix(terms, airmass, color):
+    """
+    Construct the design matrix of a calibration model.
+
+    This follows eqn. 3.2 of Harris et al. (1981) for :math:`x_{ij}`.
+
+    Parameters
+    ----------
+    terms : list
+        The names of the terms; see :func:`check_terms`.
+    airmass : :class:`numpy.ndarray`
+        The airmass of each measurement.
+    color : :class:`numpy.ndarray`
+        The color of each measurement.
+
+    Returns
+    -------
+    :class:`numpy.ndarray`
+        The design matrix, with shape (number of terms, number of
+        measurements).
+    """
+    _airmass = np.atleast_1d(np.asarray(airmass, dtype=float))
+    _color = np.atleast_1d(np.asarray(color, dtype=float))
+    values = {
+        'zp': np.ones_like(_airmass), 'airmass': _airmass, 'color': _color,
+        'color2': _color**2, 'airmass_color': _airmass * _color
+    }
+    return np.stack([values[t] for t in terms])
+
+
+@dataclass
+class CalibrationFit:
+    """
+    The result of fitting a calibration model; see :func:`fit_calibration`.
+    """
+    terms: list
+    """The names of the terms."""
+    coeff: np.ndarray
+    """The coefficients of all of the terms, including any fixed terms."""
+    cov: np.ndarray
+    """The covariance of the coefficients; zero for the fixed terms."""
+    free: np.ndarray
+    """Boolean array selecting the fitted (not fixed) terms."""
+    gpm: np.ndarray
+    """Boolean array selecting the measurements used in the fit."""
+    chi2: float
+    """The chi-square of the fit."""
+    dof: int
+    """The number of degrees of freedom of the fit."""
+    rms: float
+    """The root-mean-square residual of the fit."""
+
+    @property
+    def rchi2(self):
+        """
+        The reduced chi-square, or None if the fit has no degrees of freedom.
+        """
+        return self.chi2 / self.dof if self.dof > 0 else None
+
+    @property
+    def errors(self):
+        """
+        The errors of the coefficients; zero for the fixed terms.
+        """
+        return np.sqrt(np.diag(self.cov))
+
+    def model(self, airmass, color):
+        """
+        Return the model difference between the instrumental and calibrated
+        magnitudes, :math:`m - M`.
+        """
+        return np.dot(self.coeff, design_matrix(self.terms, airmass, color))
+
+    def model_error(self, airmass, color):
+        """
+        Return the error of :meth:`model`, propagated from the covariance of
+        the coefficients.
+        """
+        x = design_matrix(self.terms, airmass, color)
+        return np.sqrt(np.sum(x * np.dot(self.cov, x), axis=0))
+
+
+def fit_calibration(mag_c, color, mag_i, airmass, terms, err=None, fixed=None, gpm=None):
+    r"""
+    Fit a calibration model.
+
+    The approach is the weighted linear least-squares method of Harris et al.
+    (1981).
+
+    Parameters
+    ----------
+    mag_c : :class:`numpy.ndarray`
+        The catalog magnitudes, :math:`M`.
+    color : :class:`numpy.ndarray`
+        The catalog colors, :math:`C`.
+    mag_i : :class:`numpy.ndarray`
+        The instrumental magnitudes, :math:`m`.
+    airmass : :class:`numpy.ndarray`
+        The airmass of each measurement.
+    terms : list
+        The names of the terms; see :func:`check_terms`.
+    err : :class:`numpy.ndarray`, optional
+        The error of each measurement of :math:`m - M`, used to weight the
+        fit.  If None, the weights are uniform.
+    fixed : dict, optional
+        The terms to fix, mapped to their values.
+    gpm : :class:`numpy.ndarray`, optional
+        Boolean array selecting the measurements to use.  If None, all are
+        used.
+
+    Returns
+    -------
+    :class:`CalibrationFit`
+        The result of the fit.  If the measurements have errors and the
+        reduced chi-square is larger than 1, the covariance is scaled by it.
+
+    Raises
+    ------
+    :exc:`~pipnick.pkg.exceptions.PipnickParameterError`
+        Raised if a fixed term is not in the model, there are no more
+        measurements than fitted terms, or the fitted terms are degenerate.
+    """
+    _terms = check_terms(terms)
+    _fixed = {} if fixed is None else fixed
+    unknown = [t for t in _fixed if t not in _terms]
+    if len(unknown) > 0:
+        raise PipnickParameterError(f'Fixed terms are not in the model: {", ".join(unknown)}.')
+    _mag_i = np.asarray(mag_i, dtype=float)
+    _gpm = np.ones(_mag_i.shape, dtype=bool) if gpm is None else np.asarray(gpm, dtype=bool)
+    _err = np.ones(_mag_i.shape, dtype=float) if err is None else np.asarray(err, dtype=float)
+    free = np.array([t not in _fixed for t in _terms])
+    nfree = int(np.sum(free))
+    ngood = int(np.sum(_gpm))
+    if ngood <= nfree:
+        raise PipnickParameterError(
+            f'Cannot fit {nfree} terms to {ngood} measurements; more measurements than terms '
+            'are required.'
+        )
+
+    x = design_matrix(_terms, np.asarray(airmass)[_gpm], np.asarray(color)[_gpm])
+    coeff = np.array([_fixed.get(t, 0.) for t in _terms], dtype=float)
+    # The measurements, after subtracting the fixed terms
+    y = _mag_i[_gpm] - np.asarray(mag_c, dtype=float)[_gpm] - np.dot(coeff, x)
+    wgt = 1. / _err[_gpm]**2
+    cov = np.zeros((len(_terms), len(_terms)), dtype=float)
+    if nfree > 0:
+        xf = x[free]
+        # The fitted terms must be independent, e.g., the zero point and the
+        # extinction cannot both be fit to measurements at a single airmass
+        if np.linalg.matrix_rank(xf.T * np.sqrt(wgt)[:,None]) < nfree:
+            raise PipnickParameterError(
+                'The fitted terms are degenerate for these measurements (e.g., the airmass or '
+                'color does not vary); fix or remove terms.'
+            )
+        # Eqns. 3.8-3.10 of Harris et al. (1981)
+        W = np.dot(wgt[None,:] * xf, xf.T)
+        r = np.dot(wgt[None,:] * xf, y)
+        coeff[free] = linalg.solve(W, r)
+        cov[np.ix_(free, free)] = linalg.inv(W)
+    resid = y - np.dot(coeff[free], x[free]) if nfree > 0 else y
+    chi2 = float(np.sum(wgt * resid**2))
+    dof = ngood - nfree
+    if err is not None and chi2 / dof > 1.:
+        cov *= chi2 / dof
+    return CalibrationFit(
+        terms=_terms, coeff=coeff, cov=cov, free=free, gpm=_gpm, chi2=chi2, dof=dof,
+        rms=float(np.sqrt(np.mean(resid**2)))
+    )
+
+
+def reject_outliers(fit, mag_c, color, mag_i, airmass, err=None, rej=3.):
+    """
+    Identify the outliers of a calibration fit.
+
+    The residuals of the measurements used in the fit, normalized by their
+    errors, are sigma-clipped once about their median at ``rej`` times their
+    standard deviation; see :func:`astropy.stats.sigma_clip`.
+
+    Parameters
+    ----------
+    fit : :class:`CalibrationFit`
+        The fit.
+    mag_c, color, mag_i, airmass, err : :class:`numpy.ndarray`
+        The measurements; see :func:`fit_calibration`.
+    rej : float, optional
+        The rejection threshold, in standard deviations.
+
+    Returns
+    -------
+    :class:`numpy.ndarray`
+        Boolean array selecting the measurements newly identified as
+        outliers.
+    """
+    _err = np.ones(np.shape(mag_i), dtype=float) if err is None else np.asarray(err, dtype=float)
+    resid = (
+        np.asarray(mag_i, dtype=float) - np.asarray(mag_c, dtype=float)
+        - fit.model(airmass, color)
+    ) / _err
+    outlier = np.zeros(np.shape(mag_i), dtype=bool)
+    if np.sum(fit.gpm) < 3:
+        return outlier
+    clipped = stats.sigma_clip(
+        resid[fit.gpm], sigma=rej, maxiters=1, cenfunc='median', stdfunc='std'
+    )
+    outlier[np.where(fit.gpm)[0][np.ma.getmaskarray(clipped)]] = True
+    return outlier
+
+
+def zero_point(terms, coeff, cov, airmass):
+    r"""
+    Compute the zero point and color coefficients of an image.
+
+    For an image at airmass :math:`X`, the calibrated magnitude of a source
+    with color :math:`C` and count rate :math:`r` (electrons per second) is
+
+    .. math::
+
+        M = -2.5\log_{10}(r) + Z + c_1\ C + c_2\ C^2,
+
+    with :math:`Z = -(k_{\rm zp} + k_{\rm airmass} X)`, :math:`c_1 =
+    -(k_{\rm color} + k_{\rm airmass\_color} X)`, and :math:`c_2 = -k_{\rm
+    color2}`, where any term not in the model is 0.
+
+    Parameters
+    ----------
+    terms : list
+        The names of the terms.
+    coeff : :class:`numpy.ndarray`
+        The coefficients.
+    cov : :class:`numpy.ndarray`
+        The covariance of the coefficients.
+    airmass : float
+        The airmass of the image.
+
+    Returns
+    -------
+    dict
+        The zero point (``zp``) and its statistical error (``zp_err``), and
+        the color coefficients (``c1`` and ``c2``).
+    """
+    k = dict(zip(terms, np.asarray(coeff, dtype=float)))
+    grad = np.array([-1. if t == 'zp' else (-airmass if t == 'airmass' else 0.) for t in terms])
+    return {
+        'zp': -(k['zp'] + k.get('airmass', 0.) * airmass),
+        'zp_err': float(np.sqrt(np.dot(grad, np.dot(np.asarray(cov, dtype=float), grad)))),
+        # NOTE: Subtracting from 0 avoids writing -0 for missing terms
+        'c1': 0. - (k.get('color', 0.) + k.get('airmass_color', 0.) * airmass),
+        'c2': 0. - k.get('color2', 0.)
+    }
+
+
+def residual_drift(time, resid, err):
+    """
+    Measure the linear trend of calibration residuals with time.
+
+    This assesses a drift of the zero point through the night, which the
+    calibration model does not include.
+
+    Parameters
+    ----------
+    time : :class:`numpy.ndarray`
+        The time of each measurement, e.g., in hours.
+    resid : :class:`numpy.ndarray`
+        The residuals (magnitudes).
+    err : :class:`numpy.ndarray`
+        The errors of the residuals, used to weight the fit.
+
+    Returns
+    -------
+    tuple
+        The slope (magnitudes per unit time) and its error, which is scaled by
+        the square root of the reduced chi-square if that is larger than 1, or
+        None if there are fewer than three measurements or they are all at
+        the same time.
+    """
+    _time = np.asarray(time, dtype=float)
+    if len(_time) < 3 or np.ptp(_time) == 0:
+        return None
+    x = np.stack([np.ones_like(_time), _time - np.mean(_time)])
+    wgt = 1. / np.asarray(err, dtype=float)**2
+    W = np.dot(wgt[None,:] * x, x.T)
+    coeff = linalg.solve(W, np.dot(wgt[None,:] * x, np.asarray(resid, dtype=float)))
+    cov = linalg.inv(W)
+    chi2 = np.sum(wgt * (np.asarray(resid, dtype=float) - np.dot(coeff, x))**2)
+    scale = max(1., chi2 / (len(_time) - 2))
+    return float(coeff[1]), float(np.sqrt(cov[1,1] * scale))
+
+
+def iterate_colors(
+    mag_i, err_i, airmass, source, band, calibrations, default_color=None, atol=1e-3,
+    maxiter=20
+):
+    """
+    Calibrate instrumental magnitudes, iterating to find the colors of the
+    sources.
+
+    The calibration of each band depends on the color of the source, which is
+    computed from its calibrated magnitudes.  The colors start at their
+    default values; each iteration calibrates all of the measurements with
+    the current colors, averages the calibrated magnitudes of each source in
+    each band (weighted by the instrumental errors, so that repeated images
+    of a source in a band are combined), and recomputes the colors.  The
+    iterations stop when the colors change by less than ``atol``.
+
+    A color is computed only if the source has calibrated measurements in
+    both of its bands; otherwise, the default color is used and flagged as
+    assumed.
+
+    Parameters
+    ----------
+    mag_i : :class:`numpy.ma.MaskedArray`
+        The instrumental magnitude of each measurement; masked measurements
+        are not calibrated.
+    err_i : :class:`numpy.ma.MaskedArray`
+        The errors of the instrumental magnitudes.  Masked errors are taken to
+        be 1 when averaging.
+    airmass : :class:`numpy.ndarray`
+        The airmass of each measurement.
+    source : :class:`numpy.ndarray`
+        An identifier of the source of each measurement.
+    band : :class:`numpy.ndarray`
+        The band of each measurement.
+    calibrations : dict
+        The calibration of each band: a dictionary with the ``terms``, the
+        coefficients (``coeff``), their covariance (``cov``), and the two
+        bands of the color (``color``, e.g., ``('B', 'V')``).  Measurements in
+        bands without a calibration are not calibrated.
+    default_color : dict, optional
+        The default value of each color, keyed by its bands, e.g.,
+        ``{('B', 'V'): 0.6}``.  Colors not provided default to 0.
+    atol : float, optional
+        The convergence tolerance for the colors (magnitudes).
+    maxiter : int, optional
+        The maximum number of iterations.
+
+    Returns
+    -------
+    mag, mag_err : :class:`numpy.ma.MaskedArray`
+        The calibrated magnitudes and their statistical errors (the
+        instrumental error and the error from the covariance of the
+        coefficients), masked for measurements that are not calibrated (and,
+        for the errors, those without an instrumental error).
+    color : :class:`numpy.ma.MaskedArray`
+        The color used to calibrate each measurement.
+    assumed : :class:`numpy.ndarray`
+        Boolean array flagging measurements calibrated with the default
+        color.
+    """
+    _mag = np.ma.asarray(mag_i, dtype=float)
+    _err = np.ma.filled(np.ma.asarray(err_i, dtype=float), 1.)
+    _airmass = np.asarray(airmass, dtype=float)
+    _source = np.asarray(source)
+    _band = np.asarray(band)
+    _default = {} if default_color is None else default_color
+    n = len(_mag)
+    valid = np.logical_not(np.ma.getmaskarray(_mag)) & np.isin(_band, list(calibrations.keys()))
+    mag = np.zeros(n, dtype=float)
+    mag_err = np.zeros(n, dtype=float)
+    used_color = np.zeros(n, dtype=float)
+    assumed = np.ones(n, dtype=bool)
+
+    # The current color of each source, for each color used
+    colors = {}
+    for i in np.where(valid)[0]:
+        pair = tuple(calibrations[_band[i]]['color'])
+        colors[(_source[i], pair)] = _default.get(pair, 0.)
+    known = {key: False for key in colors}
+
+    for _ in range(maxiter):
+        for i in np.where(valid)[0]:
+            cal = calibrations[_band[i]]
+            used_color[i] = colors[(_source[i], tuple(cal['color']))]
+            x = design_matrix(cal['terms'], _airmass[i], used_color[i])[:,0]
+            mag[i] = _mag[i] - np.dot(cal['coeff'], x)
+        # Weighted mean magnitude of each source in each band
+        means = {}
+        for key in set(zip(_source[valid], _band[valid])):
+            indx = valid & (_source == key[0]) & (_band == key[1])
+            wgt = 1. / _err[indx]**2
+            means[key] = np.sum(wgt * mag[indx]) / np.sum(wgt)
+        change = 0.
+        for key in colors:
+            src, pair = key
+            if (src, pair[0]) in means and (src, pair[1]) in means:
+                new = means[(src, pair[0])] - means[(src, pair[1])]
+                change = max(change, abs(new - colors[key]))
+                colors[key] = new
+                known[key] = True
+        if change < atol:
+            break
+
+    for i in np.where(valid)[0]:
+        cal = calibrations[_band[i]]
+        key = (_source[i], tuple(cal['color']))
+        assumed[i] = not known[key]
+        used_color[i] = colors[key]
+        x = design_matrix(cal['terms'], _airmass[i], used_color[i])
+        mag[i] = _mag[i] - np.dot(cal['coeff'], x[:,0])
+        mag_err[i] = np.sqrt(_err[i]**2 + np.dot(x[:,0], np.dot(cal['cov'], x[:,0])))
+    invalid = np.logical_not(valid)
+    no_err = invalid | np.ma.getmaskarray(np.ma.asarray(err_i))
+    return (
+        np.ma.MaskedArray(mag, mask=invalid), np.ma.MaskedArray(mag_err, mask=no_err),
+        np.ma.MaskedArray(used_color, mask=invalid), assumed & valid
+    )

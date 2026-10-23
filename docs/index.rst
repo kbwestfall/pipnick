@@ -19,6 +19,7 @@ an issue on our GitHub page, if you have any problems.
    basics
    astrometry
    photometry
+   calibrate
    example
    issues
 

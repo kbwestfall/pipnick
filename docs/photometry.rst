@@ -121,9 +121,8 @@ provenance of the image and its astrometric solution.
 ``failed``), the number of sources, the FWHM, the number of PSF stars, and the
 astrometric solution method (``none`` if the coordinates are masked).
 
-The instrumental magnitudes are not calibrated; ``pipnick.photometry.calibrate``
-provides the functions to determine and apply a photometric calibration from
-standard stars.
+The instrumental magnitudes are not calibrated; ``pipnick_calibrate`` fits the
+photometric calibration from the Landolt standard stars (see :doc:`calibrate`).
 
 Using the pipeline in Python
 ----------------------------
