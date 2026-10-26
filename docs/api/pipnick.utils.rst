@@ -13,6 +13,7 @@ Submodules
    pipnick.utils.graphs
    pipnick.utils.log
    pipnick.utils.masking
+   pipnick.utils.rgb
 
 Module contents
 ---------------

@@ -20,6 +20,7 @@ an issue on our GitHub page, if you have any problems.
    astrometry
    photometry
    calibrate
+   mosaic
    example
    issues
 

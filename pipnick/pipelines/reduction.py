@@ -26,7 +26,9 @@ import ccdproc
 from pipnick import cameras
 from pipnick.pkg.exceptions import PipnickDataModelError, PipnickPathError
 from pipnick.utils.combiner import Combiner
-from pipnick.metadata import build_metadata, frame_path, setup_tag, update_metadata_meta
+from pipnick.metadata import (
+    _filter_name, _safe_name, build_metadata, frame_path, setup_tag, update_metadata_meta
+)
 from pipnick import log
 
 
@@ -430,31 +432,6 @@ def _group_indices(metadata):
     return {int(c): srt[comb_id[srt] == c] for c in np.unique(comb_id)}
 
 
-def _safe_name(value):
-    """
-    Convert a string for use in a file name.
-
-    Spaces are replaced by underscores, and any character other than letters,
-    digits, underscores, periods, plus signs, and minus signs is removed.  For
-    example, ``NGC 7331 I`` becomes ``NGC_7331_I``.  See :func:`_filter_name`
-    for filters.
-    """
-    return re.sub(r'[^A-Za-z0-9_.+-]', '', str(value).strip().replace(' ', '_'))
-
-
-def _filter_name(filt):
-    """
-    Convert a filter name for use in a file name.
-
-    A prime is replaced by ``p``, so that primed filters are distinct from the
-    unprimed filters with the same letter; e.g., ``i'`` becomes ``ip``, while
-    ``i`` is unchanged.  The result is then converted by :func:`_safe_name`, or
-    is ``none`` if the filter is unknown.
-    """
-    name = _safe_name(str(filt).replace("'", 'p'))
-    return 'none' if len(name) == 0 else name
-
-
 def _dark_name(exptime):
     """
     Return the name of the combined dark for an exposure time, which is rounded
@@ -467,7 +444,7 @@ def _flat_name(frametype, filt):
     """
     Return the name of the combined flat of a given type (``'skyflat'`` or
     ``'domeflat'``) and filter; e.g., ``SkyFlat_V.fits`` or
-    ``SkyFlat_ip.fits`` for the ``i'`` filter (see :func:`_filter_name`).
+    ``SkyFlat_ip.fits`` for the ``i'`` filter (see :func:`~pipnick.metadata._filter_name`).
     """
     title = 'SkyFlat' if frametype == 'skyflat' else 'DomeFlat'
     return f'{title}_{_filter_name(filt)}.fits'
@@ -602,7 +579,7 @@ def _science_name(metadata, indx, comb_id):
     ``<object>`` is the most common object name in the group (ties go to the
     earliest frame), ``<filter>`` is the filter of the earliest frame (all
     frames in a group have the same filter; see :func:`check_comb_groups` and
-    :func:`_filter_name`), ``<comb_id>`` is zero-padded to three digits, and
+    :func:`~pipnick.metadata._filter_name`), ``<comb_id>`` is zero-padded to three digits, and
     ``<date>`` is the UT date of the earliest frame.
 
     Parameters

@@ -9,6 +9,7 @@ Submodules
 
    pipnick.pipelines.astrometry
    pipnick.pipelines.calibrate
+   pipnick.pipelines.mosaic
    pipnick.pipelines.photometry
    pipnick.pipelines.reduction
 
