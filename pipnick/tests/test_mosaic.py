@@ -21,8 +21,8 @@ from pipnick import metadata
 from pipnick.mosaic import coadd, psfmatch, scaling
 from pipnick.photometry.aperture_photometry import aperture_analysis
 from pipnick.photometry.moffat import FitMoffat2D
-from pipnick.pipelines import mosaic as pipeline
-from pipnick.pipelines.photometry import _image_hash
+from pipnick.pipelines import mosaic
+from pipnick.pipelines.photometry import image_hash
 from pipnick.pipelines.reduction import load_setup, plan_products
 from pipnick.pkg.exceptions import PipnickDataModelError, PipnickParameterError
 from pipnick.tests.test_metadata import write_andor
@@ -81,8 +81,10 @@ def render(wcs, stars, fwhm, transparency, background, seed):
     model = np.full(SHAPE, background * EXPTIME)
     gamma = FitMoffat2D.to_gamma(fwhm, BETA)
     for xi, yi, fi in zip(x, y, flux):
-        model += MoffatPSF(flux=fi * transparency * EXPTIME, x_0=xi, y_0=yi, alpha=gamma,
-                           beta=BETA)(xx, yy)
+        star = MoffatPSF(
+            flux=fi * transparency * EXPTIME, x_0=xi, y_0=yi, alpha=gamma, beta=BETA
+        )
+        model += star(xx, yy)
     sigma = np.sqrt(model + READNOISE**2)
     inside = (x > 5) & (x < SHAPE[1] - 6) & (y > 5) & (y < SHAPE[0] - 6)
     return model + rng.normal(0., sigma), sigma, x[inside], y[inside], np.where(inside)[0]
@@ -166,9 +168,11 @@ def write_dithers(tmp_path, design, name='n7', stars=None):
         phot['flags'] = np.zeros(n, dtype=int)
         phot.meta = {
             'image': product['file'].name, 'filter': filt, 'exptime': EXPTIME,
-            'psf': {'fittype': 'circ', 'par': moffat_par(fwhm), 'fwhm_pix': fwhm,
-                    'fwhm_arcsec': fwhm * SCALE},
-            'settings_hash': 'settings', 'image_hash': _image_hash(hdr), 'wcs_method': 'gaia',
+            'psf': {
+                'fittype': 'circ', 'par': moffat_par(fwhm), 'fwhm_pix': fwhm,
+                'fwhm_arcsec': fwhm * SCALE
+            },
+            'settings_hash': 'settings', 'image_hash': image_hash(hdr), 'wcs_method': 'gaia',
             'wcs_hash': f'wcs{i}'
         }
         pfile = rdxdir / 'photometry' / f'{product["file"].stem}_phot.ecsv'
@@ -335,10 +339,14 @@ def test_metadata_columns(tmp_path):
             **{'DATE-BEG': f'2026-08-20T0{int(hour)}:{i:02d}:00.000'}
         )
     # Another pointing, far away
-    write_andor(rawdir / 'n8100.fits', OBJECT='SA 110 V', FILTER='V', RA='18:43:00.0',
-                DEC='00:10:00', **{'DATE-BEG': '2026-08-20T06:00:00.000'})
-    write_andor(rawdir / 'n8101.fits', OBJECT='SA 110 V', FILTER='V', RA='18:43:00.5',
-                DEC='00:10:10', **{'DATE-BEG': '2026-08-20T06:05:00.000'})
+    write_andor(
+        rawdir / 'n8100.fits', OBJECT='SA 110 V', FILTER='V', RA='18:43:00.0', DEC='00:10:00',
+        **{'DATE-BEG': '2026-08-20T06:00:00.000'}
+    )
+    write_andor(
+        rawdir / 'n8101.fits', OBJECT='SA 110 V', FILTER='V', RA='18:43:00.5', DEC='00:10:10',
+        **{'DATE-BEG': '2026-08-20T06:05:00.000'}
+    )
     files, tbl = metadata.build_metadata(rawdir=rawdir, filename=tmp_path / 'n8.ecsv', split=True)
     tbl = metadata.read_metadata(files[0])
     assert np.all(tbl['mosaic'] == '') and np.all(tbl['wcs_group'] == ''), (
@@ -382,7 +390,7 @@ def test_check_mosaic_groups(tmp_path):
     tbl['wcs_group'] = tbl['wcs_group'].astype('U20')
     tbl['wcs_group'][0] = 'other'
     with pytest.raises(PipnickDataModelError, match='several WCS groups'):
-        pipeline.check_mosaic_groups(tbl, table)
+        mosaic.check_mosaic_groups(tbl, table)
 
 
 def test_mosaic(tmp_path, caplog):
@@ -390,7 +398,7 @@ def test_mosaic(tmp_path, caplog):
     # A sparse field, so that some stars are isolated
     table, rdxdir, stars = write_dithers(tmp_path, design, stars=star_field(seed=7, nstars=15))
     with caplog.at_level(logging.INFO):
-        outputs = pipeline.mosaic_all(table, qa=True)
+        outputs = mosaic.mosaic_all(table, qa=True)
     assert sorted(f.name for f in outputs) == ['M11_R.fits', 'M11_V.fits'], (
         'There should be one mosaic per filter'
     )
@@ -452,7 +460,7 @@ def test_mosaic(tmp_path, caplog):
     # Rerun: up to date
     caplog.clear()
     with caplog.at_level(logging.INFO):
-        pipeline.mosaic_all(table)
+        mosaic.mosaic_all(table)
     assert caplog.text.count('is up to date') == 2, 'A rerun should not rebuild the mosaics'
 
     # Changing the membership of the group rebuilds all of its mosaics
@@ -461,7 +469,7 @@ def test_mosaic(tmp_path, caplog):
     metadata.write_metadata(tbl, table, commented=commented)
     caplog.clear()
     with caplog.at_level(logging.INFO):
-        pipeline.mosaic_all(table)
+        mosaic.mosaic_all(table)
     assert caplog.text.count('is up to date') == 0, (
         'A change in the membership of a WCS group should rebuild all of its mosaics'
     )
@@ -469,7 +477,7 @@ def test_mosaic(tmp_path, caplog):
 
 def test_mosaic_options(tmp_path, caplog):
     table, rdxdir, _ = write_dithers(tmp_path, three_dithers())
-    outputs = pipeline.mosaic_all(
+    outputs = mosaic.mosaic_all(
         table, psf_match='none', scale='none', match_background=True, outdir=tmp_path / 'out'
     )
     hdr = fits.getheader(outputs[0])
@@ -478,36 +486,37 @@ def test_mosaic_options(tmp_path, caplog):
     assert np.all(inputs['offset'] == 0.), 'The images should not be scaled'
     assert np.any(inputs['level'] != 0.), 'The background levels should be matched'
     with pytest.raises(PipnickParameterError):
-        pipeline.mosaic_all(table, psf_match='bad')
+        mosaic.mosaic_all(table, psf_match='bad')
     with pytest.raises(PipnickParameterError, match='output directory'):
-        pipeline.mosaic_all([table, table])
+        mosaic.mosaic_all([table, table])
 
 
 def test_mixed_filters_and_nights(tmp_path, caplog):
     table, rdxdir, _ = write_dithers(tmp_path, three_dithers())
-    images = pipeline.collect_images([table])
+    images = mosaic.collect_images([table])
     images[1]['filter'] = 'B'
     with caplog.at_level(logging.WARNING):
-        pipeline._validate(images)
+        mosaic._validate(images)
     assert 'combines images with different filters' in caplog.text, (
         'Mixed filters should give a warning'
     )
     for image in images[1:]:
         image['night'] = '2026-08-21'
     with pytest.raises(PipnickDataModelError, match='several nights'):
-        pipeline._validate(images)
+        mosaic._validate(images)
 
 
 def test_two_tables(tmp_path):
     # The same mosaic observed with two setups (tables), combined into one
     stars = star_field()
     table1, _, _ = write_dithers(tmp_path, three_dithers()[:2], name='na', stars=stars)
-    table2, _, _ = write_dithers(tmp_path, three_dithers()[2:] + three_dithers()[:1], name='nb',
-                                 stars=stars)
+    table2, _, _ = write_dithers(
+        tmp_path, three_dithers()[2:] + three_dithers()[:1], name='nb', stars=stars
+    )
     labels1 = set(metadata.read_metadata(table1)['mosaic']) - {''}
     labels2 = set(metadata.read_metadata(table2)['mosaic']) - {''}
     assert labels1 == labels2 == {'M11_V'}, 'The tables should have the same labels'
-    outputs = pipeline.mosaic_all([table1, table2], outdir=tmp_path / 'joint')
+    outputs = mosaic.mosaic_all([table1, table2], outdir=tmp_path / 'joint')
     inputs = Table.read(outputs[0], hdu='INPUTS')
     assert len(inputs) == 4 and len(set(inputs['table'])) == 2, (
         'The mosaic should combine the images of both tables'
@@ -528,7 +537,7 @@ def test_single_image_mosaics(tmp_path):
     tbl['mosaic'] = [f'M11_{f}_single' for f in tbl['filter']]
     tbl['wcs_group'] = 'M11_single'
     metadata.write_metadata(tbl, table, commented=commented)
-    outputs = pipeline.mosaic_all(table)
+    outputs = mosaic.mosaic_all(table)
     assert len(outputs) == 3, 'Each single-image mosaic should be constructed'
     headers = [fits.getheader(f) for f in outputs]
     for key in ['NAXIS1', 'NAXIS2', 'CRVAL1', 'CRVAL2', 'CRPIX1', 'CRPIX2']:

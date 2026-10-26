@@ -15,9 +15,13 @@ from astropy.time import Time
 
 from pipnick import metadata
 from pipnick.astrometry.services import propagate_proper_motion
-from pipnick.photometry import calibrate, extinction, landolt
-from pipnick.pipelines import calibrate as pipeline
-from pipnick.pipelines.photometry import _image_hash
+from pipnick.photometry import extinction, landolt
+from pipnick.photometry.calibrate import (
+    CALIBRATION_TERMS, check_terms, design_matrix, fit_calibration, iterate_colors,
+    residual_drift, zero_point
+)
+from pipnick.pipelines import calibrate
+from pipnick.pipelines.photometry import image_hash
 from pipnick.pipelines.reduction import load_setup, plan_products
 from pipnick.pkg.exceptions import PipnickDataModelError, PipnickParameterError
 from pipnick.tests.test_metadata import write_andor
@@ -134,7 +138,7 @@ def write_night(tmp_path, design, seed=1, science=False, outlier=None):
         meta = {
             'image': product['file'].name, 'setup': tag, 'comb_id': product['comb_id'],
             'object': obj, 'filter': filt, 'exptime': EXPTIME, 'airmass': airmass, 'mjd': mjd,
-            'settings_hash': 'settings', 'image_hash': _image_hash(hdr), 'wcs_method': 'gaia',
+            'settings_hash': 'settings', 'image_hash': image_hash(hdr), 'wcs_method': 'gaia',
             'wcs_hash': f'wcs{product["comb_id"]}'
         }
         if obj == 'SA110':
@@ -142,7 +146,7 @@ def write_night(tmp_path, design, seed=1, science=False, outlier=None):
             coo = propagate_proper_motion(stars, epoch)
             # Filters other than UBVRI are given the V calibration
             band = filt if filt in TRUE else 'V'
-            color, _ = landolt.catalog_color(stars, pipeline.default_colors()[band])
+            color, _ = landolt.catalog_color(stars, calibrate.default_colors()[band])
             mag = instrumental(np.asarray(stars[band]), np.asarray(color), airmass, band, rng)
             if outlier is not None:
                 mag[STARS.index(outlier)] += 0.3
@@ -247,12 +251,12 @@ def test_fit_calibration():
     color = rng.uniform(0., 1.5, n)
     mag_c = rng.uniform(11., 15., n)
     k = np.array([-24., 0.2, 0.05, 0.01, -0.02])
-    x = calibrate.design_matrix(calibrate.CALIBRATION_TERMS, airmass, color)
+    x = design_matrix(CALIBRATION_TERMS, airmass, color)
     mag_i = mag_c + np.dot(k, x) + rng.normal(0., 0.002, n)
     err = np.full(n, 0.002)
 
-    fit = calibrate.fit_calibration(
-        mag_c, color, mag_i, airmass, list(calibrate.CALIBRATION_TERMS), err=err
+    fit = fit_calibration(
+        mag_c, color, mag_i, airmass, list(CALIBRATION_TERMS), err=err
     )
     assert np.all(np.abs(fit.coeff - k) < 4 * fit.errors + 1e-6), (
         'All of the coefficients should be recovered within their errors'
@@ -261,7 +265,7 @@ def test_fit_calibration():
     # the wrong shape)
     assert fit.gpm.shape == (n,) and np.all(fit.gpm), 'Without a mask, all should be used'
 
-    fit = calibrate.fit_calibration(
+    fit = fit_calibration(
         mag_c, color, mag_i, airmass, ['zp', 'airmass', 'color', 'color2', 'airmass_color'],
         err=err, fixed={'airmass': 0.2}
     )
@@ -271,18 +275,18 @@ def test_fit_calibration():
     assert np.all(fit.cov[1] == 0.), 'A fixed term should not contribute to the covariance'
 
     with pytest.raises(PipnickParameterError):
-        calibrate.fit_calibration(
+        fit_calibration(
             mag_c[:3], color[:3], mag_i[:3], airmass[:3], ['zp', 'color', 'airmass']
         )
     with pytest.raises(PipnickParameterError):
-        calibrate.check_terms(['airmass'])
+        check_terms(['airmass'])
 
 
 def test_zero_point():
     terms = ['zp', 'airmass', 'color', 'airmass_color']
     coeff = np.array([-24., 0.2, 0.05, -0.02])
     cov = np.diag([1e-4, 4e-4, 1e-4, 0.])
-    zp = calibrate.zero_point(terms, coeff, cov, 1.5)
+    zp = zero_point(terms, coeff, cov, 1.5)
     assert zp['zp'] == pytest.approx(24. - 0.3), 'The zero point should include the extinction'
     assert zp['c1'] == pytest.approx(-(0.05 - 0.03)), (
         'The color coefficient should include the airmass-color term'
@@ -296,13 +300,13 @@ def test_residual_drift():
     rng = np.random.default_rng(3)
     time = np.linspace(0., 8., 30)
     err = np.full(30, 0.005)
-    slope, slope_err = calibrate.residual_drift(time, 0.01 * time + rng.normal(0., 0.005, 30), err)
+    slope, slope_err = residual_drift(time, 0.01 * time + rng.normal(0., 0.005, 30), err)
     assert abs(slope - 0.01) < 3 * slope_err and slope_err < 0.002, (
         'An injected drift should be recovered'
     )
-    slope, slope_err = calibrate.residual_drift(time, rng.normal(0., 0.005, 30), err)
+    slope, slope_err = residual_drift(time, rng.normal(0., 0.005, 30), err)
     assert abs(slope) < 3 * slope_err, 'No drift should be found without one'
-    assert calibrate.residual_drift(time[:2], time[:2], err[:2]) is None, (
+    assert residual_drift(time[:2], time[:2], err[:2]) is None, (
         'A drift should not be measured from fewer than three measurements'
     )
 
@@ -310,25 +314,35 @@ def test_residual_drift():
 def test_iterate_colors():
     terms = ['zp', 'airmass', 'color']
     cals = {
-        'B': {'terms': terms, 'coeff': np.array([-24.1, 0.3, 0.05]), 'cov': np.zeros((3, 3)),
-              'color': ('B', 'V')},
-        'V': {'terms': terms, 'coeff': np.array([-24.5, 0.17, -0.03]), 'cov': np.zeros((3, 3)),
-              'color': ('B', 'V')},
-        'R': {'terms': terms, 'coeff': np.array([-24.6, 0.12, 0.02]), 'cov': np.zeros((3, 3)),
-              'color': ('V', 'R')}
+        'B': {
+            'terms': terms, 'coeff': np.array([-24.1, 0.3, 0.05]), 'cov': np.zeros((3, 3)),
+            'color': ('B', 'V')
+        },
+        'V': {
+            'terms': terms, 'coeff': np.array([-24.5, 0.17, -0.03]), 'cov': np.zeros((3, 3)),
+            'color': ('B', 'V')
+        },
+        'R': {
+            'terms': terms, 'coeff': np.array([-24.6, 0.12, 0.02]), 'cov': np.zeros((3, 3)),
+            'color': ('V', 'R')
+        }
     }
     # Source 0: B, V (twice) and R; source 1: B and V only; source 2: V only
     src = np.array([0, 0, 0, 0, 1, 1, 2])
     band = np.array(['B', 'V', 'V', 'R', 'B', 'V', 'V'])
     airmass = np.array([1.2, 1.3, 1.5, 1.4, 1.2, 1.3, 1.3])
-    true = {(0, 'B'): 13.0, (0, 'V'): 12.2, (0, 'R'): 11.7, (1, 'B'): 14.0, (1, 'V'): 13.5,
-            (2, 'V'): 12.0}
+    true = {
+        (0, 'B'): 13.0, (0, 'V'): 12.2, (0, 'R'): 11.7, (1, 'B'): 14.0, (1, 'V'): 13.5,
+        (2, 'V'): 12.0
+    }
     true_color = {0: {'B': 0.8, 'V': 0.8, 'R': 0.5}, 1: {'B': 0.5, 'V': 0.5}, 2: {'V': 0.4}}
-    mag_i = np.array([
-        true[(s, b)] + np.dot(cals[b]['coeff'], [1., a, true_color[s][b]])
-        for s, b, a in zip(src, band, airmass)
-    ])
-    mag, mag_err, color, assumed = calibrate.iterate_colors(
+    mag_i = np.array(
+        [
+            true[(s, b)] + np.dot(cals[b]['coeff'], [1., a, true_color[s][b]])
+            for s, b, a in zip(src, band, airmass)
+        ]
+    )
+    mag, mag_err, color, assumed = iterate_colors(
         np.ma.MaskedArray(mag_i), np.ma.MaskedArray(np.full(7, 0.01)), airmass, src, band, cals,
         default_color={('B', 'V'): 0.4}
     )
@@ -350,9 +364,9 @@ def test_iterate_colors():
 def test_calibrate_all(tmp_path, caplog):
     table, rdxdir, _ = write_night(tmp_path, wide_design())
     with caplog.at_level(logging.INFO):
-        outputs = pipeline.calibrate_all(table, rdxdir=rdxdir, qa=True)
+        outputs = calibrate.calibrate_all(table, rdxdir=rdxdir, qa=True)
     assert len(outputs) == 1, 'There should be one calibration for the night'
-    content, edited = pipeline.read_calibration(outputs[0])
+    content, edited = calibrate.read_calibration(outputs[0])
     assert not edited, 'A new calibration file should not be reported as edited'
     assert content['calibration']['night'] == '2026-08-20', 'The night should be the UT date'
     for band, (k0, k1, kc) in TRUE.items():
@@ -382,7 +396,7 @@ def test_calibrate_all(tmp_path, caplog):
     caplog.clear()
     text = outputs[0].read_text()
     with caplog.at_level(logging.INFO):
-        pipeline.calibrate_all(table, rdxdir=rdxdir)
+        calibrate.calibrate_all(table, rdxdir=rdxdir)
     assert 'is up to date' in caplog.text and outputs[0].read_text() == text, (
         'A rerun with unchanged inputs should not refit'
     )
@@ -391,27 +405,27 @@ def test_calibrate_all(tmp_path, caplog):
     caplog.clear()
     outputs[0].write_text(text.replace('[band.V]\n', '[band.V]\n# edited\n'))
     edited_text = outputs[0].read_text().replace(
-        f'coefficients = {pipeline._toml_value(content["band"]["V"]["coefficients"])}',
+        f'coefficients = {calibrate._toml_value(content["band"]["V"]["coefficients"])}',
         'coefficients = [-24.0, 0.17, -0.03]'
     )
     outputs[0].write_text(edited_text)
     with caplog.at_level(logging.INFO):
-        pipeline.calibrate_all(table, rdxdir=rdxdir)
+        calibrate.calibrate_all(table, rdxdir=rdxdir)
     assert 'has been edited; keeping it' in caplog.text, 'The edit should be detected'
     assert outputs[0].read_text() == edited_text, 'An edited file should be kept'
 
     # Changed inputs with an edited file: a warning
     caplog.clear()
     with caplog.at_level(logging.INFO):
-        pipeline.calibrate_all(table, rdxdir=rdxdir, sys_err=0.02)
+        calibrate.calibrate_all(table, rdxdir=rdxdir, sys_err=0.02)
     assert 'may hide changes' in caplog.text, (
         'Changed inputs of an edited file should give a warning'
     )
     assert outputs[0].read_text() == edited_text, 'The edited file should still be kept'
 
     # Overwrite refits
-    pipeline.calibrate_all(table, rdxdir=rdxdir, overwrite=True)
-    content, edited = pipeline.read_calibration(outputs[0])
+    calibrate.calibrate_all(table, rdxdir=rdxdir, overwrite=True)
+    content, edited = calibrate.read_calibration(outputs[0])
     assert not edited and content['band']['V']['coefficients'][0] != -24.0, (
         '--overwrite should refit an edited file'
     )
@@ -420,12 +434,12 @@ def test_calibrate_all(tmp_path, caplog):
 def test_fallback(tmp_path, caplog):
     table, rdxdir, _ = write_night(tmp_path, narrow_design())
     with caplog.at_level(logging.WARNING):
-        pipeline.calibrate_all(
+        calibrate.calibrate_all(
             table, rdxdir=rdxdir, terms=['zp', 'airmass', 'color', 'airmass_color'],
             apply='image'
         )
     cfile = calibration_file(rdxdir)
-    content, _ = pipeline.read_calibration(cfile)
+    content, _ = calibrate.read_calibration(cfile)
     nominal = extinction.nominal_extinction(
         load_setup(table, rdxdir=rdxdir)[4], ['B', 'V']
     )
@@ -465,8 +479,8 @@ def test_fallback(tmp_path, caplog):
 
     # Without the fallback, every band fails
     with pytest.raises(PipnickDataModelError, match='No band could be calibrated'):
-        pipeline.calibrate_all(table, rdxdir=rdxdir, fallback=False, overwrite=True)
-    content, _ = pipeline.read_calibration(cfile)
+        calibrate.calibrate_all(table, rdxdir=rdxdir, fallback=False, overwrite=True)
+    content, _ = calibrate.read_calibration(cfile)
     assert content['band']['B']['status'] == 'failed', 'The bands should be recorded as failed'
     assert 'fallback is disabled' in content['band']['B']['reason'], (
         'The reason for the failure should be recorded'
@@ -476,25 +490,25 @@ def test_fallback(tmp_path, caplog):
 def test_sample_checks(tmp_path, caplog):
     design = [('B', 1.1, 4.), ('B', 1.6, 5.), ('V', 1.1, 4.), ('V', 1.6, 5.)]
     table, rdxdir, _ = write_night(tmp_path, design)
-    pipeline.calibrate_all(table, rdxdir=rdxdir)
-    content, _ = pipeline.read_calibration(calibration_file(rdxdir))
+    calibrate.calibrate_all(table, rdxdir=rdxdir)
+    content, _ = calibrate.read_calibration(calibration_file(rdxdir))
     assert content['band']['B']['status'] == 'ok', 'Eight standards should be sufficient'
 
     with caplog.at_level(logging.WARNING):
-        pipeline.calibrate_all(table, rdxdir=rdxdir, min_stars=10, overwrite=True, force=True)
-    content, _ = pipeline.read_calibration(calibration_file(rdxdir))
+        calibrate.calibrate_all(table, rdxdir=rdxdir, min_stars=10, overwrite=True, force=True)
+    content, _ = calibrate.read_calibration(calibration_file(rdxdir))
     assert content['band']['B']['status'] == 'ok' and 'fewer than 10' in caplog.text, (
         '--force should downgrade the minimum-stars error to a warning'
     )
     with pytest.raises(PipnickDataModelError):
-        pipeline.calibrate_all(table, rdxdir=rdxdir, min_stars=10, overwrite=True)
-    content, _ = pipeline.read_calibration(calibration_file(rdxdir))
+        calibrate.calibrate_all(table, rdxdir=rdxdir, min_stars=10, overwrite=True)
+    content, _ = calibrate.read_calibration(calibration_file(rdxdir))
     assert 'fewer than 10' in content['band']['B']['reason'], (
         'Too few stars should fail the band'
     )
     with pytest.raises(PipnickDataModelError):
-        pipeline.calibrate_all(table, rdxdir=rdxdir, min_color_span=5., overwrite=True)
-    content, _ = pipeline.read_calibration(calibration_file(rdxdir))
+        calibrate.calibrate_all(table, rdxdir=rdxdir, min_color_span=5., overwrite=True)
+    content, _ = calibrate.read_calibration(calibration_file(rdxdir))
     assert 'color span' in content['band']['B']['reason'], (
         'A small color span should fail the band'
     )
@@ -509,11 +523,11 @@ def test_band_failure_isolated(tmp_path):
     phot['flags'][3:len(STARS)] = 1
     phot.write(pfile, format='ascii.ecsv', overwrite=True)
     terms = ['zp', 'airmass', 'color', 'color2']
-    pipeline.calibrate_all(
+    calibrate.calibrate_all(
         table, rdxdir=rdxdir, terms=terms, min_airmass_span=0., min_color_span=0., force=True,
         fallback=False
     )
-    content, _ = pipeline.read_calibration(calibration_file(rdxdir))
+    content, _ = calibrate.read_calibration(calibration_file(rdxdir))
     assert content['band']['V']['status'] == 'ok', 'V should be calibrated'
     assert content['band']['B']['status'] == 'failed', (
         'A band with too few measurements for its terms should fail, even with --force'
@@ -527,8 +541,8 @@ def test_degenerate_terms(tmp_path):
     # B has a single airmass, so its zero point and extinction are degenerate
     design = [('B', 1.1, 4.), ('V', 1.1, 4.), ('V', 1.6, 5.)]
     table, rdxdir, _ = write_night(tmp_path, design)
-    pipeline.calibrate_all(table, rdxdir=rdxdir, min_airmass_span=0., fallback=False)
-    content, _ = pipeline.read_calibration(calibration_file(rdxdir))
+    calibrate.calibrate_all(table, rdxdir=rdxdir, min_airmass_span=0., fallback=False)
+    content, _ = calibrate.read_calibration(calibration_file(rdxdir))
     assert content['band']['V']['status'] == 'ok', 'V should be calibrated'
     assert 'degenerate' in content['band']['B']['reason'], (
         'Degenerate terms should fail the band instead of giving an invalid fit'
@@ -550,19 +564,19 @@ def test_neighbors():
     meta = {'psf': {'fwhm_pix': FWHM}, 'aper_radius_pix': 2 * FWHM}
     phot = phot_table(np.zeros(1), np.zeros(1), np.full(1, -12.), meta)
     add_source(phot, 0, 0.5 * FWHM, 0.03, 2)
-    assert pipeline.neighbors(phot, 0) == (1, 0), (
+    assert calibrate.neighbors(phot, 0) == (1, 0), (
         'A faint later detection very close to a source should be a residual detection'
     )
     add_source(phot, 0, 1.2 * FWHM, 0.05, 1)
-    assert pipeline.neighbors(phot, 0) == (1, 1), (
+    assert calibrate.neighbors(phot, 0) == (1, 1), (
         'A first-iteration neighbor within the aperture should contaminate the source'
     )
     add_source(phot, 0, 1.9 * FWHM, 0.005, 1)
     add_source(phot, 0, 3 * FWHM, 1., 1)
-    assert pipeline.neighbors(phot, 0) == (1, 1), (
+    assert calibrate.neighbors(phot, 0) == (1, 1), (
         'Faint neighbors and neighbors beyond the aperture should not contaminate the source'
     )
-    assert pipeline.neighbors(phot, 0, max_neighbor_flux=0.001) == (1, 2), (
+    assert calibrate.neighbors(phot, 0, max_neighbor_flux=0.001) == (1, 2), (
         'A lower flux limit should make the faint neighbor contaminating'
     )
 
@@ -581,7 +595,7 @@ def test_selection(tmp_path):
     add_source(phot, 4, 0.5 * FWHM, 0.03, 2)
     phot['group_size'][4] = 2
     phot.write(pfile, format='ascii.ecsv', overwrite=True)
-    pipeline.calibrate_all(table, rdxdir=rdxdir)
+    calibrate.calibrate_all(table, rdxdir=rdxdir)
     resid = Table.read(sorted((rdxdir / 'calibrate').glob('*_residuals.ecsv'))[0])
     resid = resid[resid['image'] == pfile.name.replace('_phot.ecsv', '')]
     reasons = dict(zip(resid['star'], resid['reason']))
@@ -608,7 +622,7 @@ def test_inputs(tmp_path, caplog):
     # A missing table is skipped with a warning
     pfiles[0].unlink()
     with caplog.at_level(logging.WARNING):
-        pipeline.calibrate_all(table, rdxdir=rdxdir)
+        calibrate.calibrate_all(table, rdxdir=rdxdir)
     assert 'has no source table; run pipnick_photometry' in caplog.text, (
         'A missing source table should be reported'
     )
@@ -618,7 +632,7 @@ def test_inputs(tmp_path, caplog):
     phot.meta['image_hash'] = 'old'
     phot.write(pfiles[1], format='ascii.ecsv', overwrite=True)
     with pytest.raises(PipnickDataModelError, match='out of date'):
-        pipeline.calibrate_all(table, rdxdir=rdxdir)
+        calibrate.calibrate_all(table, rdxdir=rdxdir)
     # Tables without coordinates are an error
     for pfile in pfiles[1:]:
         phot = Table.read(pfile, format='ascii.ecsv')
@@ -627,12 +641,12 @@ def test_inputs(tmp_path, caplog):
             phot.meta['image_hash'] = good_hash
         phot.write(pfile, format='ascii.ecsv', overwrite=True)
     with pytest.raises(PipnickDataModelError, match='No source table has celestial'):
-        pipeline.calibrate_all(table, rdxdir=rdxdir)
+        calibrate.calibrate_all(table, rdxdir=rdxdir)
 
 
 def test_apply(tmp_path, caplog):
     table, rdxdir, truth = write_night(tmp_path, wide_design(), science=True)
-    pipeline.calibrate_all(table, rdxdir=rdxdir, apply='both')
+    calibrate.calibrate_all(table, rdxdir=rdxdir, apply='both')
 
     # The header keywords reproduce the catalog magnitudes of the standards
     stars = standards()
@@ -649,14 +663,14 @@ def test_apply(tmp_path, caplog):
     )
     assert hdr['PHOTZP'] == hdr['PNCALZP'], 'PHOTZP should equal PNCALZP'
     assert np.all(fits.getdata(path) == 0.), 'The pixels should not be changed'
-    assert _image_hash(hdr) == phot.meta['image_hash'], (
+    assert image_hash(hdr) == phot.meta['image_hash'], (
         'The photometry should still see the image as up to date'
     )
 
     # A rerun with an unchanged calibration leaves the header alone
     caplog.clear()
     with caplog.at_level(logging.INFO):
-        pipeline.calibrate_all(table, rdxdir=rdxdir, apply='image')
+        calibrate.calibrate_all(table, rdxdir=rdxdir, apply='image')
     assert 'header calibration is up to date' in caplog.text, (
         'An unchanged calibration should not rewrite the headers'
     )
@@ -684,7 +698,7 @@ def test_leave_one_out(tmp_path):
     # The outlier has a color in the middle of the range, so that it does not
     # drive the color term
     table, rdxdir, _ = write_night(tmp_path, wide_design(), outlier=STARS[6])
-    pipeline.calibrate_all(table, rdxdir=rdxdir, rej=100.)
+    calibrate.calibrate_all(table, rdxdir=rdxdir, rej=100.)
     resid = Table.read(sorted((rdxdir / 'calibrate').glob('*_residuals.ecsv'))[0])
     resid = resid[resid['band'] == 'V']
     out = resid['star'] == STARS[6]
@@ -702,7 +716,7 @@ def test_leave_one_out(tmp_path):
 
 
 def test_leave_one_out_no_dof(tmp_path):
-    loo = pipeline._leave_one_out
+    loo = calibrate._leave_one_out
     meas = Table(
         {
             'star': ['a', 'b', 'c'], 'airmass': [1.1, 1.5, 2.], 'color': [0.1, 0.5, 1.],
@@ -724,11 +738,11 @@ def test_leave_one_out_no_dof(tmp_path):
 def test_aperture(tmp_path, caplog):
     table, rdxdir, _ = write_night(tmp_path, wide_design())
     with caplog.at_level(logging.WARNING):
-        pipeline.calibrate_all(table, rdxdir=rdxdir, mag='aper')
+        calibrate.calibrate_all(table, rdxdir=rdxdir, mag='aper')
     assert 'without an aperture correction' in caplog.text, (
         'Calibrating aperture magnitudes should warn about the aperture correction'
     )
-    content, _ = pipeline.read_calibration(calibration_file(rdxdir))
+    content, _ = calibrate.read_calibration(calibration_file(rdxdir))
     assert content['calibration']['magnitude'] == 'aper', 'The magnitude should be recorded'
     assert 'without an aperture correction' in calibration_file(rdxdir).read_text(), (
         'The calibration file should warn about the aperture correction'
@@ -739,7 +753,7 @@ def test_non_ubvri(tmp_path, caplog):
     design = wide_design() + [("i'", 1.2, 4.5)]
     table, rdxdir, _ = write_night(tmp_path, design)
     with caplog.at_level(logging.WARNING):
-        pipeline.calibrate_all(table, rdxdir=rdxdir, apply='image')
+        calibrate.calibrate_all(table, rdxdir=rdxdir, apply='image')
     assert "cannot be calibrated: calibration currently requires UBVRI" in caplog.text, (
         'A non-UBVRI filter should be skipped with a warning'
     )
@@ -748,30 +762,33 @@ def test_non_ubvri(tmp_path, caplog):
 
 
 def test_parse_fix():
-    fix = pipeline.parse_fix(['airmass=nominal', 'color=0.03', 'color2=B:0.01,V:0.02'])
+    fix = calibrate.parse_fix(['airmass=nominal', 'color=0.03', 'color2=B:0.01,V:0.02'])
     assert fix == {'airmass': 'nominal', 'color': 0.03, 'color2': {'B': 0.01, 'V': 0.02}}, (
         'The fixed terms should be parsed'
     )
     for bad in [['foo=1'], ['color'], ['color=abc']]:
         with pytest.raises(PipnickParameterError):
-            pipeline.parse_fix(bad)
+            calibrate.parse_fix(bad)
     with pytest.raises(PipnickParameterError):
-        pipeline._resolve_fixed({'color': 'nominal'}, 'B', ['zp', 'color'], {'B': 0.3})
+        calibrate._resolve_fixed({'color': 'nominal'}, 'B', ['zp', 'color'], {'B': 0.3})
 
 
 def test_toml_round_trip(tmp_path):
     content = {
-        'calibration': {'setup': 's', 'night': '2026-08-20', 'magnitude': 'psf',
-                        'input_hash': 'abc'},
+        'calibration': {
+            'setup': 's', 'night': '2026-08-20', 'magnitude': 'psf', 'input_hash': 'abc'
+        },
         'band': {
-            'V': {'status': 'ok', 'filter': 'V', 'color': 'B-V', 'terms': ['zp', 'color'],
-                  'coefficients': [-24.123456789, 0.1], 'errors': [0.001, 0.],
-                  'source': ['fit', 'fixed'], 'covariance': [[1e-6, 0.], [0., 0.]]}
+            'V': {
+                'status': 'ok', 'filter': 'V', 'color': 'B-V', 'terms': ['zp', 'color'],
+                'coefficients': [-24.123456789, 0.1], 'errors': [0.001, 0.],
+                'source': ['fit', 'fixed'], 'covariance': [[1e-6, 0.], [0., 0.]]
+            }
         }
     }
     path = tmp_path / 'cal.toml'
-    pipeline.write_calibration(path, content)
-    parsed, edited = pipeline.read_calibration(path)
+    calibrate.write_calibration(path, content)
+    parsed, edited = calibrate.read_calibration(path)
     assert not edited, 'A written file should not be reported as edited'
     assert parsed['band']['V']['coefficients'] == [-24.123456789, 0.1], (
         'The coefficients should be written exactly'
@@ -780,4 +797,4 @@ def test_toml_round_trip(tmp_path):
         'The file should be valid TOML'
     )
     path.write_text(path.read_text().replace('0.1]', '0.2]'))
-    assert pipeline.read_calibration(path)[1], 'An edited file should be reported as edited'
+    assert calibrate.read_calibration(path)[1], 'An edited file should be reported as edited'

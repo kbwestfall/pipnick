@@ -58,7 +58,7 @@ from pipnick.mosaic.psfmatch import (
 from pipnick.mosaic.scaling import mutual_matches, solve_offsets
 from pipnick.photometry.aperture_photometry import aperture_analysis
 from pipnick.photometry.psf_photometry import build_moffat_psf_model, subtract_background
-from pipnick.pipelines.photometry import _image_hash, _wcs_hash
+from pipnick.pipelines.photometry import image_hash, solution_hash
 from pipnick.pipelines.reduction import load_setup, plan_products, table_values
 from pipnick.pkg.exceptions import (
     PipnickDataModelError, PipnickParameterError, PipnickPathError
@@ -166,8 +166,8 @@ def collect_images(tables, require_photometry=True):
             if pfile.is_file():
                 phot = Table.read(pfile, format='ascii.ecsv')
                 if (
-                    phot.meta.get('image_hash') != _image_hash(hdr)
-                    or phot.meta.get('wcs_hash') != _wcs_hash(hdr)
+                    phot.meta.get('image_hash') != image_hash(hdr)
+                    or phot.meta.get('wcs_hash') != solution_hash(hdr)
                 ):
                     raise PipnickDataModelError(
                         f'The source table {pfile.name} is out of date; rerun '
@@ -310,7 +310,9 @@ def group_wcs(images, wcs_file, pixel_scale=None, overwrite=False):
     """
     ghash = _hash(
         {
-            'images': sorted([str(image['path']), _wcs_hash(image['hdr'])] for image in images),
+            'images': sorted(
+                [str(image['path']), solution_hash(image['hdr'])] for image in images
+            ),
             'pixel_scale': pixel_scale
         }
     )
@@ -618,12 +620,12 @@ def build_mosaic(images, wcs_out, shape_out, target, settings):
     inputs['table'] = [image['table'].name for image in images]
     inputs['setup'] = [image['setup'] for image in images]
     inputs['night'] = [image['night'] for image in images]
-    inputs['image_hash'] = [_image_hash(image['hdr']) for image in images]
-    inputs['wcs_hash'] = [_wcs_hash(image['hdr']) for image in images]
+    inputs['image_hash'] = [image_hash(image['hdr']) for image in images]
+    inputs['wcs_hash'] = [solution_hash(image['hdr']) for image in images]
     inputs['exptime'] = [image['exptime'] for image in images]
     inputs['airmass'] = [-1. if image['airmass'] is None else image['airmass'] for image in images]
     inputs['fwhm_in'] = [
-        _psf(image)[2] if image['phot'] is not None and image['phot'].meta.get('psf') else -1.
+        _psf(image)[2] if image['phot'] is not None and 'psf' in image['phot'].meta else -1.
         for image in images
     ]
     inputs['fwhm_out'] = achieved
@@ -637,8 +639,11 @@ def build_mosaic(images, wcs_out, shape_out, target, settings):
     inputs['reference'] = np.arange(len(images)) == ref
     inputs['weight'] = np.array(weights) / np.max(weights)
     inputs['level'] = levels
-    for name in ['airmass', 'fwhm_in', 'fwhm_out', 'match_ee', 'offset', 'offset_err', 'scale',
-                 'weight', 'level']:
+    formatted = [
+        'airmass', 'fwhm_in', 'fwhm_out', 'match_ee', 'offset', 'offset_err', 'scale', 'weight',
+        'level'
+    ]
+    for name in formatted:
         inputs[name].info.format = '.4f'
     hdus = _product(
         images, mean, var, coverage, expmap, nreject, wcs_out, target, ref, nrej, settings,
@@ -989,7 +994,7 @@ def _image_key(image):
     """
     phot = image['phot']
     return [
-        str(image['path']), _image_hash(image['hdr']), _wcs_hash(image['hdr']),
+        str(image['path']), image_hash(image['hdr']), solution_hash(image['hdr']),
         None if phot is None else phot.meta.get('settings_hash')
     ]
 

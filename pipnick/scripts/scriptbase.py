@@ -10,7 +10,7 @@ Implements base classes for use with scripts.
 
 import argparse
 import datetime
-from functools import partial, reduce
+from functools import partial
 
 from .. import log
 
@@ -78,7 +78,7 @@ class ScriptBase:
             Restrict the width of the formatted help output to be no longer
             than this number of characters, if possible given the help
             formatter.  If None, the width is the same as the terminal width.
-        formatter : argparse.HelpFormatter, optional
+        formatter : :class:`argparse.HelpFormatter`, optional
             Class used to format the help output.
         include_log_options : bool, optional
             Include the options controlling logging.

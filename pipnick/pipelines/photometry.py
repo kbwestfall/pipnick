@@ -86,19 +86,44 @@ def _settings_hash(settings):
     return hashlib.sha1(json.dumps(settings, sort_keys=True).encode()).hexdigest()[:16]
 
 
-def _image_hash(header):
+def image_hash(header):
     """
-    Return the hash of the content of a reduced image, from its provenance
-    keywords (``PNRAWHSH`` and ``PNTABH``; see
-    :func:`~pipnick.pipelines.reduction.reduce_all`).
+    Return the hash of the content of a reduced image.
+
+    The hash combines the provenance keywords of the image (``PNRAWHSH`` and
+    ``PNTABH``; see :func:`~pipnick.pipelines.reduction.reduce_all`), so it
+    changes when the image is reduced from different frames or table values.
+
+    Parameters
+    ----------
+    header : :class:`astropy.io.fits.Header`
+        The header of the reduced image.
+
+    Returns
+    -------
+    str
+        The hash, ``<PNRAWHSH>-<PNTABH>``, with ``none`` for missing keywords.
     """
     return f'{header.get("PNRAWHSH", "none")}-{header.get("PNTABH", "none")}'
 
 
-def _wcs_hash(header):
+def solution_hash(header):
     """
-    Return the hash of the astrometric solution of an image, or ``'none'`` if
-    it has none; see :func:`~pipnick.pipelines.astrometry.apply_wcs`.
+    Return the hash of the astrometric solution of a reduced image.
+
+    Only a solution found by pipnick (with the ``PNASTMTH`` keyword) counts;
+    see :func:`~pipnick.pipelines.astrometry.apply_wcs`.
+
+    Parameters
+    ----------
+    header : :class:`astropy.io.fits.Header`
+        The header of the reduced image.
+
+    Returns
+    -------
+    str
+        The hash of the solution (``PNASTWH``), or ``'none'`` if the image has
+        no solution.
     """
     return header.get('PNASTWH', 'none') if 'PNASTMTH' in header else 'none'
 
@@ -213,14 +238,16 @@ def measure_image(path, values, mjd, settings, scale):
         },
         'aper_radius_pix': float(settings['aper_radius'] * fwhm), 'removed': removed,
         'settings': settings, 'settings_hash': _settings_hash(settings),
-        'image_hash': _image_hash(hdr), 'wcs_method': hdr.get('PNASTMTH', 'none'),
-        'wcs_hash': _wcs_hash(hdr)
+        'image_hash': image_hash(hdr), 'wcs_method': hdr.get('PNASTMTH', 'none'),
+        'wcs_hash': solution_hash(hdr)
     }
+    if 'PNASTMTH' in hdr:
+        coordinates = 'celestial coordinates from the astrometric solution.'
+    else:
+        coordinates = 'no astrometric solution, so the celestial coordinates are masked.'
     log.info(
         f'{path.name}: measured {len(tbl)} sources; PSF FWHM {fwhm:.2f} pixels '
-        f'({fwhm * scale:.2f} arcsec) from {nstack} stars; '
-        + ('celestial coordinates from the astrometric solution.' if 'PNASTMTH' in hdr
-           else 'no astrometric solution, so the celestial coordinates are masked.')
+        f'({fwhm * scale:.2f} arcsec) from {nstack} stars; {coordinates}'
     )
     return tbl, fit, sub, mask
 
@@ -283,14 +310,27 @@ def vet_sources(phot, shape, fwhm):
     return phot[np.logical_not(failed | outside | moved | nonpositive)], removed
 
 
-def _select(products, selection):
+def select_products(products, selection):
     """
     Select the products to process, by file name, file name without the
     extension, or combination group (``comb_id``).
 
+    Parameters
+    ----------
+    products : list
+        The products; see :func:`~pipnick.pipelines.reduction.plan_products`.
+    selection : list
+        The file names, file names without the extension, or combination
+        groups of the products to select.
+
+    Returns
+    -------
+    list
+        The selected products, in their original order.
+
     Raises
     ------
-    ValueError
+    :exc:`ValueError`
         Raised if an entry does not match any product.
     """
     selected = []
@@ -419,7 +459,7 @@ def photometry_all(
 
     products = [p for p in plan_products(metadata, _rdxdir) if p['frametype'] == 'science']
     if images is not None:
-        products = _select(products, images)
+        products = select_products(products, images)
     settings = {
         'thresh': float(thresh), 'fwhm': float(camera.fwhm_guess if fwhm is None else fwhm),
         'fittype': fittype, 'mode': mode, 'stack': stack, 'group': bool(group),
@@ -452,11 +492,11 @@ def photometry_all(
         if ofile.is_file() and not overwrite:
             existing = Table.read(ofile, format='ascii.ecsv')
             if (
-                existing.meta.get('image_hash') == _image_hash(hdr)
+                existing.meta.get('image_hash') == image_hash(hdr)
                 and existing.meta.get('settings_hash') == _settings_hash(settings)
             ):
                 row.update(_summary_values(existing))
-                if existing.meta.get('wcs_hash') == _wcs_hash(hdr):
+                if existing.meta.get('wcs_hash') == solution_hash(hdr):
                     log.info(f'{ofile.name} is up to date.')
                     row['status'] = 'up to date'
                 else:
@@ -464,7 +504,7 @@ def photometry_all(
                         hdr, np.asarray(existing['x']), np.asarray(existing['y'])
                     )
                     existing.meta['wcs_method'] = hdr.get('PNASTMTH', 'none')
-                    existing.meta['wcs_hash'] = _wcs_hash(hdr)
+                    existing.meta['wcs_hash'] = solution_hash(hdr)
                     existing.write(ofile, format='ascii.ecsv', overwrite=True)
                     log.info(
                         f'The astrometric solution of {path.name} changed; updated the '
@@ -528,10 +568,10 @@ def _summarize(summary, phot_dir):
         tbl[name].info.format = '.2f'
     phot_dir.mkdir(parents=True, exist_ok=True)
     tbl.write(phot_dir / 'summary.ecsv', format='ascii.ecsv', overwrite=True)
+    columns = ['image', 'status', 'nsources', 'fwhm_pix', 'fwhm_arcsec', 'nstack', 'wcs']
     log.info(
         'Photometry summary (also in photometry/summary.ecsv):\n'
-        + '\n'.join(tbl['image', 'status', 'nsources', 'fwhm_pix', 'fwhm_arcsec', 'nstack',
-                        'wcs'].pformat(max_lines=-1, max_width=-1))
+        + '\n'.join(tbl[columns].pformat(max_lines=-1, max_width=-1))
     )
     for row in tbl:
         if row['status'] == 'failed':

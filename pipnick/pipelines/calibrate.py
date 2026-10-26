@@ -50,7 +50,7 @@ from pipnick.photometry.extinction import nominal_extinction
 from pipnick.photometry.landolt import (
     catalog_color, catalog_path, load_landolt, match_landolt, parse_color
 )
-from pipnick.pipelines.photometry import _image_hash, _select, _wcs_hash
+from pipnick.pipelines.photometry import image_hash, select_products, solution_hash
 from pipnick.pipelines.reduction import load_setup, plan_products
 from pipnick.pkg.exceptions import (
     PipnickDataModelError, PipnickParameterError, PipnickPathError
@@ -390,8 +390,11 @@ def _measurement_table(rows, sys_err):
         np.ma.filled(tbl['mag_inst_err'], 0.)**2 + np.ma.filled(tbl['mag_cat_err'], 0.)**2
         + sys_err**2
     )
-    for name in ['sep', 'airmass', 'mag_cat', 'mag_cat_err', 'color', 'color_err', 'mag_inst',
-                 'mag_inst_err', 'err']:
+    formatted = [
+        'sep', 'airmass', 'mag_cat', 'mag_cat_err', 'color', 'color_err', 'mag_inst',
+        'mag_inst_err', 'err'
+    ]
+    for name in formatted:
         tbl[name].info.format = '.4f'
     tbl['sep'].unit = 'arcsec'
     return tbl
@@ -796,12 +799,12 @@ def _collect_images(products, tag, phot_dir):
         if hdr.get('PNSETUP') != tag:
             raise PipnickDataModelError(f'{path.name} is not from setup {tag}.')
         phot = Table.read(pfile, format='ascii.ecsv')
-        if phot.meta.get('image_hash') != _image_hash(hdr):
+        if phot.meta.get('image_hash') != image_hash(hdr):
             raise PipnickDataModelError(
                 f'The source table {pfile.name} is out of date: {path.name} has changed since '
                 'it was measured.  Rerun pipnick_photometry.'
             )
-        if phot.meta.get('wcs_hash') != _wcs_hash(hdr):
+        if phot.meta.get('wcs_hash') != solution_hash(hdr):
             raise PipnickDataModelError(
                 f'The celestial coordinates in {pfile.name} are out of date: the astrometric '
                 f'solution of {path.name} has changed.  Rerun pipnick_photometry to update '
@@ -1192,7 +1195,7 @@ def calibrate_all(
 
     products = [p for p in plan_products(metadata, _rdxdir) if p['frametype'] == 'science']
     selected = {
-        p['comb_id'] for p in (products if images is None else _select(products, images))
+        p['comb_id'] for p in (products if images is None else select_products(products, images))
     }
     all_images = _collect_images(products, tag, _rdxdir / 'photometry')
     if not any(image['coords'] for image in all_images):
@@ -1217,8 +1220,10 @@ def calibrate_all(
                 'settings': {k: v for k, v in settings.items() if k != 'input_hash'},
                 'fix': _fix, 'nominal': nominal, 'catalog': _file_hash(catalog_path()),
                 'tables': [
-                    [image['phot_file'].name, image['phot'].meta.get('settings_hash'),
-                     image['phot'].meta.get('image_hash'), image['phot'].meta.get('wcs_hash')]
+                    [
+                        image['phot_file'].name, image['phot'].meta.get('settings_hash'),
+                        image['phot'].meta.get('image_hash'), image['phot'].meta.get('wcs_hash')
+                    ]
                     for image in standards
                 ],
                 'bands': sorted({str(i['band']) for i in night_images})
@@ -1578,11 +1583,13 @@ def _summarize(summary, cal_dir):
         tbl[name].info.format = '.3f'
     cal_dir.mkdir(parents=True, exist_ok=True)
     tbl.write(cal_dir / 'summary.ecsv', format='ascii.ecsv', overwrite=True)
+    columns = [
+        'night', 'band', 'status', 'n_stars', 'n_meas', 'n_rejected', 'rms', 'rms_loo',
+        'extinction', 'k_airmass', 'drift', 'file'
+    ]
     log.info(
         'Calibration summary (also in calibrate/summary.ecsv):\n'
-        + '\n'.join(tbl['night', 'band', 'status', 'n_stars', 'n_meas', 'n_rejected', 'rms',
-                        'rms_loo', 'extinction', 'k_airmass', 'drift', 'file']
-                    .pformat(max_lines=-1, max_width=-1))
+        + '\n'.join(tbl[columns].pformat(max_lines=-1, max_width=-1))
     )
     for row in tbl:
         if row['status'] != 'ok':

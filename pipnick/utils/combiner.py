@@ -36,7 +36,7 @@ class Combiner(ccdproc.Combiner):
     ccd_iter : list or generator
         The :class:`astropy.nddata.CCDData` objects to combine.  If any of them
         has no uncertainty, the uncertainties cannot be propagated.
-    dtype : str or `numpy.dtype` or None, optional
+    dtype : str or :class:`numpy.dtype` or None, optional
         See :class:`ccdproc.Combiner`.
 
     Attributes

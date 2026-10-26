@@ -1,7 +1,7 @@
 """
 Fit, construct, and characterize astrometric (WCS) solutions.
 
-All pixel coordinates are 0-based (the numpy convention, as returned by
+All pixel coordinates are 0-based (the ``numpy`` convention, as returned by
 ``photutils``); the WCS objects follow the FITS (1-based) convention internally,
 as usual for :class:`astropy.wcs.WCS`.
 """
@@ -22,11 +22,12 @@ from pipnick.pkg.exceptions import PipnickDataModelError
 def _fit_wcs_from_points(x, y, coords, sip_degree=None):
     """
     Call :func:`astropy.wcs.utils.fit_wcs_from_points` for 0-based pixel
-    coordinates, independent of the astropy version.
+    coordinates, independent of the ``astropy`` version.
 
-    Versions of astropy with the ``origin`` argument (added after astropy 8.0)
-    are told that the coordinates are 0-based.  In earlier versions, the fit
-    is performed for 0-based coordinates, so the argument is not needed.
+    Versions of ``astropy`` with the ``origin`` argument (added after
+    ``astropy`` 8.0) are told that the coordinates are 0-based.  In earlier
+    versions, the fit is performed for 0-based coordinates, so the argument is
+    not needed.
     """
     if 'origin' in inspect.signature(fit_wcs_from_points).parameters:
         return fit_wcs_from_points((x, y), coords, origin=0, sip_degree=sip_degree)

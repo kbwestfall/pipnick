@@ -3,7 +3,7 @@ Test configuration.
 
 No test may submit a job to astrometry.net or query the Gaia archive.  In
 addition to ``pytest-remotedata``, which blocks internet access for the test
-session (``remote_data_strict = true`` in ``pyproject.toml``) unless pytest
+session (``remote_data_strict = true`` in ``pyproject.toml``) unless ``pytest``
 is run with ``--remote-data``, every method that would contact either service
 is replaced by one that raises an error.
 """

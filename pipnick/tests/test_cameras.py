@@ -20,7 +20,7 @@ def c2_header(**kwargs):
             'NAXIS1': 1056, 'NAXIS2': 1024, 'INSTRUME': 'Nickel Direct Camera',
             'DSENSOR': 'Loral 2Kx2K', 'OBSTYPE': 'OBJECT', 'OBJECT': 'NGC_6543',
             'EXPTIME': 60, 'FILTNAM': 'R', 'CDELT1U': -2, 'CDELT2U': -2, 'READ-SPD': 80,
-            'GAIN': 1, 'DATASEC': '[1:1024,1:1024]', 'COVER': 32,
+            'GAIN': 1, 'DATASEC': '[1:1024,1:1024]', 'COVER': 32
         }
     )
     hdr.update(kwargs)
@@ -38,7 +38,7 @@ def andor_header(binning=2, window=None, **kwargs):
             'CAMID': 'headmodel DZ936_BV serial 31382', 'INSTRUME': 'Direct',
             'OBSTYPE': '?', 'OBJECT': 'M11 V', 'XPOSURE': 30.005, 'FILTER': 'V',
             'CDELT1U': binning, 'CDELT2U': binning, 'AMPCONF': '1.0MHz',
-            'WINDOW': f'{x1} {x2} {y1} {y2}',
+            'WINDOW': f'{x1} {x2} {y1} {y2}'
         }
     )
     hdr.update(kwargs)
@@ -168,7 +168,7 @@ def test_c2_sections():
     'binning, datasec, biassec', [
         (1, '[20:2067,1:2048]', '[2075:2088,1:2048]'),
         (2, '[11:1033,1:1024]', '[1038:1044,1:1024]'),
-        (4, '[6:516,1:512]', '[520:522,1:512]'),
+        (4, '[6:516,1:512]', '[520:522,1:512]')
     ]
 )
 def test_andor_sections(binning, datasec, biassec):
@@ -221,7 +221,7 @@ def test_c2_bpm():
         (1024, 1056), bad_cols=[0, 255, 256, 783, 784, 1002, 1023],
         bad_regions=[
             np.array([[-0.5, 33.5], [34.5, -0.5], [-0.5, -0.5]]),
-            np.array([[-0.5, 960.5], [64.5, 1024.5], [-0.5, 1024.5]]),
+            np.array([[-0.5, 960.5], [64.5, 1024.5], [-0.5, 1024.5]])
         ]
     )
     legacy[0] = True
@@ -259,7 +259,7 @@ def test_andor_bpm():
         ({'OBJECT': 'Focus test B', 'EXPTIME': 10}, 'focus'),
         ({'OBJECT': 'Point', 'EXPTIME': 10}, 'pointing'),
         ({'OBJECT': 'test', 'EXPTIME': 10}, 'test'),
-        ({'OBJECT': '109_199', 'EXPTIME': 30}, 'science'),
+        ({'OBJECT': '109_199', 'EXPTIME': 30}, 'science')
     ]
 )
 def test_c2_classify(kwargs, frametype):
@@ -288,7 +288,7 @@ def test_c2_classify(kwargs, frametype):
         # An explicit frame-type keyword takes precedence
         ({'OBJECT': 'Northern Local Void', 'XPOSURE': 3.0, 'IMAGETYP': 'domeflat'}, 'domeflat'),
         # ... unless its value is not recognized
-        ({'OBJECT': 'Northern Local Void', 'XPOSURE': 3.0, 'IMAGETYP': 'other'}, 'science'),
+        ({'OBJECT': 'Northern Local Void', 'XPOSURE': 3.0, 'IMAGETYP': 'other'}, 'science')
     ]
 )
 def test_andor_classify(kwargs, frametype):

@@ -29,7 +29,6 @@ class Reduce(scriptbase.ScriptBase):
                  'If not provided, the path saved in the metadata file is used or, if there is '
                  'none, the parent directory of the raw data directory.'
         )
-#        parser.add_argument('-d', '--display', action='store_true', help="Display reduced images")
         parser.add_argument(
             '-o', '--overwrite', default=False, action='store_true',
             help='Reprocess all outputs, even if they are up to date.'
@@ -39,14 +38,9 @@ class Reduce(scriptbase.ScriptBase):
     @classmethod
     def main(cls, args):
         from pipnick.pipelines.reduction import reduce_all
-        from pipnick.utils.display_fits import display_many_nickel
 
         # Initialize logger
         cls.init_log(args)
 
         # Reduce the images
-        red_files = reduce_all(args.raw_table, rdxdir=args.rdxdir, overwrite=args.overwrite)
-
-#        # Display reduced images
-#        if args.display:
-#            display_many_nickel(red_files)
+        reduce_all(args.raw_table, rdxdir=args.rdxdir, overwrite=args.overwrite)

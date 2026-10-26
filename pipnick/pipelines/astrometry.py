@@ -899,15 +899,17 @@ def _summarize(images, astro_dir):
         tbl[name] = np.ma.MaskedArray(tbl[name], mask=np.asarray(tbl[name]) < 0)
     astro_dir.mkdir(parents=True, exist_ok=True)
     tbl.write(astro_dir / 'summary.ecsv', format='ascii.ecsv', overwrite=True)
+    columns = ['image', 'status', 'method', 'reference', 'nmatch', 'rms', 'pointing_error']
     log.info(
         'Astrometry summary (also in astrometry/summary.ecsv):\n'
-        + '\n'.join(tbl['image', 'status', 'method', 'reference', 'nmatch', 'rms',
-                         'pointing_error'].pformat(max_lines=-1, max_width=-1))
+        + '\n'.join(tbl[columns].pformat(max_lines=-1, max_width=-1))
     )
     for row in tbl:
         if row['status'] == 'unsolved':
-            log.warning(f'{row["image"]} is not solved: {row["reason"]}  Suggestion: '
-                        f'{row["suggestion"]}.')
+            log.warning(
+                f'{row["image"]} is not solved: {row["reason"]}  Suggestion: '
+                f'{row["suggestion"]}.'
+            )
 
 
 def _write_qa(images, astro_dir, previous=None):

@@ -82,28 +82,14 @@ __all__ = [
     'metadata_columns', 'setup_keys', 'setup_file_keys', 'build_camera_datatable',
     'assign_setups', 'setup_tag', 'setup_file_name', 'split_by_setup', 'find_setup_files',
     'write_metadata', 'read_metadata', 'update_metadata_meta', 'summarize', 'build_metadata',
-    'frame_path', 'default_table_name', 'mosaic_columns', 'add_mosaic_columns', 'assign_mosaics'
+    'frame_path', 'default_table_name', 'mosaic_columns', 'add_mosaic_columns', 'assign_mosaics',
+    'safe_name', 'filter_name'
 ]
 
 metadata_columns = {
-    'file': str,
-    'frametype': str,
-    'setup': str,
-    'object': str,
-    'filter': str,
-    'exptime': float,
-    'airmass': float,
-    'ra': str,
-    'dec': str,
-    'date': str,
-    'mjd': float,
-    'xbin': int,
-    'ybin': int,
-    'readmode': str,
-    'naxis1': int,
-    'naxis2': int,
-    'window': str,
-    'note': str,
+    'file': str, 'frametype': str, 'setup': str, 'object': str, 'filter': str, 'exptime': float,
+    'airmass': float, 'ra': str, 'dec': str, 'date': str, 'mjd': float, 'xbin': int,
+    'ybin': int, 'readmode': str, 'naxis1': int, 'naxis2': int, 'window': str, 'note': str
 }
 """
 The columns of the metadata table, in order, and their data types.
@@ -177,28 +163,28 @@ def _column(name, values):
     return MaskedColumn(data, name=name, mask=mask) if np.any(mask) else Column(data, name=name)
 
 
-def _safe_name(value):
+def safe_name(value):
     """
     Convert a string for use in a file name.
 
     Spaces are replaced by underscores, and any character other than letters,
     digits, underscores, periods, plus signs, and minus signs is removed.  For
-    example, ``NGC 7331 I`` becomes ``NGC_7331_I``.  See :func:`_filter_name`
+    example, ``NGC 7331 I`` becomes ``NGC_7331_I``.  See :func:`filter_name`
     for filters.
     """
     return re.sub(r'[^A-Za-z0-9_.+-]', '', str(value).strip().replace(' ', '_'))
 
 
-def _filter_name(filt):
+def filter_name(filt):
     """
     Convert a filter name for use in a file name.
 
     A prime is replaced by ``p``, so that primed filters are distinct from the
     unprimed filters with the same letter; e.g., ``i'`` becomes ``ip``, while
-    ``i`` is unchanged.  The result is then converted by :func:`_safe_name`, or
+    ``i`` is unchanged.  The result is then converted by :func:`safe_name`, or
     is ``none`` if the filter is unknown.
     """
-    name = _safe_name(str(filt).replace("'", 'p'))
+    name = safe_name(str(filt).replace("'", 'p'))
     return 'none' if len(name) == 0 else name
 
 
@@ -419,11 +405,11 @@ def assign_mosaics(tbl, commented=None, radius=None):
 
         - ``wcs_group``: the most common object name in the pointing group,
           without a trailing filter name (see :func:`_strip_filter`), made
-          safe for file names (see :func:`_safe_name`), e.g. ``NGC_7331``,
+          safe for file names (see :func:`safe_name`), e.g. ``NGC_7331``,
           with ``_1``, ``_2``, etc. appended if several pointing groups have
           the same name;
         - ``mosaic``: ``<wcs_group>_<filter>``, e.g. ``NGC_7331_V`` (see
-          :func:`_filter_name`).
+          :func:`filter_name`).
 
     A filter with only one image (or combination group) in a pointing group
     is not mosaicked, so it is not labeled.  Because the labels depend only on
@@ -489,7 +475,7 @@ def assign_mosaics(tbl, commented=None, radius=None):
             _strip_filter(tbl['object'][i], tbl['filter'][i])
             for i, q in zip(good, pointing) if q == p and tbl['object'][i] is not np.ma.masked
         ]
-        name = _safe_name(max(objects, key=objects.count)) if len(objects) > 0 else 'field'
+        name = safe_name(max(objects, key=objects.count)) if len(objects) > 0 else 'field'
         names[p] = 'field' if len(name) == 0 else name
     counts = {n: list(names.values()).count(n) for n in set(names.values())}
     seen = {}
@@ -505,7 +491,7 @@ def assign_mosaics(tbl, commented=None, radius=None):
     wcs_group = np.array(tbl['wcs_group'], dtype=object)
     members = {}
     for i, p in zip(good, pointing):
-        filt = _filter_name('' if tbl['filter'][i] is np.ma.masked else tbl['filter'][i])
+        filt = filter_name('' if tbl['filter'][i] is np.ma.masked else tbl['filter'][i])
         members.setdefault((p, filt), []).append(int(tbl['comb_id'][i]))
     nassigned = 0
     for (p, filt), comb_ids in members.items():

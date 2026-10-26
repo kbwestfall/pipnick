@@ -190,7 +190,7 @@ def icrs_header(header):
     its solutions (see ``util/sip_qfits.c`` in the astrometry.net source), and
     its web API has no setting to request another frame.  By the FITS WCS
     standard, a header with ``EQUINOX`` of 1984 or later and no ``RADESYS``
-    is in the FK5 frame, so astropy reads (and writes) these solutions as
+    is in the FK5 frame, so ``astropy`` reads (and writes) these solutions as
     FK5 J2000.
 
     However, astrometry.net fits its solutions to index files built from
@@ -277,8 +277,8 @@ def propagate_proper_motion(catalog, epoch):
     pmdec = np.ma.filled(np.ma.asarray(catalog['pmdec'], dtype=float), 0.)
     dt = epoch - np.asarray(catalog['ref_epoch'], dtype=float)
     dec = np.asarray(catalog['dec'], dtype=float) + pmdec * dt / 3.6e6
-    ra = np.asarray(catalog['ra'], dtype=float) \
-        + pmra * dt / 3.6e6 / np.cos(np.radians(np.asarray(catalog['dec'], dtype=float)))
+    cosdec = np.cos(np.radians(np.asarray(catalog['dec'], dtype=float)))
+    ra = np.asarray(catalog['ra'], dtype=float) + pmra * dt / 3.6e6 / cosdec
     return SkyCoord(ra, dec, unit='deg')
 
 

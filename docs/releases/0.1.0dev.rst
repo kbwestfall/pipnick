@@ -70,6 +70,13 @@ Breaking Changes
   ``reject_outliers``, ``design_matrix``, ``zero_point``, and
   ``iterate_colors``.
 
+- Removed the unused modules ``pipnick.utils.graphs``, ``pipnick.utils.log``,
+  ``pipnick.utils.display_fits``, and ``pipnick.utils.fits_class``
+  (``Fits_Simple``), the unused functions ``get_param_list``,
+  ``get_apertures``, and ``plot_sources`` of ``pipnick.photometry.fit``,
+  ``FitEllipticalMoffat2D.get_orig_phi``, ``pipnick.pkg.logger.clear_text_color``,
+  and ``PipnickCodingError``.
+
 Dependency Changes
 ------------------
 
@@ -84,6 +91,8 @@ Dependency Changes
   nominal extinction.
 
 - Requires ``reproject>=0.14``, for the mosaics.
+
+- No longer requires ``IPython``, ``loess``, ``pandas``, or ``requests``.
 
 Functionality/Performance Improvements and Additions
 ----------------------------------------------------
@@ -283,6 +292,12 @@ Functionality/Performance Improvements and Additions
 Under-the-hood Improvements
 ---------------------------
 
+- Functions used by more than one module are public: ``metadata.safe_name``
+  and ``metadata.filter_name``, and ``pipelines.photometry.image_hash``,
+  ``solution_hash``, and ``select_products``.  The code follows the
+  conventions in ``AGENTS.md``, which no longer allow private functions to be
+  imported into other modules.
+
 - The tests block internet access (``remote_data_strict``), and replace every
   method that would contact astrometry.net or the Gaia archive.
 
@@ -312,7 +327,8 @@ Documentation Updates
   documentation through ``intersphinx``.
 
 - Added ``LICENSE.rst`` (BSD 3-Clause), ``licenses/README.rst`` describing the
-  terms of adapted (PypeIt) and dependent (``loess``) third-party code, and
+  terms of adapted (PypeIt, astropy, and ``mangadap``) code and of the
+  dependencies, and
   ``CITATION.cff``.
 
 Bug Fixes
