@@ -4,7 +4,6 @@ prune build
 prune claude
 prune dist
 prune docs
-prune examples
 
 # Remove file types
 global-exclude *.pyc *.o *.so *.DS_Store *.ipynb
