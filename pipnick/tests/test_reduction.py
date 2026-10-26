@@ -102,8 +102,10 @@ def test_comb_groups(caplog):
     check_comb_groups(comb_table([('domeflat', 1, 'V', 3.), ('skyflat', 2, 'V', 3.)]), 'test')
 
     # Violations are all listed together
-    rows = [('bias', 1, 'V', 0.2), ('bias', 2, 'V', 0.2), ('science', 3, 'V', 30.),
-            ('science', 3, 'R', 30.)]
+    rows = [
+        ('bias', 1, 'V', 0.2), ('bias', 2, 'V', 0.2), ('science', 3, 'V', 30.),
+        ('science', 3, 'R', 30.)
+    ]
     with pytest.raises(PipnickDataModelError) as err:
         check_comb_groups(comb_table(rows), 'test.ecsv')
     assert 'more than one bias group' in str(err.value) and 'mixes filters' in str(err.value), (
@@ -120,9 +122,9 @@ def test_comb_groups(caplog):
 
 
 def test_names():
-    assert reduction._safe_name('NGC 7331 I') == 'NGC_7331_I', 'Spaces should become underscores'
-    assert reduction._safe_name("Barnard's") == 'Barnards', 'Quotes should be removed'
-    assert reduction._safe_name('SN2026abc+1.5-x/y') == 'SN2026abc+1.5-xy', (
+    assert metadata.safe_name('NGC 7331 I') == 'NGC_7331_I', 'Spaces should become underscores'
+    assert metadata.safe_name("Barnard's") == 'Barnards', 'Quotes should be removed'
+    assert metadata.safe_name('SN2026abc+1.5-x/y') == 'SN2026abc+1.5-xy', (
         'Only letters, digits, underscores, periods, plus, and minus should be kept'
     )
     assert reduction._dark_name(120.004) == 'Dark_120s.fits', (
@@ -148,8 +150,10 @@ def test_names():
         {
             'object': ['M11 V', 'focus', 'M11 V', 'M 11'], 'filter': ["i'"] * 4,
             'comb_id': [7, 7, 7, 7],
-            'date': ['2026-08-21T00:10:00.000', '2026-08-20T23:50:00.000',
-                     '2026-08-21T00:20:00.000', '2026-08-20T23:40:00.000'],
+            'date': [
+                '2026-08-21T00:10:00.000', '2026-08-20T23:50:00.000', '2026-08-21T00:20:00.000',
+                '2026-08-20T23:40:00.000'
+            ],
             'mjd': [3., 1., 4., 0.]
         }
     )

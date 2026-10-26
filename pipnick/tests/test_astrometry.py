@@ -269,8 +269,9 @@ def test_fit_wcs_origin(monkeypatch):
     # Versions of astropy with the origin argument must be told the pixels are 0-based
     received = {}
 
-    def fake_fit(xy, world_coords, origin=None, proj_point='center', projection='TAN',
-                 sip_degree=None):
+    def fake_fit(
+        xy, world_coords, origin=None, proj_point='center', projection='TAN', sip_degree=None
+    ):
         received['origin'] = origin
         return true_wcs(FIELD_CENTER)
 
@@ -678,8 +679,11 @@ def test_wide_search_disabled(tmp_path):
 def test_invalidate_chains():
     # C was bootstrapped from B, which was bootstrapped from A
     images = []
-    for name, method, ref in [('a', 'astrometry.net', None), ('b', 'bootstrap', 'a.fits'),
-                              ('c', 'bootstrap', 'b.fits'), ('d', 'bootstrap', 'a.fits')]:
+    chain = [
+        ('a', 'astrometry.net', None), ('b', 'bootstrap', 'a.fits'), ('c', 'bootstrap', 'b.fits'),
+        ('d', 'bootstrap', 'a.fits')
+    ]
+    for name, method, ref in chain:
         hdr = fits.Header({'PNASTMTH': method})
         if ref is not None:
             hdr['PNASTREF'] = ref
@@ -741,8 +745,9 @@ def test_gaia_catalog(tmp_path, monkeypatch):
     assert np.all(sep.arcsec < 1e-6), 'Positions should be propagated to the epoch'
 
     # A covered cone reuses the saved query, which is not modified
-    catalog.sources(FIELD_CENTER.directional_offset_by(0. * units.deg, 0.5 * units.arcmin),
-                    1. / 60, 2026.)
+    catalog.sources(
+        FIELD_CENTER.directional_offset_by(0. * units.deg, 0.5 * units.arcmin), 1. / 60, 2026.
+    )
     assert catalog.nqueries == 1, 'A covered cone should not be queried again'
     assert saved.read_bytes() == content, 'The saved query result should never be modified'
     index = Table.read(tmp_path / 'astrometry' / 'gaia_queries.ecsv')
@@ -871,7 +876,7 @@ def test_qa_and_detection(tmp_path, caplog):
     astrometry_all(
         table, rdxdir=rdxdir, dry_run=True, qa=True, max_sources=20, detect_thresh=5.
     )
-    sources = Table.read(next((rdxdir / 'astrometry' / 'dry_run').glob('*.ecsv')))
+    sources = Table.read(sorted((rdxdir / 'astrometry' / 'dry_run').glob('*.ecsv'))[0])
     assert len(sources) == 20, 'The number of detected sources should be limited'
     assert len(list((rdxdir / 'astrometry' / 'qa').glob('*.png'))) == 4, (
         'A dry run should write a QA figure for every image'

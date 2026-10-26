@@ -158,16 +158,20 @@ def build_catalog(ofile=None, match_radius=1.):
     common.update({f'e_{key}': f'e_{key}' for key in common})
     l09 = _ingest(
         vizier.get_catalogs('J/AJ/137/4186')['J/AJ/137/4186/stars'],
-        {'name': 'Name', 'V': 'Vmag', 'e_V': 'e_Vmag', 'nobs': 'Nobs', 'nnight': 'Nnig',
-         **common},
+        {
+            'name': 'Name', 'V': 'Vmag', 'e_V': 'e_Vmag', 'nobs': 'Nobs', 'nnight': 'Nnig',
+            **common
+        },
         'Landolt (2009, AJ, 137, 4186)'
     )
     l13_names = {key: f'<{key}>' for key in ['B-V', 'U-B', 'V-R', 'R-I', 'V-I']}
     l13_names.update({f'e_{key}': f'e_<{key}>' for key in l13_names})
     l13 = _ingest(
         vizier.get_catalogs('J/AJ/146/131')['J/AJ/146/131/standards'],
-        {'name': 'Name', 'V': '<Vmag>', 'e_V': 'e_<Vmag>', 'nobs': 'No', 'nnight': 'Nn',
-         **l13_names},
+        {
+            'name': 'Name', 'V': '<Vmag>', 'e_V': 'e_<Vmag>', 'nobs': 'No', 'nnight': 'Nn',
+            **l13_names
+        },
         'Landolt (2013, AJ, 146, 131)'
     )
 

@@ -69,6 +69,12 @@
   imports a `ScriptBase` subclass needs belong inside its `main`, because every
   registered entry point is imported when the console scripts are resolved, so
   a module-level import of the heavy machinery makes `--help` pay for it.
+- **Never import private functions into other modules.** A function (or
+  class, or variable) with a leading underscore is private to its module: do
+  not import it elsewhere, or call it as `module._name`. If another module
+  needs it, make it public by removing the underscore (and document it as part
+  of the interface). The exception is test code, which may exercise private
+  helpers directly.
 - **Avoid `import ... as`.** Industry-standard aliases (`import numpy as np`)
   are fine; otherwise import the module or name directly.
 - **Any docstring containing a backslash is an r-string** (`r"""`), so that

@@ -6,7 +6,10 @@ authors = [
     { name = "Kyle B. Westfall", email = "westfall@ucolick.org" },
 ]
 license = "BSD-3-Clause"
-license-files = ["LICENSE.rst", "licenses/PYPEIT_LICENSE.rst", "licenses/ASTROPY_LICENSE.rst"]
+license-files = [
+    "LICENSE.rst", "licenses/PYPEIT_LICENSE.rst", "licenses/ASTROPY_LICENSE.rst",
+    "licenses/MANGADAP_LICENSE.rst"
+]
 description = "Photometric Pipeline for the Nickel Telescope"
 keywords = [
     "photometry",
@@ -36,14 +39,10 @@ dependencies = [
     "astropy>=7.0",
     "astroquery>=0.4",
     "ccdproc>=2.4",
-    "IPython>=8.0.0",
-    "loess>=2.1",
     "matplotlib>=3.9",
     "numpy>=2.0",
-    "pandas>=2.2",
     "photutils>=3.0",
     "reproject>=0.14",
-    "requests>=2.32",
     "scikit-image>=0.24",
     "scipy>=1.13",
     "speclite>=0.20",

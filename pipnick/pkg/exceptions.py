@@ -8,30 +8,11 @@ Provides pipnick-specific exceptions.
     ``licenses/README.rst``.
 """
 
-__all__ = [
-    'PipnickError',
-    'PipnickCodingError',
-    'PipnickDataModelError',
-    'PipnickPathError',
-    'PipnickParameterError',
-]
+__all__ = ['PipnickError', 'PipnickDataModelError', 'PipnickPathError', 'PipnickParameterError']
 
 
 class PipnickError(Exception):
     """Base class for all pipnick-specific exceptions."""
-    pass
-
-
-class PipnickCodingError(PipnickError):
-    """
-    Raised for a fault in how pipnick itself is written, not in how it is used.
-
-    This marks a condition that no user input can produce: an invariant the code
-    is supposed to maintain, or a branch that should be unreachable.  Raising
-    this type rather than :class:`PipnickParameterError` (or similar) keeps the
-    two audiences apart -- a user seeing this has found a bug to report, not a
-    mistake to correct.
-    """
     pass
 
 

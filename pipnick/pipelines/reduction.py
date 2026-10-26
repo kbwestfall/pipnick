@@ -10,7 +10,6 @@ column of a per-setup metadata file; see :mod:`pipnick.metadata` and
 
 from pathlib import Path
 import hashlib
-import re
 import warnings
 
 import numpy as np
@@ -19,7 +18,6 @@ from astropy.coordinates import SkyCoord
 from astropy.io import fits
 from astropy.nddata import CCDData, StdDevUncertainty
 from astropy.stats import sigma_clip, sigma_clipped_stats
-from astropy.wcs.wcs import FITSFixedWarning
 from astropy import units
 import ccdproc
 
@@ -27,7 +25,7 @@ from pipnick import cameras
 from pipnick.pkg.exceptions import PipnickDataModelError, PipnickPathError
 from pipnick.utils.combiner import Combiner
 from pipnick.metadata import (
-    _filter_name, _safe_name, build_metadata, frame_path, setup_tag, update_metadata_meta
+    filter_name, safe_name, build_metadata, frame_path, setup_tag, update_metadata_meta
 )
 from pipnick import log
 
@@ -123,7 +121,7 @@ def reduce_all(table, rdxdir=None, overwrite=False):
     if not _rdxdir.is_dir():
         _rdxdir.mkdir(parents=True)
 
-    log.info(f'Reducing data:')
+    log.info('Reducing data:')
     log.info(f'    Metadata file: {metafile}')
     log.info(f'    Setup: {tag}')
     log.info(f'    Reduction directory: {_rdxdir}')
@@ -444,10 +442,10 @@ def _flat_name(frametype, filt):
     """
     Return the name of the combined flat of a given type (``'skyflat'`` or
     ``'domeflat'``) and filter; e.g., ``SkyFlat_V.fits`` or
-    ``SkyFlat_ip.fits`` for the ``i'`` filter (see :func:`~pipnick.metadata._filter_name`).
+    ``SkyFlat_ip.fits`` for the ``i'`` filter (see :func:`~pipnick.metadata.filter_name`).
     """
     title = 'SkyFlat' if frametype == 'skyflat' else 'DomeFlat'
-    return f'{title}_{_filter_name(filt)}.fits'
+    return f'{title}_{filter_name(filt)}.fits'
 
 
 def _group_object(metadata, indx):
@@ -579,7 +577,7 @@ def _science_name(metadata, indx, comb_id):
     ``<object>`` is the most common object name in the group (ties go to the
     earliest frame), ``<filter>`` is the filter of the earliest frame (all
     frames in a group have the same filter; see :func:`check_comb_groups` and
-    :func:`~pipnick.metadata._filter_name`), ``<comb_id>`` is zero-padded to three digits, and
+    :func:`~pipnick.metadata.filter_name`), ``<comb_id>`` is zero-padded to three digits, and
     ``<date>`` is the UT date of the earliest frame.
 
     Parameters
@@ -597,10 +595,10 @@ def _science_name(metadata, indx, comb_id):
         The file name.
     """
     obj = _group_object(metadata, indx)
-    obj = '' if obj is None else _safe_name(obj)
+    obj = '' if obj is None else safe_name(obj)
     date = _masked_to_none(metadata['date'][indx[0]])
     date = 'nodate' if date is None else str(date).split('T')[0]
-    filt = _filter_name(_filter(metadata, indx[0]))
+    filt = filter_name(_filter(metadata, indx[0]))
     return f'{"unknown" if len(obj) == 0 else obj}_{filt}_C{comb_id:03d}_{date}.fits'
 
 
@@ -916,7 +914,6 @@ def init_ccddata(frame, bpm=None, saturation=None, gain=None, readnoise=None):
     :class:`astropy.nddata.CCDData`
         Initialized and processed CCDData object.
     """
-#    warnings.simplefilter('ignore', FITSFixedWarning)
     _frame = Path(frame).absolute()
 
     log.info(f'Initializing CCD imaging data in {_frame.name}.')
@@ -1015,7 +1012,6 @@ def process_frame(raw_frame, bias=None, flat=None, flag_cosmics=True, photon_noi
     :class:`astropy.nddata.CCDData`
         Processed CCDData object with overscan subtracted and image trimmed.
     """
-#    warnings.simplefilter("error", RuntimeWarning)
     ccd = init_ccddata(raw_frame)
     readnoise = ccd.meta.get('PROCRN')
     # The number of overscan pixels averaged to set the overscan level of each

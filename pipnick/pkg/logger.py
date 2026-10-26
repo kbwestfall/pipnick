@@ -18,7 +18,6 @@ import inspect
 import io
 import logging
 from pathlib import Path
-import re
 import sys
 import traceback
 import warnings
@@ -40,12 +39,7 @@ def short_warning(message, category, filename, lineno, line=None):
 warnings.formatwarning = short_warning
 
 
-def color_text(
-    text: str,
-    color: list[int],
-    bold: bool = False,
-    nchar: int | None = None
-) -> str:
+def color_text(text: str, color: list[int], bold: bool = False, nchar: int | None = None) -> str:
     """
     Return an input string with escape characters to colorize console text.
 
@@ -71,23 +65,6 @@ def color_text(
     return f'{msg}38;2;{color[0]};{color[1]};{color[2]}m{_text}\033[0m'
 
 
-def clear_text_color(text: str) -> str:
-    """
-    Remove the escape characters that colorize the text in a string.
-
-    Parameters
-    ----------
-    text
-        String to alter.
-
-    Returns
-    -------
-    str
-        String with all color escape characters removed.
-    """
-    return re.compile(r'\x1b[^m]*m').sub("", text)
-
-
 class StreamFormatter(logging.Formatter):
     """
     Custom :class:`logging.Formatter` for the stream handler.
@@ -103,11 +80,8 @@ class StreamFormatter(logging.Formatter):
         """Format the provided log record."""
         # RGB colors for the logging levels
         level_colors = {
-            'debug': [116, 173, 209],
-            'info': [49, 54, 149],
-            'warning': [253, 174, 97],
-            'error': [215, 48, 39],
-            'critical': [165, 0, 38],
+            'debug': [116, 173, 209], 'info': [49, 54, 149], 'warning': [253, 174, 97],
+            'error': [215, 48, 39], 'critical': [165, 0, 38]
         }
         frame_color = level_colors['debug']
 
@@ -157,11 +131,8 @@ class PipnickLogger(logging.Logger):
     _excepthook_orig = None
 
     def init(
-        self,
-        level: int = logging.INFO,
-        stream: io.TextIOBase | None = None,
-        log_file: str | Path | None = None,
-        log_file_level: int | None = None,
+        self, level: int = logging.INFO, stream: io.TextIOBase | None = None,
+        log_file: str | Path | None = None, log_file_level: int | None = None
     ):
         """
         Initialize the logger.
@@ -363,10 +334,8 @@ class PipnickLogger(logging.Logger):
 
 
 def get_logger(
-    level: int = logging.INFO,
-    stream: io.TextIOBase | None = None,
-    log_file: str | Path | None = None,
-    log_file_level: int | None = None,
+    level: int = logging.INFO, stream: io.TextIOBase | None = None,
+    log_file: str | Path | None = None, log_file_level: int | None = None
 ) -> PipnickLogger:
     """
     Instantiate a new logger.
@@ -394,12 +363,7 @@ def get_logger(
 
     try:
         log = logging.getLogger("pipnick")
-        log.init(
-            level=level,
-            stream=stream,
-            log_file=log_file,
-            log_file_level=log_file_level
-        )
+        log.init(level=level, stream=stream, log_file=log_file, log_file_level=log_file_level)
     finally:
         logging.setLoggerClass(orig_logger)
 

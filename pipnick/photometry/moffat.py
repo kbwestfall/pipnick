@@ -598,37 +598,6 @@ class FitEllipticalMoffat2D:
         else:
             return nice_phi
 
-    @staticmethod
-    def get_orig_phi(gamma1, gamma2, nice_phi):
-        """
-        Convert nice phi back to original phi (rad).
-
-        Parameters
-        ----------
-        gamma1 : float
-            Gamma value in x-direction.
-        gamma2 : float
-            Gamma value in y-direction.
-        nice_phi : float
-            Nice phi in degrees.
-
-        Returns
-        -------
-        float
-            Original phi in radians.
-        """
-        if gamma1 < gamma2:
-            # This accounts for the previous condition nice_phi - 90 > 0.001
-            if nice_phi >= -89.999:
-                original_phi = nice_phi + 90
-            else:
-                original_phi = nice_phi - 90
-        else:
-            original_phi = nice_phi
-        
-        original_rad = np.deg2rad(original_phi - 0.000000000001)
-        return original_rad
-
 
 def make_ellipse(a, b, phi, n=500):
     """
@@ -723,9 +692,10 @@ class EllipticalMoffat2DModel(Fittable2DModel):
     def fwhm(self):
         """
         Moffat full width at half maximum: the mean of the FWHM along the two
-        axes.  Derivation of the formula is available in
-        `this notebook by Yoonsoo Bach
-        <https://nbviewer.jupyter.org/github/ysbach/AO_2017/blob/master/04_Ground_Based_Concept.ipynb#1.2.-Moffat>`_.
+        axes.  Derivation of the formula is available in `this notebook by
+        Yoonsoo Bach
+        <https://github.com/ysbach/AO_2017/blob/master/04_Ground_Based_Concept.ipynb>`_
+        (section 1.2, Moffat).
         """
         gamma = (np.abs(self.gamma1) + np.abs(self.gamma2)) / 2
         return 2.0 * gamma * np.sqrt(2.0 ** (1.0 / self.alpha) - 1.0)
@@ -812,10 +782,7 @@ class EllipticalMoffat2DModel(Fittable2DModel):
         if self.x_0.input_unit is None:
             return None
         else:
-            return {
-                self.inputs[0]: self.x_0.input_unit,
-                self.inputs[1]: self.y_0.input_unit,
-            }
+            return {self.inputs[0]: self.x_0.input_unit, self.inputs[1]: self.y_0.input_unit}
 
     def _parameter_units_for_data_units(self, inputs_unit, outputs_unit):
         # Note that here we need to make sure that x and y are in the same
@@ -824,11 +791,9 @@ class EllipticalMoffat2DModel(Fittable2DModel):
         if inputs_unit[self.inputs[0]] != inputs_unit[self.inputs[1]]:
             raise UnitsError("Units of 'x' and 'y' inputs should match")
         return {
-            "x_0": inputs_unit[self.inputs[0]],
-            "y_0": inputs_unit[self.inputs[0]],
-            "gamma1": inputs_unit[self.inputs[0]],
-            "gamma2": inputs_unit[self.inputs[0]],
-            "amplitude": outputs_unit[self.outputs[0]],
+            "x_0": inputs_unit[self.inputs[0]], "y_0": inputs_unit[self.inputs[0]],
+            "gamma1": inputs_unit[self.inputs[0]], "gamma2": inputs_unit[self.inputs[0]],
+            "amplitude": outputs_unit[self.outputs[0]]
         }
 
 

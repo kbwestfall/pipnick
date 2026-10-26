@@ -147,11 +147,9 @@ class NickelCamera:
     """
 
     required = {
-        'camera': ['name', 'plate_scale', 'saturation'],
-        'identify': [],
-        'keywords': [],
+        'camera': ['name', 'plate_scale', 'saturation'], 'identify': [], 'keywords': [],
         'geometry': ['shape', 'data_columns', 'data_rows', 'overscan_columns'],
-        'frametypes': ['default'],
+        'frametypes': ['default']
     }
     """
     Required configuration sections and their required entries.
@@ -265,7 +263,7 @@ class NickelCamera:
         The location is constructed from the geodetic coordinates in the
         configuration, instead of with
         :meth:`astropy.coordinates.EarthLocation.of_site`, which downloads
-        astropy's registry of sites.
+        the ``astropy`` registry of sites.
         """
         if 'observatory' not in self.config:
             return None
@@ -283,7 +281,7 @@ class NickelCamera:
         by transforming the coordinates to the
         :class:`astropy.coordinates.AltAz` frame at the observatory (see
         :attr:`location`).  The transformation never contacts the network:
-        astropy's automatic download of the IERS Earth-orientation data is
+        the automatic download by ``astropy`` of the IERS Earth-orientation data is
         disabled, and its bundled data are used even if they do not cover the
         date.  The resulting error (less than a second in UT1-UTC) is
         negligible for the airmass.
@@ -720,7 +718,7 @@ class NickelCamera:
     @staticmethod
     def _section_slice(section):
         """
-        Convert a FITS section string to a numpy slice.
+        Convert a FITS section string to a ``numpy`` slice.
         """
         (x1, x2), (y1, y2) = [map(int, s.split(':')) for s in section.strip('[]').split(',')]
         return np.s_[y1 - 1:y2, x1 - 1:x2]
@@ -877,13 +875,9 @@ class NickelCamera:
             'airmass': self._to_float(self.header_value(hdr, 'airmass')),
             'ra': self._to_str(self.header_value(hdr, 'ra')),
             'dec': self._to_str(self.header_value(hdr, 'dec')),
-            'date': self._to_str(self.header_value(hdr, 'date')),
-            'xbin': xbin,
-            'ybin': ybin,
-            'readmode': self.readout(hdr).mode,
-            'naxis1': hdr.get('NAXIS1'),
-            'naxis2': hdr.get('NAXIS2'),
-            'window': self.window_label(hdr),
+            'date': self._to_str(self.header_value(hdr, 'date')), 'xbin': xbin, 'ybin': ybin,
+            'readmode': self.readout(hdr).mode, 'naxis1': hdr.get('NAXIS1'),
+            'naxis2': hdr.get('NAXIS2'), 'window': self.window_label(hdr)
         }
 
 

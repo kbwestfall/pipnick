@@ -23,7 +23,7 @@ def write_c2(path, **kwargs):
             'INSTRUME': 'Nickel Direct Camera', 'DSENSOR': 'Loral 2Kx2K', 'OBSTYPE': 'OBJECT',
             'OBJECT': 'NGC_6543', 'EXPTIME': 60, 'FILTNAM': 'R', 'AIRMASS': 1.2,
             'RA': '17:58:33.4', 'DEC': '66:37:59', 'DATE-BEG': '2024-06-27T05:37:01.28',
-            'CDELT1U': -2, 'CDELT2U': -2, 'READ-SPD': 80,
+            'CDELT1U': -2, 'CDELT2U': -2, 'READ-SPD': 80
         }
     )
     hdr.update(kwargs)
@@ -39,7 +39,7 @@ def write_andor(path, **kwargs):
             'CAMID': 'headmodel DZ936_BV serial 31382', 'INSTRUME': 'Direct', 'OBSTYPE': '?',
             'OBJECT': 'M11 V', 'XPOSURE': 30.005, 'FILTER': 'V', 'AIRMASS': 1.3,
             'RA': '18:51:05.0', 'DEC': '-06:16:12', 'DATE-BEG': '2026-08-20T04:12:00.000',
-            'CDELT1U': 2, 'CDELT2U': 2, 'AMPCONF': '1.0MHz', 'WINDOW': '1 2088 1 2048',
+            'CDELT1U': 2, 'CDELT2U': 2, 'AMPCONF': '1.0MHz', 'WINDOW': '1 2088 1 2048'
         }
     )
     hdr.update(kwargs)
@@ -55,7 +55,7 @@ def write_andor_image(path, level, **kwargs):
             'CAMID': 'headmodel DZ936_BV serial 31382', 'OBSTYPE': '?',
             'OBJECT': 'Dome flat V', 'XPOSURE': 3.0, 'FILTER': 'V',
             'DATE-BEG': '2026-08-20T04:12:00.000', 'CDELT1U': 4, 'CDELT2U': 4,
-            'AMPCONF': '1.0MHz', 'WINDOW': '1 2088 1 2048', 'CURRTEMP': -79.9,
+            'AMPCONF': '1.0MHz', 'WINDOW': '1 2088 1 2048', 'CURRTEMP': -79.9
         }
     )
     hdr.update(kwargs)
