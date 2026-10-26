@@ -35,6 +35,19 @@ class MetaData(scriptbase.ScriptBase):
                  'to combine, and pointing and focus frames are commented out by default.'
         )
         parser.add_argument(
+            '--assign_mosaics', default=False, action='store_true',
+            help='Assign default mosaics (requires --split): the science frames are grouped by '
+                 'pointing and, within each pointing, by filter, and labeled in the mosaic and '
+                 'wcs_group columns.  Only frames without labels are assigned.  Without this '
+                 'option, the columns are empty, i.e., no mosaics are defined.  With --append, '
+                 'the labels are assigned even if there are no new frames.'
+        )
+        parser.add_argument(
+            '--mosaic_radius', default=None, type=float,
+            help='Linking length (arcmin) of the pointing groups used by --assign_mosaics.  '
+                 'If not provided, half the field of view is used.'
+        )
+        parser.add_argument(
             '--camera', default=None,
             help='The camera used to obtain the data (e.g., NickelC2 or '
                  'NickelAndor).  If not provided, the camera is identified from '
@@ -75,6 +88,9 @@ class MetaData(scriptbase.ScriptBase):
         # Initialize logger
         cls.init_log(args)
 
+        if args.assign_mosaics and not args.split:
+            log.error('--assign_mosaics requires --split.')
+            return
         if args.rawdir is None:
             log.error('Must provide the directory with the raw data (--rawdir).')
             return
@@ -100,5 +116,6 @@ class MetaData(scriptbase.ScriptBase):
 
         build_metadata(
             rawdir=args.rawdir, filename=args.raw_table, ext=args.ext, overwrite=args.overwrite,
-            append=args.append, camera=args.camera, classify=args.classify, split=args.split
+            append=args.append, camera=args.camera, classify=args.classify, split=args.split,
+            assign=args.assign_mosaics, mosaic_radius=args.mosaic_radius
         )

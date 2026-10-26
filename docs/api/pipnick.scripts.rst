@@ -10,8 +10,10 @@ Submodules
    pipnick.scripts.astrometry
    pipnick.scripts.calibrate
    pipnick.scripts.metadata
+   pipnick.scripts.mosaic
    pipnick.scripts.photometry
    pipnick.scripts.reduce
+   pipnick.scripts.rgb
    pipnick.scripts.scriptbase
    pipnick.scripts.version
 

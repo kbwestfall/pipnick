@@ -413,6 +413,8 @@ def test_split_files(tmp_path):
     moved = ['setup'] + metadata.setup_file_keys
     expected = [c for c in metadata.metadata_columns if c not in moved]
     expected.insert(expected.index('frametype') + 1, 'comb_id')
+    for i, name in enumerate(metadata.mosaic_columns):
+        expected.insert(expected.index('comb_id') + 1 + i, name)
     assert compact.colnames == expected, (
         'The setup values and image size should not be columns of a per-setup file, which '
         'should have the combination groups'
@@ -430,8 +432,13 @@ def test_split_files(tmp_path):
     tbl = metadata.read_metadata(ofile)
     expected = list(metadata.metadata_columns.keys())
     expected.insert(expected.index('setup') + 1, 'comb_id')
+    for i, name in enumerate(metadata.mosaic_columns):
+        expected.insert(expected.index('comb_id') + 1 + i, name)
     assert tbl.colnames == expected, (
         'Reading a per-setup file should restore the columns, in order'
+    )
+    assert np.all(tbl['mosaic'] == '') and np.all(tbl['wcs_group'] == ''), (
+        'By default, no mosaics should be defined'
     )
     assert tbl['xbin'].dtype.kind == 'i' and tbl['readmode'].dtype.kind == 'U', (
         'The restored columns should have their usual types'

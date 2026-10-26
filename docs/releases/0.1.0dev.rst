@@ -83,6 +83,8 @@ Dependency Changes
 - Requires ``speclite>=0.20``, for the filter responses used to compute the
   nominal extinction.
 
+- Requires ``reproject>=0.14``, for the mosaics.
+
 Functionality/Performance Improvements and Additions
 ----------------------------------------------------
 
@@ -260,6 +262,24 @@ Functionality/Performance Improvements and Additions
   each band.  The camera configurations name the extinction curve of the
   observatory (``extinction`` in ``[observatory]``).
 
+- Added ``pipnick_mosaic``, which combines reduced science images into
+  mosaics.  The images are matched to a common PSF (the worst seeing of the
+  mosaic, or of the WCS group), scaled to a common flux scale using the
+  sources common to overlapping images (or their photometric calibrations),
+  optionally matched in background level, reprojected with ``reproject``,
+  and combined with outlier rejection.  The mosaics of a WCS group share an
+  identical output WCS and shape, and a mosaic can combine the images of
+  several setups.  Added ``pipnick.mosaic``.
+
+- Added ``pipnick_rgb``, which makes a three-colour image from three images
+  with the same WCS (e.g., the mosaics of one WCS group), with the Lupton et
+  al. (2004) scheme or a linear or logarithmic stretch.  A mosaic can have a
+  single image, which is then only reprojected onto the WCS of its group.
+
+- Per-setup metadata tables have ``mosaic`` and ``wcs_group`` columns that
+  define the mosaics, empty by default.  ``pipnick_metadata
+  --assign_mosaics`` assigns them by pointing and filter.
+
 Under-the-hood Improvements
 ---------------------------
 
@@ -284,6 +304,8 @@ Documentation Updates
 - Rewrote the photometry documentation for the new ``pipnick_photometry``.
 
 - Added documentation for ``pipnick_calibrate``.
+
+- Added documentation for ``pipnick_mosaic``.
 
 - Docstrings are NumPy style and rendered by ``numpydoc``, with types
   cross-referenced to the numpy, astropy, matplotlib, photutils, and ccdproc
