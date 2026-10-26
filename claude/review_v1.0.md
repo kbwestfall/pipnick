@@ -1287,8 +1287,28 @@ is kept.
     in the `license-files` of `pyproject.toml`.
 - **Updated:** the release notes.
 
-**Changes beyond the review.** `pipnick_version --dependencies` also reports
-`astroquery`, `reproject` and `speclite`.
+**Changes beyond the review.**
+
+- `pipnick_version --dependencies` also reports `astroquery`, `reproject` and
+  `speclite`.
+- **The `examples/` directory was removed by the author.** It held `all.py`,
+  the notebooks `all.ipynb`, `reduction.ipynb`, `astrometry.ipynb`,
+  `photometry.ipynb` and `final_calib.ipynb`, and 19 raw C2 frames in
+  `data_example/raw/` (about 41 MB). Before the removal, all of them were
+  confirmed to be defunct:
+  - they imported modules that no longer exist (`pipelines.final_calib`,
+    `utils.log`, `utils.display_fits`, `pipnick.convenience`), and
+    `photometry.fit.plot_sources`, which was removed;
+  - they called `reduce_all`, `astrometry_all` and `photometry_all` with
+    arguments that were removed (`excl_files`, `excl_filts`, `excl_objs`,
+    `use_table`, `save_inters`, `plot_final`, `plot_inters`), or with a
+    directory where a metadata table is now required.
+
+  Nothing else used the example data: the tests are synthetic.
+
+  The `prune examples` line was removed from `MANIFEST.in`. Its
+  `global-exclude` of `*.ipynb` files is **kept on purpose**: notebooks remain
+  excluded from the source distribution for the time being.
 
 **Left as is:**
 
@@ -1298,9 +1318,10 @@ is kept.
   convention (§2.2, uncertain).
 - **Other one-element-per-line constructs** flagged by the automatic check
   (e.g. long `help` strings) have elements too long to pack.
-- **The stale usage documents** `docs/basics.rst`, `docs/example.rst` and
-  `examples/all.py` still refer to removed code. They already referred to
-  modules that no longer exist (`pipnick.convenience`), and their rewrite is
-  deferred.
+- **The stale usage documents** `docs/basics.rst` and `docs/example.rst`
+  still refer to removed code. They already referred to modules that no
+  longer exist (`pipnick.convenience`), and their rewrite is deferred.
+  `docs/example.rst` also refers to the example data removed with
+  `examples/`.
 - **The tests** still use private names in 30 places. The new rule exempts
   tests.
