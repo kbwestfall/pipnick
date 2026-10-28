@@ -36,7 +36,6 @@ its solutions as FK5 (J2000), and they are relabeled as ICRS; see
 :func:`~pipnick.astrometry.services.icrs_header` for why this is correct.
 """
 
-import hashlib
 import re
 import tempfile
 from pathlib import Path
@@ -53,7 +52,7 @@ from pipnick import log
 from pipnick.astrometry.detect import detect_sources
 from pipnick.astrometry.fit import (
     fit_wcs, image_center, predict_wcs, scale_and_rotation, to_icrs, wcs_from_header,
-    wcs_from_transform, wcs_hash, wcs_residuals
+    wcs_from_transform, wcs_residuals
 )
 from pipnick.astrometry.match import match_frames
 from pipnick.astrometry.qa import plot_solution
@@ -62,6 +61,8 @@ from pipnick.astrometry.services import (
 )
 from pipnick.pipelines.reduction import load_setup, plan_products
 from pipnick.pkg.exceptions import PipnickDataModelError, PipnickPathError
+from pipnick.pkg.paths import points_file, step_dir
+from pipnick.pkg.provenance import digest, wcs_hash
 
 
 class AstrometryImage:
@@ -362,7 +363,7 @@ def apply_wcs(
         hdu[0].header.update(solution)
         hdr = hdu[0].header.copy()
     if method == 'points':
-        sidecar = path.parent / 'astrometry' / f'{path.stem}_points.fits'
+        sidecar = points_file(path)
         sidecar.parent.mkdir(parents=True, exist_ok=True)
         fits.PrimaryHDU(header=solution).writeto(sidecar, overwrite=True)
     log.info(f'Applied the {method} astrometric solution to {path.name}.')
@@ -373,16 +374,14 @@ def _input_hash(image_data, sources, hints, upload_image):
     """
     Return a hash of what would be submitted to astrometry.net for an image:
     the source positions (rounded to 0.01 pixel) or, if the image is
-    uploaded, the masked image data; and the solver settings.  The hash is the
-    first 16 hexadecimal digits of the SHA-1 hash.
+    uploaded, the masked image data; and the solver settings.  See
+    :func:`~pipnick.pkg.provenance.digest`.
     """
-    sha = hashlib.sha1()
     if upload_image:
-        sha.update(np.ascontiguousarray(image_data).tobytes())
+        data = np.ascontiguousarray(image_data).tobytes()
     else:
-        sha.update(np.round(np.column_stack([sources['x'], sources['y']]), 2).tobytes())
-    sha.update(repr(sorted(hints.items())).encode())
-    return sha.hexdigest()[:16]
+        data = np.round(np.column_stack([sources['x'], sources['y']]), 2).tobytes()
+    return digest(data, repr(sorted(hints.items())))
 
 
 def _read_image(path):
@@ -590,7 +589,7 @@ def _restore_solution(image, images, astro_dir):
         log.info(f'{image.name} already has a {method} solution.')
         return
 
-    points = astro_dir / f'{image.path.stem}_points.fits'
+    points = points_file(image.path)
     if points.is_file():
         image.set_solution(apply_wcs(image.path, wcs_from_header(fits.getheader(points))))
         return
@@ -1499,7 +1498,7 @@ def astrometry_all(
     metafile, metadata, _rdxdir, tag, camera = load_setup(table, rdxdir=rdxdir)
     if not _rdxdir.is_dir():
         raise PipnickPathError(f'{_rdxdir} does not exist; reduce the data first.')
-    astro_dir = _rdxdir / 'astrometry'
+    astro_dir = step_dir(_rdxdir, 'astrometry')
     log.info(f'Astrometric calibration of the images in {_rdxdir}')
 
     _images = _load_images(

@@ -293,10 +293,24 @@ Under-the-hood Improvements
 ---------------------------
 
 - Functions used by more than one module are public: ``metadata.safe_name``
-  and ``metadata.filter_name``, and ``pipelines.photometry.image_hash``,
-  ``solution_hash``, and ``select_products``.  The code follows the
-  conventions in ``AGENTS.md``, which no longer allow private functions to be
-  imported into other modules.
+  and ``metadata.filter_name``, and ``pipelines.photometry.select_products``.
+  The code follows the conventions in ``AGENTS.md``, which no longer allow
+  private functions to be imported into other modules.
+
+- Added ``pipnick.pkg.provenance``, which provides every hash recorded with
+  the products (e.g., ``image_hash``, ``solution_hash``, ``wcs_hash``),
+  replacing eleven separate implementations.  The hash values are unchanged.
+
+- Added ``pipnick.pkg.paths``, which names the products that one step writes
+  and another reads (e.g., the source tables and calibration files).
+
+- Added ``pipnick.utils.lsq.weighted_lstsq``, used by the photometric
+  calibration fit, the zero-point drift, and the mosaic flux scaling.
+
+- Added ``pipnick.utils.crossmatch``, with ``match_sky`` and
+  ``link_sources``, used to match the Landolt standards, the sources of the
+  images of a mosaic, and the sources of the images calibrated together.
+  ``mosaic.scaling.mutual_matches`` is removed.
 
 - The tests block internet access (``remote_data_strict``), and replace every
   method that would contact astrometry.net or the Gaia archive.

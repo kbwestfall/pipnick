@@ -8,6 +8,8 @@ Submodules
    :maxdepth: 4
 
    pipnick.utils.combiner
+   pipnick.utils.crossmatch
+   pipnick.utils.lsq
    pipnick.utils.masking
    pipnick.utils.rgb
 

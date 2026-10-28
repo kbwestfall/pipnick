@@ -6,7 +6,6 @@ All pixel coordinates are 0-based (the ``numpy`` convention, as returned by
 as usual for :class:`astropy.wcs.WCS`.
 """
 
-import hashlib
 import inspect
 import warnings
 
@@ -142,15 +141,6 @@ def scale_and_rotation(wcs):
     scale = float(np.mean(proj_plane_pixel_scales(wcs.celestial))) * 3600.
     rotation = float(np.degrees(np.arctan2(cd[1,0], cd[1,1])))
     return scale, rotation, int(np.sign(np.linalg.det(cd)))
-
-
-def wcs_hash(wcs):
-    """
-    Return a hash of an astrometric solution, used to determine if it has
-    changed: the first 16 hexadecimal digits of the SHA-1 hash of its FITS
-    header.
-    """
-    return hashlib.sha1(wcs.to_header(relax=True).tostring().encode()).hexdigest()[:16]
 
 
 def predict_wcs(ref_wcs, center, shape):

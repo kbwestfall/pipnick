@@ -9,6 +9,8 @@ Submodules
 
    pipnick.pkg.exceptions
    pipnick.pkg.logger
+   pipnick.pkg.paths
+   pipnick.pkg.provenance
 
 Module contents
 ---------------

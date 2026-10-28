@@ -36,9 +36,8 @@ from dataclasses import dataclass
 import numpy as np
 
 from astropy import stats
-from scipy import linalg
-
 from pipnick.pkg.exceptions import PipnickParameterError
+from pipnick.utils.lsq import weighted_lstsq
 
 # The terms of the calibration model, in the order used by the design matrix
 CALIBRATION_TERMS = ('zp', 'airmass', 'color', 'color2', 'airmass_color')
@@ -232,15 +231,12 @@ def fit_calibration(mag_c, color, mag_i, airmass, terms, err=None, fixed=None, g
                 'color does not vary); fix or remove terms.'
             )
         # Eqns. 3.8-3.10 of Harris et al. (1981)
-        W = np.dot(wgt[None,:] * xf, xf.T)
-        r = np.dot(wgt[None,:] * xf, y)
-        coeff[free] = linalg.solve(W, r)
-        cov[np.ix_(free, free)] = linalg.inv(W)
+        coeff[free], cov[np.ix_(free, free)], _, _ = weighted_lstsq(
+            xf.T, y, err=_err[_gpm], scale_cov=err is not None
+        )
     resid = y - np.dot(coeff[free], x[free]) if nfree > 0 else y
     chi2 = float(np.sum(wgt * resid**2))
     dof = ngood - nfree
-    if err is not None and chi2 / dof > 1.:
-        cov *= chi2 / dof
     return CalibrationFit(
         terms=_terms, coeff=coeff, cov=cov, free=free, gpm=_gpm, chi2=chi2, dof=dof,
         rms=float(np.sqrt(np.mean(resid**2)))
@@ -355,14 +351,9 @@ def residual_drift(time, resid, err):
     _time = np.asarray(time, dtype=float)
     if len(_time) < 3 or np.ptp(_time) == 0:
         return None
-    x = np.stack([np.ones_like(_time), _time - np.mean(_time)])
-    wgt = 1. / np.asarray(err, dtype=float)**2
-    W = np.dot(wgt[None,:] * x, x.T)
-    coeff = linalg.solve(W, np.dot(wgt[None,:] * x, np.asarray(resid, dtype=float)))
-    cov = linalg.inv(W)
-    chi2 = np.sum(wgt * (np.asarray(resid, dtype=float) - np.dot(coeff, x))**2)
-    scale = max(1., chi2 / (len(_time) - 2))
-    return float(coeff[1]), float(np.sqrt(cov[1,1] * scale))
+    x = np.column_stack([np.ones_like(_time), _time - np.mean(_time)])
+    coeff, cov, _, _ = weighted_lstsq(x, resid, err=err)
+    return float(coeff[1]), float(np.sqrt(cov[1,1]))
 
 
 def iterate_colors(

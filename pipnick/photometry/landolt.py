@@ -32,6 +32,7 @@ from astroquery.vizier import Vizier
 from pipnick import log
 from pipnick.astrometry.services import propagate_proper_motion
 from pipnick.pkg.exceptions import PipnickParameterError
+from pipnick.utils.crossmatch import match_sky
 
 
 def catalog_path():
@@ -292,7 +293,8 @@ def match_landolt(catalog, ra, dec, epoch, radius=2.):
     using their proper motions; see
     :func:`~pipnick.astrometry.services.propagate_proper_motion`.  Each
     standard is matched to its nearest source within ``radius``, and a source
-    matched to more than one standard is kept only for the nearest.
+    matched to more than one standard is kept only for the nearest; see
+    :func:`~pipnick.utils.crossmatch.match_sky`.
 
     Parameters
     ----------
@@ -316,13 +318,5 @@ def match_landolt(catalog, ra, dec, epoch, radius=2.):
         return np.array([], dtype=int), np.array([], dtype=int), np.array([])
     stars = propagate_proper_motion(catalog, epoch)
     sources = SkyCoord(np.asarray(ra, dtype=float), np.asarray(dec, dtype=float), unit='deg')
-    isrc, sep, _ = stars.match_to_catalog_sky(sources)
-    sep = sep.arcsec
-    icat = np.where(sep < radius)[0]
-    isrc = isrc[icat]
-    sep = sep[icat]
-    # Keep only the nearest standard for each source
-    order = np.argsort(sep)
-    _, first = np.unique(isrc[order], return_index=True)
-    keep = np.sort(order[first])
-    return isrc[keep], icat[keep], sep[keep]
+    icat, isrc, sep = match_sky(stars, sources, radius, unique='second')
+    return isrc, icat, sep

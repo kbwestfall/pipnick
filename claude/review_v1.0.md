@@ -187,6 +187,8 @@ Proposals:
    **Complete** (2026-10-26, branch `review`; see the
    [progress log](#progress-log)).
 2. Consolidate the pure helpers: hashes, paths, least squares, matching.
+   **Complete** (2026-10-27, branch `consolidate_helpers`; see the
+   [progress log](#progress-log)).
 3. Add `DataSet`, `ReducedImage` and `PSFModel`.
 4. Improve the logging and add `pipnick_status`.
 5. Split the large modules, and add `SourceCatalog`, `Summary` and the `qa/`
@@ -1218,7 +1220,7 @@ camera lives in one place.
 | Step | Work | Effect | Risk | Status |
 |---|---|---|---|---|
 | 1 | Remove the unused code and dependencies (§1); fix the convention items (§2), including making the shared private helpers public | cleaner code; no `loess` packaging problem | low | **complete** |
-| 2 | `pkg/provenance.py`, `pkg/paths.py`, `utils/lsq.py`, `utils/crossmatch.py` (§4) | less duplication; one hash implementation | low (needs byte-identical hash tests) | |
+| 2 | `pkg/provenance.py`, `pkg/paths.py`, `utils/lsq.py`, `utils/crossmatch.py` (§4) | less duplication; one hash implementation | low (needs byte-identical hash tests) | **complete** |
 | 3 | `DataSet`, `Product`, `ReducedImage`, `read_reduced`; `PSFModel` with one FWHM definition (§5) | removes the coupling between pipelines and the FWHM inconsistency | medium (some mosaics are rebuilt) | |
 | 4 | Logging (run header, progress, verdicts, next steps, default log files, version); a reduction summary; `pipnick_status` (§6, §7 P1–P3) | the most direct benefit to new observers | low | |
 | 5 | Split the large modules; `SourceCatalog`, `Summary`, `qa/`; QA on by default; `pipnick_report`, `pipnick_inspect` (§3, §5, §7) | maintainability and interrogation | medium | |
@@ -1325,3 +1327,77 @@ is kept.
   `examples/`.
 - **The tests** still use private names in 30 places. The new rule exempts
   tests.
+
+#### Step 2: pure helpers (complete, 2026-10-27, branch `consolidate_helpers`)
+
+Checks after the work:
+
+- `tox -r -e 3.13-test,codestyle` passes in a fresh environment: 176 tests
+  passed, 1 skipped.
+- The docs build without warnings.
+- All eight scripts start.
+- **The hashes are unchanged.**
+  - The new tests compare every hash with reference values computed by the
+    implementations that were replaced.
+  - On a copy of the 2026-08-17 n3 (fast) reduction, `reduce_all` and
+    `photometry_all` report all 24 reduction products and all 19 source
+    tables as up to date.
+
+**`pkg/provenance.py` (§4.4).**
+
+- It provides `digest`, `json_hash`, `file_hash`, `names_hash`,
+  `values_hash`, `wcs_hash`, `image_hash` and `solution_hash`.
+- These replace:
+  - `reduction._table_hash` and `_raw_hash`;
+  - `photometry._settings_hash`, `image_hash` and `solution_hash`;
+  - `calibrate._hash` and `_file_hash`;
+  - `mosaic._hash`;
+  - `astrometry.fit.wcs_hash`.
+- `astrometry._input_hash` (the astrometry.net cache key) and
+  `calibrate.calibration_hash` keep their roles, built on `digest` and
+  `json_hash`.
+- **Deferred:** the `Provenance` record and `is_current` in the second half
+  of §4.4.
+
+**`pkg/paths.py` (§4.6).**
+
+- It provides `step_dir`, plus `photometry_table`, `points_file`,
+  `calibrated_table`, `calibration_file` and `residuals_file`.
+- The products derived from one image are named from the image's path, so
+  `calibrate._collect_images` and `apply_to_catalogs` no longer take an
+  output directory.
+- **Left as is:** the names used only within one step (the astrometry.net
+  cache files, the QA figures, the summaries and the mosaic products).
+
+**`utils/lsq.py` (§4.6).**
+
+- `weighted_lstsq` solves the normal equations for `fit_calibration`,
+  `residual_drift` and `solve_offsets`. Each caller keeps its own rejection
+  and its own rule for scaling the covariance by the reduced χ².
+  - `solve_offsets` scales after its rejection loop, using the final
+    selection. When the loop reaches `maxiter`, that selection includes one
+    rejection that the solution doesn't. This behaviour is kept unchanged.
+- On 300 random problems, the results agree with the old code to better
+  than 1e-11 (relative). The differences are rounding from the reordered
+  matrix products. The integer and boolean outputs are identical.
+
+**`utils/crossmatch.py` (§4.3).**
+
+- `match_sky(coords1, coords2, radius, unique='mutual'|'second'|'none')`
+  serves three callers:
+  - `match_landolt` (`'second'`);
+  - the mosaic flux scaling (`'mutual'`; `mosaic.scaling.mutual_matches` is
+    removed);
+  - the linking below (`'none'`).
+- `link_sources(ra, dec, radius)` replaces `calibrate._cross_match`. A list
+  without celestial coordinates is passed fully masked.
+- On 400 random crowded fields, all three give results identical to the old
+  code.
+- The pixel-space `astrometry.match.match_nearest` is unchanged, as
+  proposed.
+
+**Tests.** There are four new modules: `test_provenance.py`, `test_paths.py`,
+`test_lsq.py` and `test_crossmatch.py`. `test_mutual_matches` moved to
+`test_crossmatch.py`.
+
+**Updated:** the release notes and the API pages.

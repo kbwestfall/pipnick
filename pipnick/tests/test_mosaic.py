@@ -22,9 +22,9 @@ from pipnick.mosaic import coadd, psfmatch, scaling
 from pipnick.photometry.aperture_photometry import aperture_analysis
 from pipnick.photometry.moffat import FitMoffat2D
 from pipnick.pipelines import mosaic
-from pipnick.pipelines.photometry import image_hash
 from pipnick.pipelines.reduction import load_setup, plan_products
 from pipnick.pkg.exceptions import PipnickDataModelError, PipnickParameterError
+from pipnick.pkg.provenance import image_hash
 from pipnick.tests.test_metadata import write_andor
 
 SHAPE = (160, 160)
@@ -279,17 +279,6 @@ def test_solve_offsets():
         'An image with too few common sources should not be scaled'
     )
     assert offset[4] == 0. and error[4] == 0., 'An unscaled image should have no offset'
-
-
-def test_mutual_matches():
-    ra1 = np.array([10., 10.001, 10.002])
-    dec1 = np.zeros(3)
-    ra2 = np.array([10.0000001, 10.00205, 11.])
-    dec2 = np.zeros(3)
-    i1, i2 = scaling.mutual_matches(ra1, dec1, ra2, dec2, 1.)
-    assert list(i1) == [0, 2] and list(i2) == [0, 1], (
-        'Positions should be matched one-to-one within the radius'
-    )
 
 
 def test_reproject_and_combine():
