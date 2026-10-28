@@ -15,9 +15,6 @@ otherwise.  The WCS that the reduced images inherit from the raw headers is the
 nominal telescope solution, which is not used.
 """
 
-import hashlib
-import json
-
 import numpy as np
 
 from astropy.io import fits
@@ -32,6 +29,8 @@ from pipnick.photometry.fit import psf_plot
 from pipnick.photometry.psf_photometry import consolidate_groups, psf_analysis
 from pipnick.pipelines.reduction import load_setup, plan_products, table_values
 from pipnick.pkg.exceptions import PipnickDataModelError, PipnickPathError
+from pipnick.pkg.paths import photometry_table, step_dir
+from pipnick.pkg.provenance import image_hash, json_hash, solution_hash
 
 
 def celestial_coordinates(header, x, y):
@@ -75,57 +74,6 @@ def _masked(values):
     _values = np.asarray(values, dtype=float)
     bad = np.logical_not(np.isfinite(_values))
     return np.ma.MaskedArray(np.where(bad, 0., _values), mask=bad)
-
-
-def _settings_hash(settings):
-    """
-    Return a hash of the photometry settings, used to determine if they have
-    changed: the first 16 hexadecimal digits of the SHA-1 hash of their JSON
-    representation.
-    """
-    return hashlib.sha1(json.dumps(settings, sort_keys=True).encode()).hexdigest()[:16]
-
-
-def image_hash(header):
-    """
-    Return the hash of the content of a reduced image.
-
-    The hash combines the provenance keywords of the image (``PNRAWHSH`` and
-    ``PNTABH``; see :func:`~pipnick.pipelines.reduction.reduce_all`), so it
-    changes when the image is reduced from different frames or table values.
-
-    Parameters
-    ----------
-    header : :class:`astropy.io.fits.Header`
-        The header of the reduced image.
-
-    Returns
-    -------
-    str
-        The hash, ``<PNRAWHSH>-<PNTABH>``, with ``none`` for missing keywords.
-    """
-    return f'{header.get("PNRAWHSH", "none")}-{header.get("PNTABH", "none")}'
-
-
-def solution_hash(header):
-    """
-    Return the hash of the astrometric solution of a reduced image.
-
-    Only a solution found by pipnick (with the ``PNASTMTH`` keyword) counts;
-    see :func:`~pipnick.pipelines.astrometry.apply_wcs`.
-
-    Parameters
-    ----------
-    header : :class:`astropy.io.fits.Header`
-        The header of the reduced image.
-
-    Returns
-    -------
-    str
-        The hash of the solution (``PNASTWH``), or ``'none'`` if the image has
-        no solution.
-    """
-    return header.get('PNASTWH', 'none') if 'PNASTMTH' in header else 'none'
 
 
 def measure_image(path, values, mjd, settings, scale):
@@ -237,7 +185,7 @@ def measure_image(path, values, mjd, settings, scale):
             'fwhm_pix': float(fwhm), 'fwhm_arcsec': float(fwhm * scale), 'nstack': nstack
         },
         'aper_radius_pix': float(settings['aper_radius'] * fwhm), 'removed': removed,
-        'settings': settings, 'settings_hash': _settings_hash(settings),
+        'settings': settings, 'settings_hash': json_hash(settings),
         'image_hash': image_hash(hdr), 'wcs_method': hdr.get('PNASTMTH', 'none'),
         'wcs_hash': solution_hash(hdr)
     }
@@ -454,7 +402,7 @@ def photometry_all(
     metafile, metadata, _rdxdir, tag, camera = load_setup(table, rdxdir=rdxdir)
     if not _rdxdir.is_dir():
         raise PipnickPathError(f'{_rdxdir} does not exist; reduce the data first.')
-    phot_dir = _rdxdir / 'photometry'
+    phot_dir = step_dir(_rdxdir, 'photometry')
     log.info(f'Photometry of the images in {_rdxdir}')
 
     products = [p for p in plan_products(metadata, _rdxdir) if p['frametype'] == 'science']
@@ -471,7 +419,7 @@ def photometry_all(
     summary = []
     for product in products:
         path = product['file']
-        ofile = phot_dir / f'{path.stem}_phot.ecsv'
+        ofile = photometry_table(path)
         row = {
             'image': path.name, 'status': 'failed', 'nsources': -1, 'fwhm_pix': -1.,
             'fwhm_arcsec': -1., 'nstack': -1, 'wcs': 'none', 'reason': '-'
@@ -493,7 +441,7 @@ def photometry_all(
             existing = Table.read(ofile, format='ascii.ecsv')
             if (
                 existing.meta.get('image_hash') == image_hash(hdr)
-                and existing.meta.get('settings_hash') == _settings_hash(settings)
+                and existing.meta.get('settings_hash') == json_hash(settings)
             ):
                 row.update(_summary_values(existing))
                 if existing.meta.get('wcs_hash') == solution_hash(hdr):

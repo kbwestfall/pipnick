@@ -28,14 +28,12 @@ recorded in the image headers.
 """
 
 import datetime
-import hashlib
 import json
 import tomllib
 from pathlib import Path
 
 import numpy as np
 
-from astropy.coordinates import SkyCoord
 from astropy.io import fits
 from astropy.table import MaskedColumn, Table
 from astropy.time import Time
@@ -50,11 +48,16 @@ from pipnick.photometry.extinction import nominal_extinction
 from pipnick.photometry.landolt import (
     catalog_color, catalog_path, load_landolt, match_landolt, parse_color
 )
-from pipnick.pipelines.photometry import image_hash, select_products, solution_hash
+from pipnick.pipelines.photometry import select_products
 from pipnick.pipelines.reduction import load_setup, plan_products
 from pipnick.pkg.exceptions import (
     PipnickDataModelError, PipnickParameterError, PipnickPathError
 )
+from pipnick.pkg.paths import (
+    calibrated_table, calibration_file, photometry_table, residuals_file, step_dir
+)
+from pipnick.pkg.provenance import file_hash, image_hash, json_hash, solution_hash
+from pipnick.utils.crossmatch import link_sources
 
 
 def default_colors():
@@ -168,21 +171,6 @@ def _resolve_fixed(fix, band, terms, nominal):
         else:
             fixed[term] = float(value)
     return fixed
-
-
-def _hash(content):
-    """
-    Return the first 16 hexadecimal digits of the SHA-1 hash of the JSON
-    representation of ``content``.
-    """
-    return hashlib.sha1(json.dumps(content, sort_keys=True).encode()).hexdigest()[:16]
-
-
-def _file_hash(path):
-    """
-    Return the first 16 hexadecimal digits of the SHA-1 hash of a file.
-    """
-    return hashlib.sha1(Path(path).read_bytes()).hexdigest()[:16]
 
 
 def _night(mjd):
@@ -728,7 +716,7 @@ def calibration_hash(content):
     """
     _content = json.loads(json.dumps(content))
     _content.get('calibration', {}).pop('fit_hash', None)
-    return _hash(_content)
+    return json_hash(_content)
 
 
 def read_calibration(path):
@@ -769,7 +757,7 @@ def read_calibration(path):
     return content, calibration_hash(content) != content['calibration'].get('fit_hash')
 
 
-def _collect_images(products, tag, phot_dir):
+def _collect_images(products, tag):
     """
     Collect the reduced science images and their source tables.
 
@@ -788,7 +776,7 @@ def _collect_images(products, tag, phot_dir):
     unsupported = set()
     for product in products:
         path = product['file']
-        pfile = phot_dir / f'{path.stem}_phot.ecsv'
+        pfile = photometry_table(path)
         if not path.is_file():
             log.warning(f'{path.name} does not exist; reduce the data first.  Skipping.')
             continue
@@ -897,7 +885,7 @@ def calibrate_night(night, images, standards, catalog, camera, tag, settings, no
     content = {
         'calibration': {
             'setup': tag, 'night': night, 'camera': camera.name,
-            'catalog': 'Landolt (2009, 2013)', 'catalog_hash': _file_hash(catalog_path()),
+            'catalog': 'Landolt (2009, 2013)', 'catalog_hash': file_hash(catalog_path()),
             'magnitude': settings['mag'],
             'created': datetime.datetime.now(datetime.UTC).isoformat(timespec='seconds'),
             'input_hash': settings['input_hash']
@@ -1162,7 +1150,7 @@ def calibrate_all(
             'Calibrating the aperture magnitudes, without an aperture correction: the '
             'calibration is valid only for magnitudes measured in the same aperture.'
         )
-    cal_dir = _rdxdir / 'calibrate'
+    cal_dir = step_dir(_rdxdir, 'calibrate')
     log.info(f'Photometric calibration of the images in {_rdxdir}')
 
     _colors = default_colors()
@@ -1197,7 +1185,7 @@ def calibrate_all(
     selected = {
         p['comb_id'] for p in (products if images is None else select_products(products, images))
     }
-    all_images = _collect_images(products, tag, _rdxdir / 'photometry')
+    all_images = _collect_images(products, tag)
     if not any(image['coords'] for image in all_images):
         raise PipnickDataModelError(
             'No source table has celestial coordinates, so no standards can be found; run '
@@ -1215,10 +1203,10 @@ def calibrate_all(
             if image['coords'] and image['band'] is not None and image['airmass'] is not None
             and image['product']['comb_id'] in selected
         ]
-        settings['input_hash'] = _hash(
+        settings['input_hash'] = json_hash(
             {
                 'settings': {k: v for k, v in settings.items() if k != 'input_hash'},
-                'fix': _fix, 'nominal': nominal, 'catalog': _file_hash(catalog_path()),
+                'fix': _fix, 'nominal': nominal, 'catalog': file_hash(catalog_path()),
                 'tables': [
                     [
                         image['phot_file'].name, image['phot'].meta.get('settings_hash'),
@@ -1229,7 +1217,7 @@ def calibrate_all(
                 'bands': sorted({str(i['band']) for i in night_images})
             }
         )
-        ofile = cal_dir / f'{tag}_{night}.toml'
+        ofile = calibration_file(_rdxdir, tag, night)
         content = None
         if ofile.is_file() and not overwrite:
             existing, edited = read_calibration(ofile)
@@ -1260,7 +1248,7 @@ def calibrate_all(
             )
             write_calibration(ofile, content)
             log.info(f'Wrote {ofile}')
-            rfile = cal_dir / f'{tag}_{night}_residuals.ecsv'
+            rfile = residuals_file(_rdxdir, tag, night)
             meas.write(rfile, format='ascii.ecsv', overwrite=True)
             log.info(f'Wrote {rfile}')
             if qa:
@@ -1272,7 +1260,7 @@ def calibrate_all(
         if apply in ['image', 'both']:
             apply_to_headers(night_images, content, ofile)
         if apply in ['catalog', 'both']:
-            apply_to_catalogs(night_images, content, ofile, cal_dir, settings, _default_color)
+            apply_to_catalogs(night_images, content, ofile, settings, _default_color)
 
     _summarize(summary, cal_dir)
     if not any(row['status'] == 'ok' for row in summary):
@@ -1345,7 +1333,7 @@ def apply_to_headers(images, content, cfile):
         The names of the images that could not be calibrated.
     """
     calibrations = _calibrations(content)
-    chash = _file_hash(cfile)
+    chash = file_hash(cfile)
     skipped = []
     for image in images:
         path = image['path']
@@ -1393,59 +1381,17 @@ def apply_to_headers(images, content, cfile):
     return skipped
 
 
-def _cross_match(images, radius):
-    """
-    Identify the same sources in images of one object, by their celestial
-    coordinates.
-
-    The sources of each image (in order) are matched to the sources found so
-    far, within ``radius`` (arcsec); unmatched sources are added.  Sources in
-    images without celestial coordinates are not matched.
-
-    Returns
-    -------
-    list
-        The source identifier of each source in each image.
-    """
-    ref_id = []
-    ref_ra = []
-    ref_dec = []
-    ids = []
-    next_id = 0
-    for image in images:
-        phot = image['phot']
-        sid = np.arange(next_id, next_id + len(phot))
-        next_id += len(phot)
-        ids.append(sid)
-        if not image['coords'] or len(phot) == 0:
-            continue
-        ra = np.ma.asarray(phot['ra'], dtype=float)
-        dec = np.ma.asarray(phot['dec'], dtype=float)
-        good = np.where(np.logical_not(np.ma.getmaskarray(ra) | np.ma.getmaskarray(dec)))[0]
-        new = good
-        if len(ref_id) > 0 and len(good) > 0:
-            ref = SkyCoord(ref_ra, ref_dec, unit='deg')
-            coo = SkyCoord(ra[good].filled(0.), dec[good].filled(0.), unit='deg')
-            near, sep, _ = coo.match_to_catalog_sky(ref)
-            matched = sep.arcsec < radius
-            sid[good[matched]] = np.asarray(ref_id)[near[matched]]
-            new = good[np.logical_not(matched)]
-        ref_id += [int(s) for s in sid[new]]
-        ref_ra += [float(r) for r in ra[new]]
-        ref_dec += [float(d) for d in dec[new]]
-    return ids
-
-
-def apply_to_catalogs(images, content, cfile, cal_dir, settings, default_color):
+def apply_to_catalogs(images, content, cfile, settings, default_color):
     """
     Calibrate the source tables of the images of a night.
 
     The sources in the images of each object are identified by their
-    celestial coordinates (see :func:`_cross_match`), and calibrated with
-    :func:`~pipnick.photometry.calibrate.iterate_colors`, so that the color
-    of each source is computed from its calibrated magnitudes, averaged over
-    the images in each band.  Sources without a measured color use the
-    default color, and are flagged (``color_assumed``).
+    celestial coordinates (see :func:`~pipnick.utils.crossmatch.link_sources`),
+    and calibrated with :func:`~pipnick.photometry.calibrate.iterate_colors`,
+    so that the color of each source is computed from its calibrated
+    magnitudes, averaged over the images in each band.  Sources without a
+    measured color use the default color, and are flagged
+    (``color_assumed``).
 
     The calibrated table of each image is written to
     ``calibrate/<image>_cal.ecsv``; the source tables of the photometry are
@@ -1463,8 +1409,6 @@ def apply_to_catalogs(images, content, cfile, cal_dir, settings, default_color):
         The calibration; see :func:`write_calibration`.
     cfile : :class:`pathlib.Path`
         The calibration file.
-    cal_dir : :class:`pathlib.Path`
-        The output directory.
     settings : dict
         The calibration settings; see :func:`calibrate_all`.
     default_color : dict
@@ -1478,7 +1422,7 @@ def apply_to_catalogs(images, content, cfile, cal_dir, settings, default_color):
     calibrations = _calibrations(content)
     defaults = {parse_color(c): float(v) for c, v in default_color.items()}
     mag_type = content['calibration']['magnitude']
-    chash = _file_hash(cfile)
+    chash = file_hash(cfile)
     outputs = []
     usable = []
     for image in images:
@@ -1492,7 +1436,16 @@ def apply_to_catalogs(images, content, cfile, cal_dir, settings, default_color):
     objects = sorted({str(image['phot'].meta.get('object')) for image in usable})
     for obj in objects:
         group = [image for image in usable if str(image['phot'].meta.get('object')) == obj]
-        ids = _cross_match(group, settings['match_radius'])
+        # Images without celestial coordinates are not matched
+        ra = [
+            np.ma.asarray(i['phot']['ra'], dtype=float) if i['coords']
+            else np.ma.masked_all(len(i['phot'])) for i in group
+        ]
+        dec = [
+            np.ma.asarray(i['phot']['dec'], dtype=float) if i['coords']
+            else np.ma.masked_all(len(i['phot'])) for i in group
+        ]
+        ids = link_sources(ra, dec, settings['match_radius'])
         mags = []
         errs = []
         for image in group:
@@ -1529,7 +1482,7 @@ def apply_to_catalogs(images, content, cfile, cal_dir, settings, default_color):
                 'calibration_hash': chash, 'airmass': image['airmass'],
                 'errors': 'statistical only; fixed and fallback terms have no error'
             }
-            ofile = cal_dir / f'{image["path"].stem}_cal.ecsv'
+            ofile = calibrated_table(image['path'])
             tbl.write(ofile, format='ascii.ecsv', overwrite=True)
             outputs.append(ofile)
             log.info(

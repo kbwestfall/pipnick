@@ -16,39 +16,8 @@ is then multiplied by :math:`10^{0.4 z_i}`.
 
 import numpy as np
 
-from astropy.coordinates import SkyCoord
-from scipy import linalg
-
 from pipnick import log
-
-
-def mutual_matches(ra1, dec1, ra2, dec2, radius):
-    """
-    Match two lists of positions one-to-one.
-
-    Two positions are matched if each is the nearest to the other, and they
-    are separated by less than ``radius``.
-
-    Parameters
-    ----------
-    ra1, dec1, ra2, dec2 : :class:`numpy.ndarray`
-        The ICRS coordinates (deg) of the two lists.
-    radius : float
-        The match radius (arcsec).
-
-    Returns
-    -------
-    i1, i2 : :class:`numpy.ndarray`
-        The indices of the matched positions in each list.
-    """
-    if len(ra1) == 0 or len(ra2) == 0:
-        return np.array([], dtype=int), np.array([], dtype=int)
-    c1 = SkyCoord(ra1, dec1, unit='deg')
-    c2 = SkyCoord(ra2, dec2, unit='deg')
-    near12, sep, _ = c1.match_to_catalog_sky(c2)
-    near21, _, _ = c2.match_to_catalog_sky(c1)
-    mutual = (near21[near12] == np.arange(len(c1))) & (sep.arcsec < radius)
-    return np.where(mutual)[0], near12[mutual]
+from pipnick.utils.lsq import weighted_lstsq
 
 
 def _connected(nimages, pairs):
@@ -124,16 +93,13 @@ def solve_offsets(nimages, measurements, reference=0, floor=0.01, rej=3., maxite
         x[rows_j == k, n] -= 1.
     use = np.ones(len(dm), dtype=bool)
     for _ in range(maxiter + 1):
-        w = use / err**2
-        normal = np.dot(x.T * w, x)
-        coeff = linalg.solve(normal, np.dot(x.T * w, dm))
+        coeff, cov, _, _ = weighted_lstsq(x, dm, err=err, gpm=use, scale_cov=False)
         resid = (dm - np.dot(x, coeff)) / err
         scatter = np.std(resid[use])
         reject = use & (np.abs(resid) > rej * max(scatter, 1.))
         if not np.any(reject):
             break
         use = use & np.logical_not(reject)
-    cov = linalg.inv(normal)
     dof = int(np.sum(use)) - len(free)
     if dof > 0:
         rchi2 = np.sum((resid[use])**2) / dof

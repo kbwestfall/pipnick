@@ -31,12 +31,11 @@ For now, a mosaic must combine images from a single night; see
 :func:`mosaic_all`.
 """
 
-import hashlib
-import json
 from pathlib import Path
 
 import numpy as np
 
+from astropy.coordinates import SkyCoord
 from astropy.io import fits
 from astropy.stats import sigma_clipped_stats
 from astropy.table import Table
@@ -55,22 +54,16 @@ from pipnick.mosaic.coadd import (
 from pipnick.mosaic.psfmatch import (
     image_kernel, moffat_beta, moffat_fwhm, normalized_convolve
 )
-from pipnick.mosaic.scaling import mutual_matches, solve_offsets
+from pipnick.mosaic.scaling import solve_offsets
 from pipnick.photometry.aperture_photometry import aperture_analysis
 from pipnick.photometry.psf_photometry import build_moffat_psf_model, subtract_background
-from pipnick.pipelines.photometry import image_hash, solution_hash
 from pipnick.pipelines.reduction import load_setup, plan_products, table_values
 from pipnick.pkg.exceptions import (
     PipnickDataModelError, PipnickParameterError, PipnickPathError
 )
-
-
-def _hash(content):
-    """
-    Return the first 16 hexadecimal digits of the SHA-1 hash of the JSON
-    representation of ``content``.
-    """
-    return hashlib.sha1(json.dumps(content, sort_keys=True).encode()).hexdigest()[:16]
+from pipnick.pkg.paths import photometry_table, step_dir
+from pipnick.pkg.provenance import image_hash, json_hash, solution_hash
+from pipnick.utils.crossmatch import match_sky
 
 
 def check_mosaic_groups(metadata, metafile):
@@ -161,7 +154,7 @@ def collect_images(tables, require_photometry=True):
                 raise PipnickDataModelError(
                     f'{path.name} has no astrometric solution; run pipnick_astrometry.'
                 )
-            pfile = rdxdir / 'photometry' / f'{path.stem}_phot.ecsv'
+            pfile = photometry_table(path)
             phot = None
             if pfile.is_file():
                 phot = Table.read(pfile, format='ascii.ecsv')
@@ -308,7 +301,7 @@ def group_wcs(images, wcs_file, pixel_scale=None, overwrite=False):
     ghash : str
         The hash of the group membership and pixel scale.
     """
-    ghash = _hash(
+    ghash = json_hash(
         {
             'images': sorted(
                 [str(image['path']), solution_hash(image['hdr'])] for image in images
@@ -483,9 +476,9 @@ def measure_offsets(images, prepared, targets, settings):
     measurements = []
     for i in range(n):
         for j in range(i + 1, n):
-            i1, i2 = mutual_matches(
-                sources[i][0], sources[i][1], sources[j][0], sources[j][1],
-                settings['match_radius']
+            i1, i2, _ = match_sky(
+                SkyCoord(sources[i][0], sources[i][1], unit='deg'),
+                SkyCoord(sources[j][0], sources[j][1], unit='deg'), settings['match_radius']
             )
             if len(i1) == 0:
                 continue
@@ -909,7 +902,7 @@ def mosaic_all(
         log.warning('No mosaics are defined; see pipnick_metadata --assign_mosaics.')
         return []
     if outdir is None:
-        _outdir = images[0]['rdxdir'] / 'mosaic'
+        _outdir = step_dir(images[0]['rdxdir'], 'mosaic')
     else:
         _outdir = Path(outdir).absolute()
     if not _outdir.parent.is_dir():
@@ -951,7 +944,7 @@ def mosaic_all(
                 # A single image is not convolved to match itself; it is only
                 # reprojected
                 target = None
-            mhash = _hash(
+            mhash = json_hash(
                 {
                     'settings': settings, 'group': ghash, 'target': target,
                     'images': sorted(_image_key(image) for image in these)

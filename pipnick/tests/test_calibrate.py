@@ -21,9 +21,9 @@ from pipnick.photometry.calibrate import (
     residual_drift, zero_point
 )
 from pipnick.pipelines import calibrate
-from pipnick.pipelines.photometry import image_hash
 from pipnick.pipelines.reduction import load_setup, plan_products
 from pipnick.pkg.exceptions import PipnickDataModelError, PipnickParameterError
+from pipnick.pkg.provenance import image_hash
 from pipnick.tests.test_metadata import write_andor
 
 # The standards: well-observed stars of Landolt field SA 110

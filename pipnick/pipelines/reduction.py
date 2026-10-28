@@ -9,7 +9,6 @@ column of a per-setup metadata file; see :mod:`pipnick.metadata` and
 """
 
 from pathlib import Path
-import hashlib
 import warnings
 
 import numpy as np
@@ -23,6 +22,7 @@ import ccdproc
 
 from pipnick import cameras
 from pipnick.pkg.exceptions import PipnickDataModelError, PipnickPathError
+from pipnick.pkg.provenance import names_hash, values_hash
 from pipnick.utils.combiner import Combiner
 from pipnick.metadata import (
     filter_name, safe_name, build_metadata, frame_path, setup_tag, update_metadata_meta
@@ -513,18 +513,6 @@ def table_values(metadata, indx, frametype):
     return values
 
 
-def _table_hash(values):
-    """
-    Return a hash of the metadata table values written to the header of an
-    output (see :func:`table_values`), used to determine if they have changed.
-
-    The hash is the first 16 hexadecimal digits of the SHA-1 hash of the
-    sorted ``quantity=value`` pairs, separated by newlines.
-    """
-    text = '\n'.join(f'{k}={values[k]}' for k in sorted(values.keys()))
-    return hashlib.sha1(text.encode()).hexdigest()[:16]
-
-
 def _apply_table_values(ccd, values, camera):
     """
     Write metadata table values to the header of an output.
@@ -683,18 +671,6 @@ def _find_products(rdxdir):
     return products
 
 
-def _raw_hash(files):
-    """
-    Return a hash of the names of a set of raw files, used to determine if the
-    frames used to construct an output have changed.
-
-    The hash is the first 16 hexadecimal digits of the SHA-1 hash of the
-    sorted file names (without their paths), separated by newlines.
-    """
-    names = '\n'.join(sorted(Path(f).name for f in files))
-    return hashlib.sha1(names.encode()).hexdigest()[:16]
-
-
 def _needs_update(ofile, tag, raw_hash, table_hash, calib_hashes, overwrite):
     """
     Determine if an output file must be (re)constructed.
@@ -707,10 +683,11 @@ def _needs_update(ofile, tag, raw_hash, table_hash, calib_hashes, overwrite):
         The setup tag; see :func:`~pipnick.metadata.setup_tag`.
     raw_hash : str
         The hash of the raw frames used to construct the output; see
-        :func:`_raw_hash`.
+        :func:`~pipnick.pkg.provenance.names_hash`.
     table_hash : str
         The hash of the metadata table values written to the output header;
-        see :func:`_table_hash`.  Compared to the ``PNTABH`` header keyword.
+        see :func:`~pipnick.pkg.provenance.values_hash`.  Compared to the
+        ``PNTABH`` header keyword.
     calib_hashes : dict
         The hash of each calibration used to construct the output, keyed by
         the calibration type (e.g., ``'bias'``), or ``'none'`` if the
@@ -798,7 +775,8 @@ def _add_provenance(ccd, tag, comb_id, files, raw_hash, calibs):
     files : list
         The raw files.
     raw_hash : str
-        The hash of the raw files; see :func:`_raw_hash`.
+        The hash of the raw files; see
+        :func:`~pipnick.pkg.provenance.names_hash`.
     calibs : dict
         The calibrations used, keyed by their type (e.g., ``'bias'``), with
         None for any that are not available; see :func:`_reduce_calibration`.
@@ -1249,17 +1227,17 @@ def _reduce_calibration(product, metadata, raw, tag, overwrite, camera, bias=Non
     -------
     dict
         The calibration, with its output file (``file``), the hash of its raw
-        frames (``hash``; see :func:`_raw_hash`), and its image data (``ccd``),
-        which is None until needed if the calibration was up to date; see
-        :func:`_calibration_data`.
+        frames (``hash``; see :func:`~pipnick.pkg.provenance.names_hash`), and
+        its image data (``ccd``), which is None until needed if the
+        calibration was up to date; see :func:`_calibration_data`.
     """
     frametype = product['frametype']
     files = [raw[i] for i in product['indx']]
-    raw_hash = _raw_hash(files)
+    raw_hash = names_hash(files)
     calib = {'file': product['file'], 'hash': raw_hash, 'ccd': None}
     calibs = {} if frametype == 'bias' else {'bias': bias}
     values = table_values(metadata, product['indx'], frametype)
-    table_hash = _table_hash(values)
+    table_hash = values_hash(values)
     update, reason = _needs_update(
         product['file'], tag, raw_hash, table_hash, _calib_hashes(calibs), overwrite
     )
@@ -1326,10 +1304,10 @@ def _reduce_science(product, metadata, raw, tag, overwrite, camera, bias=None, f
     """
     indx = product['indx']
     files = [raw[i] for i in indx]
-    raw_hash = _raw_hash(files)
+    raw_hash = names_hash(files)
     calibs = {'bias': bias, 'flat': flat}
     values = table_values(metadata, indx, 'science')
-    table_hash = _table_hash(values)
+    table_hash = values_hash(values)
     update, reason = _needs_update(
         product['file'], tag, raw_hash, table_hash, _calib_hashes(calibs), overwrite
     )
