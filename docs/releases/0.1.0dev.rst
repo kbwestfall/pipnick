@@ -162,7 +162,7 @@ Functionality/Performance Improvements and Additions
   not resubmitted after they are rewritten by ``pipnick_reduce``.  New options:
   ``--resolve``, ``--upload_image``, ``--dry_run``, ``--max_submissions``,
   ``--group_radius``, ``--min_matches``, ``--max_rms``, ``--search``,
-  ``--wide_search``, ``--wide_min_matches``, ``--images``, ``--qa``,
+  ``--wide_search``, ``--wide_min_matches``, ``--images``, ``--no_qa``,
   ``--max_sources``, ``--detect_thresh``, and ``--fwhm``.
 
 - ``pipnick_astrometry`` logs a summary of the solution of each image, with
@@ -230,7 +230,7 @@ Functionality/Performance Improvements and Additions
   airmass from the metadata table).  Reruns only measure images that, or
   whose settings, have changed, and only update the coordinates of images
   whose astrometric solution has changed.  A summary is written to
-  ``photometry/summary.ecsv``.  New options: ``--images``, ``--qa``,
+  ``photometry/summary.ecsv``.  New options: ``--images``, ``--no_qa``,
   ``--psf_thresh``, ``--fwhm``, ``--stack``, ``--min_sep``, ``--group_sep``,
   and ``--aper_radius``.
 
@@ -253,7 +253,7 @@ Functionality/Performance Improvements and Additions
   fits are not counted as neighbors.  The calibration is written to an editable TOML
   file, which is kept on rerun if edited.  The residuals of the standards,
   their leave-one-out residuals, and the drift of the zero point with time
-  are reported, with optional QA figures.  ``--apply`` writes calibrated
+  are reported, with QA figures.  ``--apply`` writes calibrated
   source tables and records the calibration in the image headers.
 
 - If the standards of a band do not span enough airmass to measure the
@@ -317,6 +317,19 @@ Functionality/Performance Improvements and Additions
 
 - Added ``pipnick_status``, which reports the state of every step for every
   science image of a per-setup metadata table, and the next command to run.
+
+- Every step writes its QA figures by default (``--no_qa`` skips them), for
+  each product it builds and for any product that lacks one.  The reduction
+  writes a figure of each product to ``reduce/qa``.
+
+- The photometry lists the sources removed by its vetting, with the reason,
+  in ``photometry/<image>_removed.ecsv``.
+
+- The calibration summary gives the zero point above the atmosphere and its
+  error, and its ``file`` column is renamed ``action``.
+
+- Missing values in the ``INPUTS`` table of a mosaic are masked instead of
+  being set to -1.
 
 Under-the-hood Improvements
 ---------------------------

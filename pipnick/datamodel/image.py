@@ -12,7 +12,7 @@ from pipnick.astrometry.fit import wcs_from_header
 from pipnick.datamodel.catalog import SourceCatalog
 from pipnick.image.io import read_reduced
 from pipnick.pkg.exceptions import PipnickDataModelError
-from pipnick.pkg.paths import photometry_table
+from pipnick.pkg.paths import photometry_table, removed_table
 from pipnick.pkg.provenance import image_hash, names_hash, solution_hash, values_hash
 
 
@@ -216,6 +216,14 @@ class ReducedImage:
     def phot_file(self):
         """The source table of the image; see :func:`~pipnick.pkg.paths.photometry_table`."""
         return photometry_table(self.path)
+
+    @property
+    def removed_file(self):
+        """
+        The table of the sources removed from the photometry of the image; see
+        :func:`~pipnick.pkg.paths.removed_table`.
+        """
+        return removed_table(self.path)
 
     def photometry(self, require=True):
         """

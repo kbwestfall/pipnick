@@ -48,6 +48,7 @@ from pipnick.astrometry.solve import (
 )
 from pipnick.datamodel.dataset import DataSet
 from pipnick.pkg.exceptions import PipnickPathError
+from pipnick.pkg.paths import qa_figure
 from pipnick.pkg.report import StepReport
 from pipnick.pkg.summary import Summary
 from pipnick.qa.sources import plot_sources
@@ -204,10 +205,16 @@ def _summarize(images, astro_dir):
             )
 
 
-def _write_qa(images, astro_dir, previous=None):
+def _write_qa(images, astro_dir, report, solved=None):
     """
-    Write a QA figure for images to ``astrometry/qa/<image>.png``; see
+    Write the QA figures of the images to ``astrometry/qa/<image>.png``; see
     :func:`~pipnick.qa.sources.plot_sources`.
+
+    A figure is redrawn for each image solved in this run, which shows the
+    sources matched by the solution, and drawn for any image without one,
+    which shows only the detected sources if the image is unsolved or was
+    solved in an earlier run.  A failure is recorded in the report, and does
+    not stop the astrometry.
 
     Parameters
     ----------
@@ -215,25 +222,31 @@ def _write_qa(images, astro_dir, previous=None):
         The :class:`~pipnick.astrometry.solve.AstrometryImage` objects.
     astro_dir : :class:`pathlib.Path`
         The ``astrometry`` directory.
-    previous : set, optional
-        The names of the images that were solved before this run, which are
-        skipped, along with images that are not solved.  If None, a figure is
-        written for every image (e.g., for a dry run).
+    report : :class:`~pipnick.pkg.report.StepReport`
+        Records any failure.
+    solved : set, optional
+        The names of the images solved in this run.  If None, no image was
+        solved (e.g., for a dry run).
     """
-    qa_dir = astro_dir / 'qa'
-    qa_dir.mkdir(parents=True, exist_ok=True)
+    _solved = set() if solved is None else solved
+    nwritten = 0
     for image in images:
-        if previous is not None and (image.status != 'solved' or image.name in previous):
+        ofile = qa_figure(astro_dir, image.path.stem)
+        if image.name not in _solved and ofile.is_file():
             continue
-        data, mask, _ = read_image(image.path)
         title = f'{image.name}: {len(image.sources)} detected sources'
         if image.status == 'solved':
             title += f'; {image.method} solution'
-        plot_sources(
-            data, mask, image.sources, qa_dir / f'{image.path.stem}.png', matched=image.matched,
-            title=title
-        )
-    log.info(f'QA figures written to {qa_dir}.')
+        try:
+            data, mask, _ = read_image(image.path)
+            plot_sources(data, mask, image.sources, ofile, matched=image.matched, title=title)
+        except Exception as e:
+            log.debug(f'Traceback of the failure of the QA of {image.name}:', exc_info=True)
+            report.attention(f'The QA figure of {image.name} failed: {type(e).__name__}: {e}')
+            continue
+        nwritten += 1
+    if nwritten > 0:
+        log.info(f'Wrote {nwritten} QA figures to astrometry/qa.')
 
 
 def _select(images, selection):
@@ -320,7 +333,7 @@ def _report_dry_run(images, groups, astro_dir):
 def astrometry_all(
     table, rdxdir=None, solver=None, catalog=None, api_key=None, resolve=False,
     upload_image=False, dry_run=False, max_submissions=None, group_radius=1., min_matches=4,
-    max_rms=0.3, search=60., wide_search=10., wide_min_matches=10, images=None, qa=False,
+    max_rms=0.3, search=60., wide_search=10., wide_min_matches=10, images=None, qa=True,
     max_sources=100, detect_thresh=5., fwhm=None, report=None
 ):
     """
@@ -389,9 +402,9 @@ def astrometry_all(
         not changed, but their solutions are used as references.  If None, all
         images are solved.
     qa : bool, optional
-        Write a QA figure for each image solved in this run (for every image,
-        for a dry run) to ``astrometry/qa``; see
-        :func:`~pipnick.qa.sources.plot_sources`.
+        Write the QA figures to ``astrometry/qa``: a figure is redrawn for
+        each image solved in this run, and drawn for any image without one;
+        see :func:`~pipnick.qa.sources.plot_sources`.
     max_sources : int, optional
         The maximum number of (brightest) sources detected in each image, and
         submitted to astrometry.net.
@@ -458,7 +471,7 @@ def astrometry_all(
     if dry_run:
         _report_dry_run(_images, groups, astro_dir)
         if qa:
-            _write_qa(_images, astro_dir)
+            _write_qa(_images, astro_dir, _report)
         _report.note('This was a dry run: nothing was submitted to astrometry.net.')
         _report.finish(
             f'dry run of {len(_images)} images.',
@@ -493,7 +506,8 @@ def astrometry_all(
         solve_group(group, _images, session)
 
     if qa:
-        _write_qa(_images, astro_dir, previous=previous)
+        solved = {i.name for i in _images if i.status == 'solved' and i.name not in previous}
+        _write_qa(_images, astro_dir, _report, solved=solved)
     log_pointing_offset(_images)
     _summarize(_images, astro_dir)
     solved = [image for image in _images if image.status == 'solved']
@@ -506,7 +520,8 @@ def astrometry_all(
             _report.check_range(
                 f'{image.name}: the RMS of the astrometric solution',
                 float(image.header['PNASTRMS']), expected, ' arcsec',
-                advice='Check the QA figure (--qa), and consider solving it again (--resolve).'
+                advice='Check its QA figure in astrometry/qa, and consider solving it again '
+                       '(--resolve).'
             )
     unsolved = [image.name for image in _images if image.status not in ['solved', 'skipped']]
     if len(unsolved) > 0:

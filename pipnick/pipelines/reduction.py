@@ -19,15 +19,18 @@ from astropy import units
 
 from pipnick import log
 from pipnick.datamodel.dataset import DataSet
+from pipnick.image.io import read_reduced
 from pipnick.pkg.exceptions import PipnickDataModelError
+from pipnick.pkg.paths import qa_figure
 from pipnick.pkg.provenance import names_hash, values_hash
 from pipnick.pkg.report import StepReport
 from pipnick.pkg.summary import Summary
 from pipnick.pkg.version import version
+from pipnick.qa.reduction import plot_product
 from pipnick.reduction.processing import combine_frames, process_frames, report_bias_stats
 
 
-def reduce_all(table, rdxdir=None, overwrite=False, report=None):
+def reduce_all(table, rdxdir=None, overwrite=False, qa=True, report=None):
     """
     Perform reduction of raw astronomical data frames (overscan subtraction,
     bias subtraction, flat division, cosmic ray masking).
@@ -81,6 +84,10 @@ def reduce_all(table, rdxdir=None, overwrite=False, report=None):
 
     A reduction directory may only hold the products from a single setup.
 
+    A summary of each product is logged and written to ``reduce/summary.ecsv``
+    (see :func:`_summarize`), and a QA figure of each product to
+    ``reduce/qa/<product>.png`` (see :func:`~pipnick.qa.reduction.plot_product`).
+
     Parameters
     ----------
     table : str, :class:`pathlib.Path`
@@ -97,6 +104,9 @@ def reduce_all(table, rdxdir=None, overwrite=False, report=None):
         Reprocess all outputs, even if they are up to date.  The metadata
         ``table`` is never rebuilt, to preserve any user edits; use
         ``pipnick_metadata --overwrite`` to rebuild it.
+    qa : bool, optional
+        Write the QA figures: a figure is redrawn when a product is built, and
+        drawn for a product that is up to date but lacks one.
     report : :class:`~pipnick.pkg.report.StepReport`, optional
         Collects the failures and problems of the reduction for its closing
         verdict.  If None, a new one is used.
@@ -218,6 +228,8 @@ def reduce_all(table, rdxdir=None, overwrite=False, report=None):
 
     _check_measurements(rows, dataset, _report)
     _summarize(rows, dataset.outdir('reduce'))
+    if qa:
+        _write_qa(rows, products, dataset.outdir('reduce'), _report)
     nup = sum(row['status'] == 'up to date' for row in rows)
     nbuilt = sum(row['status'] == 'built' for row in rows)
     nfail = sum(row['status'] == 'failed' for row in rows)
@@ -594,6 +606,60 @@ def _check_measurements(rows, dataset, report):
                 f'{row["file"]}: read noise {row["read_noise"]:.2f} e- (nominal {nominal} e-) '
                 'OK.'
             )
+
+
+def _write_qa(rows, products, outdir, report):
+    """
+    Write the QA figures of the products to ``reduce/qa/<product>.png``; see
+    :func:`~pipnick.qa.reduction.plot_product`.
+
+    A figure is redrawn for each product built in this run, and drawn for
+    each product that is up to date but lacks one.  The title gives the
+    measurements in the summary; see :func:`_summarize`.  A failure is
+    recorded in the report, and does not stop the reduction.
+
+    Parameters
+    ----------
+    rows : list
+        The summary rows; see :func:`_product_row`.
+    products : list
+        The :class:`~pipnick.datamodel.dataset.Product` objects.
+    outdir : :class:`pathlib.Path`
+        The ``reduce`` directory.
+    report : :class:`~pipnick.pkg.report.StepReport`
+        Records any failure.
+    """
+    by_name = {product.name: product for product in products}
+    nwritten = 0
+    for row in rows:
+        product = by_name[row['file']]
+        ofile = qa_figure(outdir, product.file.stem)
+        if row['status'] == 'failed' or (row['status'] == 'up to date' and ofile.is_file()):
+            continue
+        frames = 'frame' if row['nframes'] == 1 else 'frames'
+        title = f'{product.name}: {row["frametype"]}, {row["nframes"]} {frames}'
+        if row['bias_level'] is not None:
+            title += f'; bias level {row["bias_level"]:.1f} ADU'
+        if row['read_noise'] is not None:
+            title += f', read noise {row["read_noise"]:.2f} e-'
+        if row['level'] is not None:
+            title += f'; mean level {row["level"]:.0f} e-'
+        if row['sky'] is not None:
+            title += f'; sky {row["sky"]:.0f} e-'
+        if row['cr_frac'] is not None:
+            title += f', {100 * row["cr_frac"]:.2f}% cosmic rays'
+        try:
+            data, mask, _, hdr = read_reduced(product.file)
+            plot_product(data, mask, ofile, title=title, unit=hdr.get('BUNIT'))
+        except Exception as e:
+            log.debug(f'Traceback of the failure of the QA of {product.name}:', exc_info=True)
+            report.attention(
+                f'The QA figure of {product.name} failed: {type(e).__name__}: {e}'
+            )
+            continue
+        nwritten += 1
+    if nwritten > 0:
+        log.info(f'Wrote {nwritten} QA figures to reduce/qa.')
 
 
 def _summarize(rows, outdir):

@@ -164,7 +164,7 @@ Using the command-line script
 
 .. code-block:: console
 
-   pipnick_calibrate -t n1_2x2_slow_full.ecsv --qa --apply both
+   pipnick_calibrate -t n1_2x2_slow_full.ecsv --apply both
 
 The options are:
 
@@ -204,7 +204,9 @@ The options are:
 - ``--no_fallback``: Fail instead of using the nominal extinction.
 - ``--drift_warn``: The drift (mag/hour) above which a significant drift is
   reported as a warning (default 0.02).
-- ``--qa``: Write the QA figures to ``calibrate/qa``.
+- ``--no_qa``: Do not write the QA figures to ``calibrate/qa``.  By default, a
+  figure is written when a night is fit, and drawn from the residual table for
+  a night that is not refit but lacks one.
 - ``-o``, ``--overwrite``: Refit, even if the inputs have not changed or the
   calibration file has been edited.
 - ``--apply``: Apply the calibration to the science images of the night:
@@ -233,8 +235,11 @@ The products are in the ``calibrate`` subdirectory of the reduction directory:
 - ``summary.ecsv``, also logged: the status of each band, the numbers of stars
   and measurements, the rms and leave-one-out rms of the residuals, how the
   extinction was set (``fit``, ``fixed``, ``fallback``, or ``failed``), the
-  extinction coefficient, and the drift;
-- ``qa/<setup>_<night>_residuals.png`` (with ``--qa``): the residuals of each
+  extinction coefficient, the zero point above the atmosphere (airmass 0, for
+  color 0) and its error (``zp``, ``zp_err``), the drift, and what was done
+  with the calibration file (``action``: ``fit``, ``up to date``, or
+  ``edited (kept)``);
+- ``qa/<setup>_<night>_residuals.png`` (unless ``--no_qa``): the residuals of each
   band against airmass, color, catalog magnitude, and time.
 
 The calibration file
@@ -332,7 +337,7 @@ Using the pipeline in Python
 
    from pipnick.pipelines.calibrate import calibrate_all
 
-   files = calibrate_all('n1_2x2_slow_full.ecsv', qa=True, apply='both')
+   files = calibrate_all('n1_2x2_slow_full.ecsv', apply='both')
 
 See :func:`~pipnick.pipelines.calibrate.calibrate_all` for the full set of
 parameters, and :mod:`pipnick.photometry.calibrate` for the functions used to

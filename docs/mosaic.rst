@@ -18,7 +18,7 @@ The workflow is:
    pipnick_reduce -t n3_2x2_fast_full.ecsv
    pipnick_astrometry -t n3_2x2_fast_full.ecsv
    pipnick_photometry -t n3_2x2_fast_full.ecsv
-   pipnick_mosaic -t n3_2x2_fast_full.ecsv --qa
+   pipnick_mosaic -t n3_2x2_fast_full.ecsv
 
 Defining the mosaics
 --------------------
@@ -150,7 +150,7 @@ Using the command-line script
 
 .. code-block:: console
 
-   pipnick_mosaic -t n3_2x2_fast_full.ecsv n3_2x2_slow_full.ecsv --outdir mosaics --qa
+   pipnick_mosaic -t n3_2x2_fast_full.ecsv n3_2x2_slow_full.ecsv --outdir mosaics
 
 The options are:
 
@@ -176,9 +176,11 @@ The options are:
 - ``--pixel_scale``: The output pixel scale (arcsec).
 - ``--rej``, ``--rej_frac``, ``--no_reject``: The outlier rejection; see above.
 - ``-o``, ``--overwrite``: Rebuild the mosaics, even if they are up to date.
-- ``--qa``: Write a QA figure for each mosaic to ``qa/<mosaic>.png``: the
-  mosaic, its coverage, the magnitude offsets of the images, and their PSF
-  FWHM before and after the matching.
+- ``--no_qa``: Do not write the QA figure of each mosaic to
+  ``qa/<mosaic>.png``: the mosaic, its coverage, the magnitude offsets of the
+  images, and their PSF FWHM before and after the matching.  By default, the
+  figure is redrawn when a mosaic is constructed, and drawn for a mosaic that
+  is up to date but lacks one.
 
 When rerun, a mosaic is rebuilt only if its images, the settings, or the
 membership of its WCS group have changed.  A change in the membership of a WCS
@@ -203,7 +205,11 @@ Each mosaic is written to ``<mosaic>.fits``, with the extensions:
   (``match_ee``, the ratio of the encircled energy of the matched PSF model
   to that of the target within 1.5 times the target FWHM), magnitude offsets
   and scales, the number of magnitude differences used, the reference, the
-  relative weights, and the background levels subtracted.
+  relative weights, and the background levels subtracted.  Values that are
+  unknown (an airmass) or not measured (e.g., ``fwhm_out`` and ``match_ee``
+  without PSF matching) are masked; they are stored as NaN, the FITS null
+  value for floating-point columns, and :meth:`astropy.table.Table.read`
+  masks them again.
 
 The header records the labels, the filter, the night, the target PSF, the
 settings, the reference image, and the number of rejected pixels.  If the

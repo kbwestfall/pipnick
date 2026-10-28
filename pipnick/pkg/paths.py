@@ -61,6 +61,52 @@ def photometry_table(image):
     return step_dir(_image.parent, 'photometry') / f'{_image.stem}_phot.ecsv'
 
 
+def removed_table(image):
+    """
+    Return the table of the sources removed from the photometry of a reduced
+    image; see :func:`~pipnick.pipelines.photometry.vet_sources`.
+
+    Parameters
+    ----------
+    image : str, :class:`pathlib.Path`
+        The reduced image, in the reduction directory.
+
+    Returns
+    -------
+    :class:`pathlib.Path`
+        The table, ``photometry/<image>_removed.ecsv`` in the reduction
+        directory.
+    """
+    _image = Path(image)
+    return step_dir(_image.parent, 'photometry') / f'{_image.stem}_removed.ecsv'
+
+
+def qa_figure(outdir, name):
+    """
+    Return a QA figure of a step.
+
+    The figures of each step are written to the ``qa`` subdirectory of its
+    output directory, named for the product they show: e.g.,
+    ``reduce/qa/Bias.png``, ``astrometry/qa/<image>.png``,
+    ``photometry/qa/<image>_psf.png`` and ``<image>_sources.png``,
+    ``calibrate/qa/<setup>_<night>_residuals.png``, and
+    ``mosaic/qa/<mosaic>.png``.
+
+    Parameters
+    ----------
+    outdir : str, :class:`pathlib.Path`
+        The output directory of the step; see :func:`step_dir`.
+    name : str
+        The name of the figure, without the extension.
+
+    Returns
+    -------
+    :class:`pathlib.Path`
+        The figure, ``<outdir>/qa/<name>.png``.
+    """
+    return Path(outdir) / 'qa' / f'{name}.png'
+
+
 def points_file(image):
     """
     Return the file with the astrometric solution of a reduced image provided

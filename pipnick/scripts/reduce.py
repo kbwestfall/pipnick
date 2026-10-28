@@ -33,6 +33,12 @@ class Reduce(scriptbase.ScriptBase):
             '-o', '--overwrite', default=False, action='store_true',
             help='Reprocess all outputs, even if they are up to date.'
         )
+        parser.add_argument(
+            '--no_qa', dest='qa', default=True, action='store_false',
+            help='Do not write the QA figures.  By default, a figure of each product (the image '
+                 'and the histogram of its pixel values) is written to the reduce/qa directory '
+                 'when the product is built, or if it lacks one.'
+        )
         return parser
 
     @classmethod
@@ -46,5 +52,7 @@ class Reduce(scriptbase.ScriptBase):
 
         # Reduce the images
         report = StepReport('REDUCTION')
-        reduce_all(args.raw_table, rdxdir=args.rdxdir, overwrite=args.overwrite, report=report)
+        reduce_all(
+            args.raw_table, rdxdir=args.rdxdir, overwrite=args.overwrite, qa=args.qa, report=report
+        )
         return report.exit_status

@@ -36,7 +36,7 @@ from pathlib import Path
 import numpy as np
 
 from astropy.io import fits
-from astropy.table import Table
+from astropy.table import MaskedColumn, Table
 
 from pipnick import log
 from pipnick.astrometry.fit import wcs_from_header
@@ -52,7 +52,7 @@ from pipnick.photometry.psf_photometry import build_moffat_psf_model
 from pipnick.pkg.exceptions import (
     PipnickDataModelError, PipnickParameterError, PipnickPathError
 )
-from pipnick.pkg.paths import step_dir
+from pipnick.pkg.paths import qa_figure, step_dir
 from pipnick.pkg.provenance import image_hash, json_hash, solution_hash
 from pipnick.pkg.report import StepReport
 from pipnick.pkg.summary import Summary
@@ -307,7 +307,7 @@ def build_mosaic(images, wcs_out, shape_out, target, settings):
             # used without PSF matching (the PSF fluxes are used instead)
             target_pix = 0.
             kernels.append('none')
-            ee_ratios.append(-1.)
+            ee_ratios.append(None)
         prepared.append((data, var, good))
         targets.append(target_pix)
 
@@ -320,7 +320,7 @@ def build_mosaic(images, wcs_out, shape_out, target, settings):
         data = data * s
         var = var * s**2
         achieved.append(
-            -1. if target is None else _achieved_fwhm(image, data, good, t, target[1])
+            None if target is None else _achieved_fwhm(image, data, good, t, target[1])
         )
         weights.append(1. / float(np.median(var[good])))
         bbox = footprint_bbox(image.wcs, image.shape, wcs_out, shape_out)
@@ -367,15 +367,15 @@ def build_mosaic(images, wcs_out, shape_out, target, settings):
     inputs['image_hash'] = [image_hash(image.header) for image in images]
     inputs['wcs_hash'] = [solution_hash(image.header) for image in images]
     inputs['exptime'] = [image.exptime for image in images]
-    inputs['airmass'] = [-1. if image.airmass is None else image.airmass for image in images]
     fwhm_in = []
     for image in images:
         phot = image.photometry(require=False)
-        fwhm_in.append(_psf(image)[1] if phot is not None and 'psf' in phot.meta else -1.)
-    inputs['fwhm_in'] = fwhm_in
-    inputs['fwhm_out'] = achieved
+        fwhm_in.append(_psf(image)[1] if phot is not None and 'psf' in phot.meta else None)
+    inputs['airmass'] = _masked_column([image.airmass for image in images])
+    inputs['fwhm_in'] = _masked_column(fwhm_in)
+    inputs['fwhm_out'] = _masked_column(achieved)
     inputs['kernel'] = kernels
-    inputs['match_ee'] = ee_ratios
+    inputs['match_ee'] = _masked_column(ee_ratios)
     inputs['offset'] = offset
     inputs['offset_err'] = offset_err
     inputs['scale'] = 10**(0.4 * offset)
@@ -397,9 +397,17 @@ def build_mosaic(images, wcs_out, shape_out, target, settings):
     return hdus, inputs
 
 
+def _masked_column(values):
+    """
+    Return a float column with the values that are None masked.
+    """
+    missing = [v is None for v in values]
+    return MaskedColumn([0. if v is None else float(v) for v in values], mask=missing)
+
+
 def _achieved_fwhm(image, data, good, target_pix, target_beta):
     """
-    Return the FWHM (arcsec) of the PSF of a matched image, or -1 if it
+    Return the FWHM (arcsec) of the PSF of a matched image, or None if it
     cannot be measured.
 
     A circular Moffat model is fit to the stack of its bright, isolated stars
@@ -421,7 +429,7 @@ def _achieved_fwhm(image, data, good, target_pix, target_beta):
         fit.fit(p0=par, fix=np.array([False, False, False, False, True, False]))
     except (ValueError, RuntimeError) as e:
         log.warning(f'Could not measure the matched PSF of {image.name}: {e}')
-        return -1.
+        return None
     return PSFModel.from_fit(fit).fwhm * image.pixel_scale
 
 
@@ -517,7 +525,7 @@ def mosaic_all(
     tables, outdir=None, mosaics=None, psf_match='mosaic', kernel='moffat', psf_margin=1.05,
     scale='sources', reference=None, match_radius=1., min_common=3, min_snr=20.,
     background='constant', match_background=False, reproject='adaptive', pixel_scale=None,
-    rej=3., rej_frac=0.1, overwrite=False, qa=False, report=None
+    rej=3., rej_frac=0.1, overwrite=False, qa=True, report=None
 ):
     r"""
     Construct the mosaics defined in the metadata tables.
@@ -613,7 +621,10 @@ def mosaic_all(
     overwrite : bool, optional
         Rebuild the mosaics even if they are up to date.
     qa : bool, optional
-        Write a QA figure for each mosaic to the ``qa`` subdirectory.
+        Write a QA figure of each mosaic to the ``qa`` subdirectory (see
+        :func:`~pipnick.qa.mosaic.plot_mosaic`): the figure is redrawn when
+        a mosaic is constructed, and drawn for a mosaic that is up to date
+        but lacks one.
     report : :class:`~pipnick.pkg.report.StepReport`, optional
         Collects the failures of the mosaics for the closing verdict.  A
         mosaic that fails is recorded, and the others are still constructed.
@@ -748,9 +759,11 @@ def mosaic_all(
                         row.update(_summary_values(ofile))
                         row['status'] = 'up to date'
                         outputs.append(ofile)
+                        if qa and not qa_figure(_outdir, label).is_file():
+                            _write_qa(ofile, _outdir, label, _report)
                         continue
                 log.info(f'{progress} Constructing mosaic {label} from {len(these)} images.')
-                hdus, inputs = build_mosaic(these, wcs_out, shape_out, target, settings)
+                hdus, _ = build_mosaic(these, wcs_out, shape_out, target, settings)
             except Exception as e:
                 log.debug(f'Traceback of the failure of mosaic {label}:', exc_info=True)
                 _report.fail(
@@ -768,8 +781,7 @@ def mosaic_all(
             row['status'] = 'constructed'
             outputs.append(ofile)
             if qa:
-                plot_mosaic(hdus, inputs, _outdir / 'qa' / f'{label}.png')
-                log.info(f'Wrote {_outdir.name}/qa/{label}.png')
+                _write_qa(ofile, _outdir, label, _report)
     summary.write(_outdir)
     nbuilt = sum(row['status'] == 'constructed' for row in summary.rows)
     nup = sum(row['status'] == 'up to date' for row in summary.rows)
@@ -780,6 +792,23 @@ def mosaic_all(
         next_step='pipnick_rgb, to combine the mosaics of a WCS group into a colour image'
     )
     return outputs
+
+
+def _write_qa(ofile, outdir, label, report):
+    """
+    Write the QA figure of a mosaic, read from its file; see
+    :func:`~pipnick.qa.mosaic.plot_mosaic`.  A failure is recorded in the
+    report, and does not stop the construction of the other mosaics.
+    """
+    qa_file = qa_figure(outdir, label)
+    try:
+        with fits.open(ofile) as hdus:
+            plot_mosaic(hdus, Table.read(hdus['INPUTS']), qa_file)
+    except Exception as e:
+        log.debug(f'Traceback of the failure of {qa_file.name}:', exc_info=True)
+        report.attention(f'The QA figure of mosaic {label} failed: {type(e).__name__}: {e}')
+        return
+    log.info(f'Wrote {outdir.name}/qa/{qa_file.name}')
 
 
 def _image_key(image):

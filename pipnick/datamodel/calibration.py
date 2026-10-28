@@ -17,7 +17,7 @@ from pathlib import Path
 
 import numpy as np
 
-from pipnick.photometry.calibrate import check_terms
+from pipnick.photometry.calibrate import check_terms, zero_point
 from pipnick.photometry.landolt import parse_color
 from pipnick.pkg.exceptions import PipnickDataModelError, PipnickParameterError
 from pipnick.pkg.provenance import json_hash
@@ -208,7 +208,7 @@ class Calibration:
             }
         return calibrations
 
-    def summary_rows(self, night, status):
+    def summary_rows(self, night, action):
         """
         Return the summary rows of the bands; see
         :func:`~pipnick.pipelines.calibrate.calibrate_all`.
@@ -217,20 +217,29 @@ class Calibration:
         ----------
         night : str
             The night.
-        status : str
+        action : str
             What was done with the calibration file, e.g., ``'fit'``.
 
         Returns
         -------
         list
-            One dictionary for each band.
+            One dictionary for each band.  The zero point (``zp``, with its
+            error ``zp_err``) is that above the atmosphere (airmass 0) for
+            color 0; see :func:`~pipnick.photometry.calibrate.zero_point`.
         """
         rows = []
         for band, entry in self.content.get('band', {}).items():
             ok = entry.get('status') == 'ok'
             k = None
-            if ok and 'airmass' in entry['terms']:
-                k = entry['coefficients'][entry['terms'].index('airmass')]
+            zp = {'zp': None, 'zp_err': None}
+            if ok:
+                terms = entry['terms']
+                if 'airmass' in terms:
+                    k = entry['coefficients'][terms.index('airmass')]
+                n = len(terms)
+                zp = zero_point(
+                    terms, entry['coefficients'], entry.get('covariance', np.zeros((n, n))), 0.
+                )
             drift = entry.get('drift', [None, None])
             rows.append(
                 {
@@ -238,8 +247,8 @@ class Calibration:
                     'n_stars': entry.get('n_stars'), 'n_meas': entry.get('n_meas'),
                     'n_rejected': entry.get('n_rejected'), 'rms': entry.get('rms'),
                     'rms_loo': entry.get('rms_loo'), 'extinction': extinction_source(entry),
-                    'k_airmass': k, 'drift': drift[0], 'drift_err': drift[1],
-                    'file': status,
+                    'k_airmass': k, 'zp': zp['zp'], 'zp_err': zp['zp_err'], 'drift': drift[0],
+                    'drift_err': drift[1], 'action': action,
                     'reason': entry.get('reason', entry.get('fallback_reason', '-'))
                 }
             )

@@ -38,9 +38,10 @@ class Photometry(scriptbase.ScriptBase):
             help='Measure the images again, even if they are up to date.'
         )
         parser.add_argument(
-            '--qa', default=False, action='store_true',
-            help='Write QA figures of the PSF model and the measured sources for each measured '
-                 'image to the photometry/qa directory.'
+            '--no_qa', dest='qa', default=True, action='store_false',
+            help='Do not write the QA figures.  By default, the figures of the PSF model and '
+                 'the measured sources are written to the photometry/qa directory for each '
+                 'measured image, and for any image that lacks them.'
         )
         parser.add_argument(
             '--thresh', default=8.0, type=float,

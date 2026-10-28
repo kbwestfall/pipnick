@@ -58,6 +58,28 @@ summary table to its output directory, e.g., ``reduce/summary.ecsv`` for the
 reduction, which gives the bias level and read noise of the bias, the levels
 of the flats, and the sky level and cosmic-ray fraction of each science image.
 
+QA figures
+----------
+
+Each step writes QA figures by default, to the ``qa`` subdirectory of its
+output directory (use ``--no_qa`` to skip them):
+
+- ``reduce/qa/<product>.png``: each combined calibration frame and reduced
+  science image, with the histogram of its pixel values and its measurements;
+- ``astrometry/qa/<image>.png``: the detected sources and, for an image solved
+  in the run, the sources matched by the solution with their residuals;
+- ``photometry/qa/<image>_psf.png`` and ``<image>_sources.png``: the PSF model
+  and the measured sources;
+- ``calibrate/qa/<setup>_<night>_residuals.png``: the residuals of the
+  calibration;
+- ``mosaic/qa/<mosaic>.png``: the mosaic, its coverage, the flux scales, and
+  the PSF matching.
+
+A figure is redrawn when its product is rebuilt, and drawn for any product
+that lacks one, e.g., a product that is up to date but was made before the
+figures were written by default.  A figure that cannot be drawn needs
+attention, but does not stop the step.
+
 Expected ranges
 ---------------
 

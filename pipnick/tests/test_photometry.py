@@ -3,6 +3,7 @@ Tests for the photometry, using synthetic reduced images of stars with a known
 Moffat point-spread function.
 """
 
+import matplotlib.image
 import numpy as np
 import pytest
 from astropy.coordinates import SkyCoord
@@ -20,8 +21,9 @@ from pipnick.datamodel.psf import PSFModel
 from pipnick.photometry import psf_photometry
 from pipnick.photometry.moffat import EllipticalMoffatPSF
 from pipnick.photometry.aperture_photometry import aperture_analysis
-from pipnick.pipelines.photometry import photometry_all
+from pipnick.pipelines.photometry import photometry_all, vet_sources
 from pipnick.pkg.exceptions import PipnickParameterError
+from pipnick.pkg.paths import removed_table
 from pipnick.pkg.version import version
 from pipnick.tests.test_metadata import write_andor
 
@@ -258,11 +260,83 @@ def test_photometry(tmp_path, caplog):
         'The summary should record the measurement'
     )
 
+    # The removed sources are listed with the reason
+    removed = Table.read(removed_table(rdxdir / tbl.meta['image']))
+    assert len(removed) == sum(tbl.meta['removed'].values()), (
+        'Every removed source should be listed'
+    )
+    assert removed.meta['removed'] == tbl.meta['removed'], (
+        'The removed table should record the counts of the source table'
+    )
+    assert set(removed['reason']) <= {'failed', 'outside', 'moved', 'nonpositive'}, (
+        'Each removed source should have a reason'
+    )
+    for name in removed.colnames:
+        if removed[name].dtype.kind == 'f':
+            assert np.all(np.isfinite(np.asarray(removed[name]))), (
+                f'{name} should not contain NaN'
+            )
+
+
+
+def test_vet_sources():
+    phot = Table()
+    phot['x_init'] = [10., 20., 30., 40., 50.]
+    phot['y_init'] = [10., 20., 30., 40., 50.]
+    phot['x_fit'] = [10.1, np.nan, -5., 45., 50.2]
+    phot['y_fit'] = [10.1, np.nan, 30., 40., 50.1]
+    phot['flux_fit'] = [100., np.nan, 50., 80., -3.]
+    phot['iter_detected'] = [1, 1, 1, 2, 1]
+    kept, removed, rejected = vet_sources(phot, (100, 100), 2.)
+    assert list(kept['x_init']) == [10.], 'Only the credible source should be kept'
+    assert removed == {'failed': 1, 'outside': 1, 'moved': 1, 'nonpositive': 1}, (
+        'The removed sources should be counted by reason'
+    )
+    assert list(rejected['reason']) == ['failed', 'outside', 'moved', 'nonpositive'], (
+        'Each removed source should be listed with its reason'
+    )
+    assert list(rejected['x_init']) == [20., 30., 40., 50.], (
+        'The removed sources should keep their detected positions'
+    )
+    assert bool(rejected['x_fit'].mask[0]) and not np.any(rejected['x_fit'].mask[1:]), (
+        'The failed fits should be masked, not NaN'
+    )
+    assert np.all(np.isfinite(rejected['flux_fit'].data)), 'The removed table should not hold NaN'
+
+
+def test_photometry_qa(tmp_path):
+    table, rdxdir, stars = write_field(tmp_path)
+    photometry_all(table, rdxdir=rdxdir)
+    qa = rdxdir / 'photometry' / 'qa'
+    figures = sorted(qa.glob('*.png'))
+    assert len(figures) == 2, 'By default, the QA figures should be written'
+    assert all(matplotlib.image.imread(f).ndim == 3 for f in figures), (
+        'The QA figures should be readable PNG images'
+    )
+    psf, sources = sorted(figures, key=lambda f: 'sources' in f.name)
+    before = sources.stat().st_mtime_ns
+
+    # An up-to-date image only gets the figures it lacks
+    psf.unlink()
+    photometry_all(table, rdxdir=rdxdir)
+    assert psf.is_file(), 'A missing QA figure of an up-to-date image should be drawn'
+    assert sources.stat().st_mtime_ns != before, (
+        'The figures of an image are drawn together'
+    )
+    before = {f.name: f.stat().st_mtime_ns for f in figures}
+    photometry_all(table, rdxdir=rdxdir)
+    assert all(f.stat().st_mtime_ns == before[f.name] for f in figures), (
+        'The figures of an up-to-date image should not be redrawn'
+    )
+    psf.unlink()
+    photometry_all(table, rdxdir=rdxdir, qa=False)
+    assert not psf.is_file(), 'No QA figure should be drawn if qa is False'
+
 
 def test_coordinates_and_reruns(tmp_path, caplog):
     table, rdxdir, stars = write_field(tmp_path, raw_wcs=True)
     image = next(iter(sorted(rdxdir.glob('*.fits'))))
-    ofile = photometry_all(table, rdxdir=rdxdir)[0]
+    ofile = photometry_all(table, rdxdir=rdxdir, qa=False)[0]
     tbl = Table.read(ofile)
     assert np.all(np.ma.getmaskarray(tbl['ra'])), (
         'The WCS inherited from the raw headers should not be used for the coordinates'
@@ -271,7 +345,7 @@ def test_coordinates_and_reruns(tmp_path, caplog):
     # A rerun does nothing
     before = ofile.stat().st_mtime_ns
     caplog.clear()
-    photometry_all(table, rdxdir=rdxdir)
+    photometry_all(table, rdxdir=rdxdir, qa=False)
     assert ofile.stat().st_mtime_ns == before and 'is up to date' in caplog.text, (
         'An up-to-date table should not be rewritten'
     )
@@ -280,7 +354,7 @@ def test_coordinates_and_reruns(tmp_path, caplog):
     wcs = true_wcs()
     apply_wcs(image, wcs)
     caplog.clear()
-    photometry_all(table, rdxdir=rdxdir)
+    photometry_all(table, rdxdir=rdxdir, qa=False)
     assert 'updated the celestial coordinates' in caplog.text, (
         'A new solution should only update the coordinates'
     )
@@ -297,13 +371,13 @@ def test_coordinates_and_reruns(tmp_path, caplog):
 
     # Changed settings, or a changed image, are measured again
     caplog.clear()
-    photometry_all(table, rdxdir=rdxdir, thresh=10.)
+    photometry_all(table, rdxdir=rdxdir, thresh=10., qa=False)
     assert Table.read(ofile).meta['settings']['thresh'] == 10., (
         'Changed settings should trigger a new measurement'
     )
     with fits.open(image, mode='update') as hdu:
         hdu[0].header['PNTABH'] = 'edited'
-    photometry_all(table, rdxdir=rdxdir, thresh=10.)
+    photometry_all(table, rdxdir=rdxdir, thresh=10., qa=False)
     assert Table.read(ofile).meta['image_hash'].endswith('edited'), (
         'A changed image should be measured again'
     )
@@ -314,7 +388,7 @@ def test_coordinates_and_reruns(tmp_path, caplog):
 
 def test_select_images(tmp_path):
     table, rdxdir, stars = write_field(tmp_path, nimages=2)
-    outputs = photometry_all(table, rdxdir=rdxdir, images=['2'])
+    outputs = photometry_all(table, rdxdir=rdxdir, images=['2'], qa=False)
     assert len(outputs) == 1 and '_C002_' in outputs[0].name, (
         'Only the selected image should be measured'
     )
@@ -324,7 +398,7 @@ def test_select_images(tmp_path):
 
 def test_elliptical_psf(tmp_path):
     table, rdxdir, stars = write_field(tmp_path)
-    tbl = Table.read(photometry_all(table, rdxdir=rdxdir, fittype='ellip')[0])
+    tbl = Table.read(photometry_all(table, rdxdir=rdxdir, fittype='ellip', qa=False)[0])
     isrc, istar = match_stars(tbl, stars)
     assert len(istar) >= 24, 'The elliptical PSF model should also find the stars'
     ratio = np.asarray(tbl['flux_psf'][isrc]) / stars[2][istar]
@@ -347,12 +421,12 @@ def test_elliptical_moffat_psf():
 def test_pixel_errors(tmp_path, caplog):
     table, rdxdir, stars = write_field(tmp_path)
     image = next(iter(sorted(rdxdir.glob('*.fits'))))
-    nominal = Table.read(photometry_all(table, rdxdir=rdxdir)[0])
+    nominal = Table.read(photometry_all(table, rdxdir=rdxdir, qa=False)[0])
 
     # The errors come from the UNCERT extension of the reduced image
     with fits.open(image, mode='update') as hdu:
         hdu['UNCERT'].data = 2 * hdu['UNCERT'].data
-    doubled = Table.read(photometry_all(table, rdxdir=rdxdir, overwrite=True)[0])
+    doubled = Table.read(photometry_all(table, rdxdir=rdxdir, overwrite=True, qa=False)[0])
     isrc, _ = match_stars(nominal, stars)
     jsrc, _ = match_stars(doubled, stars)
     ratio = (
@@ -368,5 +442,5 @@ def test_pixel_errors(tmp_path, caplog):
         hdus = fits.HDUList([hdu[0].copy(), hdu['MASK'].copy()])
     hdus.writeto(image, overwrite=True)
     caplog.clear()
-    photometry_all(table, rdxdir=rdxdir, overwrite=True)
+    photometry_all(table, rdxdir=rdxdir, overwrite=True, qa=False)
     assert 'has no uncertainty' in caplog.text, 'A missing uncertainty should be reported'

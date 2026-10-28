@@ -104,7 +104,10 @@ class Mosaic(scriptbase.ScriptBase):
             help='Rebuild the mosaics, even if they are up to date.'
         )
         parser.add_argument(
-            '--qa', default=False, action='store_true', help='Write QA figures of the mosaics.'
+            '--no_qa', dest='qa', default=True, action='store_false',
+            help='Do not write the QA figures.  By default, a figure of each mosaic is written '
+                 'to the qa subdirectory of the output directory when the mosaic is '
+                 'constructed, or if it lacks one.'
         )
         return parser
 

@@ -121,8 +121,10 @@ class Calibrate(scriptbase.ScriptBase):
                  'significant.  The drift is not fit.'
         )
         parser.add_argument(
-            '--qa', default=False, action='store_true',
-            help='Write QA figures of the residuals to the calibrate/qa directory.'
+            '--no_qa', dest='qa', default=True, action='store_false',
+            help='Do not write the QA figures.  By default, a figure of the residuals of each '
+                 'night is written to the calibrate/qa directory when the night is fit, or if '
+                 'it lacks one.'
         )
         parser.add_argument(
             '-o', '--overwrite', default=False, action='store_true',
@@ -165,7 +167,7 @@ class Calibrate(scriptbase.ScriptBase):
             maxiter=args.maxiter, min_stars=args.min_stars,
             min_airmass_span=args.min_airmass_span, min_color_span=args.min_color_span,
             force=args.force, fallback=not args.no_fallback, drift_warn=args.drift_warn,
-            qa=args.qa, overwrite=args.overwrite, apply=args.apply, default_color=default_color,
-            report=report
+            qa=args.qa, overwrite=args.overwrite, apply=args.apply,
+            default_color=default_color, report=report
         )
         return report.exit_status

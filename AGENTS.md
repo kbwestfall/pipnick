@@ -7,7 +7,11 @@
 - **Never use NaN intentionally.** A value that is invalid, missing or to be
   ignored is flagged with a mask, never by setting it to NaN. A NaN always
   signifies a computational error. Do not write NaN as a placeholder, a fill
-  value, an "undefined" result, or a gap in a plotted line.
+  value, an "undefined" result, or a gap in a plotted line. The one exception:
+  a masked float column written to a FITS binary table (e.g., the mosaic
+  `INPUTS` extension) is stored as NaN, the FITS null for floats, and
+  `Table.read` masks it again. The code still uses masked columns and never
+  writes NaN itself; the NaN comes only from astropy's FITS writer.
 - **Always use explicit condition checks.** Never rely on the truthiness or
   falsiness of a non-boolean object: write `if x is None`, `if len(x) == 0`,
   `if x != 0`, not `if not x` or `if x`. Truthiness on an actual `bool` is fine.

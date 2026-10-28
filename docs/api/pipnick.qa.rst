@@ -11,6 +11,7 @@ Submodules
    pipnick.qa.display
    pipnick.qa.mosaic
    pipnick.qa.psf
+   pipnick.qa.reduction
    pipnick.qa.sources
 
 Module contents

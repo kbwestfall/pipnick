@@ -31,7 +31,7 @@ def test_status(tmp_path):
     assert list(tbl['reduced']) == ['missing'], 'An unreduced image should be missing'
     assert next_step.startswith('pipnick_reduce'), 'The next step should be the reduction'
 
-    reduce_all(table, rdxdir=rdxdir)
+    reduce_all(table, rdxdir=rdxdir, qa=False)
     tbl, next_step = night_status(table, rdxdir=rdxdir)
     row = tbl[0]
     assert row['reduced'] == 'ok' and row['wcs'] == 'missing' and row['phot'] == 'missing', (

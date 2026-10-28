@@ -5,6 +5,7 @@ fluxes, seeing, and transparency.
 
 import logging
 
+import matplotlib.image
 import numpy as np
 import pytest
 from astropy import units
@@ -446,11 +447,25 @@ def test_mosaic(tmp_path, caplog):
     for h in hdus.values():
         h.close()
 
-    # Rerun: up to date
+    # Rerun: up to date, and only the missing QA figures are drawn
+    qa_dir = outputs[0].parent / 'qa'
+    figures = sorted(qa_dir.glob('*.png'))
+    assert [f.name for f in figures] == ['M11_R.png', 'M11_V.png'], (
+        'A QA figure should be written for each mosaic'
+    )
+    assert all(matplotlib.image.imread(f).ndim == 3 for f in figures), (
+        'The QA figures should be readable PNG images'
+    )
+    before = figures[1].stat().st_mtime_ns
+    figures[0].unlink()
     caplog.clear()
     with caplog.at_level(logging.INFO):
         mosaic.mosaic_all(table)
     assert caplog.text.count('is up to date') == 2, 'A rerun should not rebuild the mosaics'
+    assert figures[0].is_file(), 'A missing QA figure of an up-to-date mosaic should be drawn'
+    assert figures[1].stat().st_mtime_ns == before, (
+        'The QA figure of an up-to-date mosaic should not be redrawn'
+    )
 
     # Changing the membership of the group rebuilds all of its mosaics
     tbl, commented = read_metadata(table, include_commented=True, expand=False)
@@ -467,12 +482,20 @@ def test_mosaic(tmp_path, caplog):
 def test_mosaic_options(tmp_path, caplog):
     table, rdxdir, _ = write_dithers(tmp_path, three_dithers())
     outputs = mosaic.mosaic_all(
-        table, psf_match='none', scale='none', match_background=True, outdir=tmp_path / 'out'
+        table, psf_match='none', scale='none', match_background=True, outdir=tmp_path / 'out',
+        qa=False
     )
     hdr = fits.getheader(outputs[0])
     assert hdr['PNPSFMAT'] == 'none' and 'PNTGFWHM' not in hdr, 'The PSFs should not be matched'
     inputs = Table.read(outputs[0], hdu='INPUTS')
     assert np.all(inputs['offset'] == 0.), 'The images should not be scaled'
+    assert np.all(inputs['fwhm_out'].mask) and np.all(inputs['match_ee'].mask), (
+        'Without PSF matching, the matched FWHM and its accuracy should be masked'
+    )
+    known = np.ma.getmaskarray(inputs['fwhm_in']) | np.ma.getmaskarray(inputs['airmass'])
+    assert not np.any(known), (
+        'The known FWHM and airmasses should not be masked'
+    )
     assert np.any(inputs['level'] != 0.), 'The background levels should be matched'
     with pytest.raises(PipnickParameterError):
         mosaic.mosaic_all(table, psf_match='bad')
@@ -507,7 +530,7 @@ def test_two_tables(tmp_path):
     labels1 = set(read_metadata(table1)['mosaic']) - {''}
     labels2 = set(read_metadata(table2)['mosaic']) - {''}
     assert labels1 == labels2 == {'M11_V'}, 'The tables should have the same labels'
-    outputs = mosaic.mosaic_all([table1, table2], outdir=tmp_path / 'joint')
+    outputs = mosaic.mosaic_all([table1, table2], outdir=tmp_path / 'joint', qa=False)
     inputs = Table.read(outputs[0], hdu='INPUTS')
     assert len(inputs) == 4 and len(set(inputs['table'])) == 2, (
         'The mosaic should combine the images of both tables'
@@ -528,7 +551,7 @@ def test_single_image_mosaics(tmp_path):
     tbl['mosaic'] = [f'M11_{f}_single' for f in tbl['filter']]
     tbl['wcs_group'] = 'M11_single'
     write_metadata(tbl, table, commented=commented)
-    outputs = mosaic.mosaic_all(table)
+    outputs = mosaic.mosaic_all(table, qa=False)
     assert len(outputs) == 3, 'Each single-image mosaic should be constructed'
     headers = [fits.getheader(f) for f in outputs]
     for key in ['NAXIS1', 'NAXIS2', 'CRVAL1', 'CRVAL2', 'CRPIX1', 'CRPIX2']:

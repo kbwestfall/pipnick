@@ -1728,3 +1728,82 @@ than one module were made public).
 the new modules.
 
 **Updated:** the release notes and the API pages.
+
+#### Step 5, Phase B: QA by default and small output fixes (complete, 2026-10-28, branch `qa`)
+
+Decision made with the author:
+
+- **Missing values in FITS tables:** the mosaic `INPUTS` columns are masked,
+  so their missing values are written as NaN, the FITS null for floats, and
+  masked again when read. This is the one exception to the no-NaN rule,
+  limited to masked float columns of FITS binary tables.
+
+Checks after the work:
+
+- `tox -r -e 3.13-test,codestyle` passes in a fresh environment: 202 tests
+  passed, 1 skipped.
+- The docs build without warnings.
+- **Real data:** on a scratch copy of the 2026-08-17 n3 (fast) reduction
+  (with three existing figures deleted, and the M11 images labelled as four
+  mosaics in one WCS group), every step was run twice with the defaults; the
+  astrometry only as a dry run, so nothing could be submitted.
+  - First run: the 32 missing figures were drawn (24 reduction products, 1
+    astrometry, 2 photometry, 1 calibration, 4 mosaics), with nothing
+    rebuilt. Redrawing a missing photometry figure also redraws its pair.
+  - Second run: no figure was redrawn.
+  - Remeasuring one image redrew its two figures and wrote its
+    `_removed.ecsv` (263 sources: 96 moved, 119 non-positive, 39 outside,
+    9 failed; no NaN).
+  - Drawing the missing figures took about 1 s per reduction product and
+    about 5 s per photometry image (restacking the PSF and subtracting the
+    background).
+
+**QA by default.**
+
+- Every step has `qa=True` by default, and every script `--no_qa` in place of
+  `--qa`.
+- A figure is redrawn when its product is rebuilt, and drawn for any product
+  that lacks one. For the astrometry, "rebuilt" means solved in this run, so
+  a dry run only draws the missing figures.
+- Figures without the product's inputs in memory are drawn from the files:
+  the photometry restacks the PSF stars from the image with the saved
+  settings (`build_moffat_psf_model`), the calibration reads its residual
+  table, and the mosaics read the mosaic file.
+- A figure that fails needs attention, but does not stop the step.
+- `pkg.paths.qa_figure(outdir, name)` names every figure
+  (`<step>/qa/<name>.png`), for the report in Phase C.
+
+**Reduction QA.** `qa/reduction.py` (`plot_product`): each product, with
+the histogram of its pixel values and a title with its measurements, in
+`reduce/qa/<product>.png`.
+
+**P7 fixes.**
+
+- **Removed sources:** `vet_sources` also returns the removed sources, which
+  are written to `photometry/<image>_removed.ecsv` (`pkg.paths.removed_table`,
+  `ReducedImage.removed_file`): the detected and fitted positions, the
+  fitted flux (masked if the fit failed), `iter_detected`, and the reason.
+  Existing source tables gain the file when they are next measured.
+- **Calibration summary:** new `zp` and `zp_err` columns (the zero point
+  above the atmosphere, for color 0), and `file` renamed `action`.
+- **Mosaic `INPUTS`:** `airmass`, `fwhm_in`, `fwhm_out` and `match_ee` are
+  masked instead of -1; the QA figure uses the masks.
+
+**Tests:** new `test_reduce_qa`, `test_photometry_qa`, `test_vet_sources`
+and `test_qa_figure`; the QA, removed-source, summary and `INPUTS` checks
+added to the astrometry, photometry, calibration, mosaic and path tests.
+
+- With QA on by default, the suite took 193 s, against 78 s with QA off.
+  Every pipeline call in the tests now passes `qa=False`, except in the six
+  tests that check the figures (`test_reduce_qa`, `test_qa_and_detection`,
+  `test_photometry`, `test_photometry_qa`, `test_calibrate_all`,
+  `test_mosaic`), which also check that each figure is a readable PNG.
+  The suite takes 105 s.
+- The scripts' `--no_qa` sets `qa` (`dest='qa'`, `action='store_false'`).
+
+**Docs:** a "QA figures" section in `docs/status.rst`; the `--no_qa`
+options, the removed-source table, the calibration summary columns and the
+`INPUTS` nulls in the step pages; the release notes and the API pages.
+
+**Not done:** the rewrite of `docs/basics.rst` (P7) stays deferred with the
+other usage documents.

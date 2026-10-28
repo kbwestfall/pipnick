@@ -19,7 +19,8 @@ def plot_mosaic(hdus, inputs, ofile):
     hdus : :class:`astropy.io.fits.HDUList`
         The mosaic; see :func:`~pipnick.pipelines.mosaic.mosaic_all`.
     inputs : :class:`astropy.table.Table`
-        The table of the input images.
+        The table of the input images, with the FWHM that could not be
+        measured masked.
     ofile : str, :class:`pathlib.Path`
         The output file.
     """
@@ -42,9 +43,10 @@ def plot_mosaic(hdus, inputs, ofile):
     axes[1,0].set_xlabel('image')
     axes[1,0].set_ylabel('magnitude offset (mag)')
     axes[1,0].set_title(f'reference: {hdus[0].header["PNREFIMG"]}', fontsize=9)
-    axes[1,1].plot(index, inputs['fwhm_in'], 'o', label='input')
-    fwhm_out = np.asarray(inputs['fwhm_out'])
-    axes[1,1].plot(index[fwhm_out > 0], fwhm_out[fwhm_out > 0], 's', label='matched')
+    for name, marker, label in [('fwhm_in', 'o', 'input'), ('fwhm_out', 's', 'matched')]:
+        fwhm = np.ma.asarray(inputs[name], dtype=float)
+        measured = np.logical_not(np.ma.getmaskarray(fwhm))
+        axes[1,1].plot(index[measured], fwhm.data[measured], marker, label=label)
     if 'PNTGFWHM' in hdus[0].header:
         axes[1,1].axhline(hdus[0].header['PNTGFWHM'], color='k', lw=0.5, label='target')
     axes[1,1].set_xlabel('image')

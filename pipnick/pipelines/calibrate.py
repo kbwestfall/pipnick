@@ -29,6 +29,8 @@ recorded in the image headers.
 
 import numpy as np
 
+from astropy.table import Table
+
 from pipnick import log
 from pipnick.datamodel.calibration import Calibration
 from pipnick.datamodel.dataset import DataSet
@@ -40,7 +42,7 @@ from pipnick.photometry.nightfit import calibrate_night
 from pipnick.pkg.exceptions import (
     PipnickDataModelError, PipnickParameterError, PipnickPathError
 )
-from pipnick.pkg.paths import calibration_file, residuals_file, step_dir
+from pipnick.pkg.paths import calibration_file, qa_figure, residuals_file, step_dir
 from pipnick.pkg.provenance import file_hash, json_hash
 from pipnick.pkg.report import StepReport
 from pipnick.pkg.summary import Summary
@@ -113,7 +115,7 @@ def calibrate_all(
     table, rdxdir=None, images=None, terms=('zp', 'airmass', 'color'), fix=None, colors=None,
     mag='psf', match_radius=2., max_neighbor_flux=0.01, residual_radius=1.5, max_cat_err=0.05,
     min_cat_obs=1, sys_err=0.01, rej=3., maxiter=5, min_stars=3, min_airmass_span=0.2,
-    min_color_span=0.3, force=False, fallback=True, drift_warn=0.02, qa=False, overwrite=False,
+    min_color_span=0.3, force=False, fallback=True, drift_warn=0.02, qa=True, overwrite=False,
     apply=None, default_color=None, report=None
 ):
     r"""
@@ -155,7 +157,8 @@ def calibrate_all(
           they were used, rejected, or unusable (``reason``);
         - ``summary.ecsv``: the summary of the calibration of each band;
         - ``qa/<setup>_<night>_residuals.png``: the residuals against airmass,
-          color, magnitude, and time (if ``qa`` is set).
+          color, magnitude, and time (if ``qa`` is set and a band is
+          calibrated).
 
     The residuals are also used to measure the drift of the zero point with
     time, which is reported but not fit.
@@ -230,7 +233,9 @@ def calibrate_all(
         Warn if the residuals drift by more than this (mag/hour), and the
         drift is significant.
     qa : bool, optional
-        Write the QA figures.
+        Write the QA figures: a figure is redrawn when a night is fit, and
+        drawn from its residual table for a night that is not refit but lacks
+        one.
     overwrite : bool, optional
         Refit, even if the inputs have not changed or the calibration file
         has been edited.
@@ -348,6 +353,8 @@ def calibrate_all(
             }
         )
         ofile = calibration_file(_rdxdir, tag, night)
+        rfile = residuals_file(_rdxdir, tag, night)
+        qa_file = qa_figure(cal_dir, rfile.stem)
         content = None
         if ofile.is_file() and not overwrite:
             calibration = Calibration.read(ofile)
@@ -363,12 +370,12 @@ def calibrate_all(
                         'calibration may hide changes in the photometry or settings.'
                     )
                 content = existing
-                status = 'edited (kept)'
+                action = 'edited (kept)'
                 _report.note(f'{ofile.name} has been edited, and was kept.')
             elif same_inputs:
                 log.info(f'{ofile.name} is up to date.')
                 content = existing
-                status = 'up to date'
+                action = 'up to date'
             if content is not None:
                 _report.check_version(
                     ofile.name, content['calibration'].get('pipnick_version')
@@ -384,17 +391,16 @@ def calibrate_all(
             )
             Calibration(content).write(ofile)
             log.info(f'Wrote calibrate/{ofile.name}')
-            rfile = residuals_file(_rdxdir, tag, night)
             meas.meta['pipnick_version'] = version
             meas.write(rfile, format='ascii.ecsv', overwrite=True)
             log.info(f'Wrote calibrate/{rfile.name}')
             if qa:
-                qa_file = cal_dir / 'qa' / f'{tag}_{night}_residuals.png'
-                plot_residuals(meas, content, qa_file)
-                log.info(f'Wrote calibrate/qa/{qa_file.name}')
-            status = 'fit'
+                _write_qa(meas, content, qa_file, _report)
+            action = 'fit'
+        elif qa and not qa_file.is_file() and rfile.is_file():
+            _write_qa(Table.read(rfile), content, qa_file, _report)
         outputs.append(ofile)
-        summary += Calibration(content).summary_rows(night, status)
+        summary += Calibration(content).summary_rows(night, action)
 
         if apply in ['image', 'both']:
             apply_to_headers(night_images, content, ofile, report=_report)
@@ -426,22 +432,47 @@ def calibrate_all(
     return outputs
 
 
+def _write_qa(meas, content, ofile, report):
+    """
+    Write the QA figure of the calibration of a night; see
+    :func:`~pipnick.qa.calibration.plot_residuals`.  A failure is recorded in
+    the report, and does not stop the calibration.
+    """
+    try:
+        plot_residuals(meas, content, ofile)
+    except Exception as e:
+        log.debug(f'Traceback of the failure of {ofile.name}:', exc_info=True)
+        report.attention(f'The QA figure {ofile.name} failed: {type(e).__name__}: {e}')
+        return
+    if ofile.is_file():
+        log.info(f'Wrote calibrate/qa/{ofile.name}')
+
+
 def _summarize(summary, cal_dir):
     """
     Log the summary of the calibration of each band, write it to
     ``calibrate/summary.ecsv``, and end with a banner listing the bands whose
     extinction was not measured.
+
+    The summary gives, for each night and band, the status of the
+    calibration, the numbers of stars, measurements, and rejected
+    measurements, the rms and leave-one-out rms of the residuals, how the
+    extinction was found and its value, the zero point above the atmosphere
+    and its error, the drift of the residuals, what was done with the
+    calibration file (``action``: ``fit``, ``up to date``, or ``edited
+    (kept)``), and the reason for a failure or fallback; see
+    :meth:`~pipnick.datamodel.calibration.Calibration.summary_rows`.
     """
     columns = [
         'night', 'band', 'status', 'n_stars', 'n_meas', 'n_rejected', 'rms', 'rms_loo',
-        'extinction', 'k_airmass', 'drift', 'drift_err', 'file', 'reason'
+        'extinction', 'k_airmass', 'zp', 'zp_err', 'drift', 'drift_err', 'action', 'reason'
     ]
-    floats = ['rms', 'rms_loo', 'k_airmass', 'drift', 'drift_err']
+    floats = ['rms', 'rms_loo', 'k_airmass', 'zp', 'zp_err', 'drift', 'drift_err']
     table = Summary(
         'Calibration', columns,
         dtypes={'n_stars': int, 'n_meas': int, 'n_rejected': int} | {k: float for k in floats},
         formats={k: '.3f' for k in floats},
-        logged=[c for c in columns if c not in ['drift_err', 'reason']]
+        logged=[c for c in columns if c not in ['zp_err', 'drift_err', 'reason']]
     )
     for row in summary:
         table.add(**row)

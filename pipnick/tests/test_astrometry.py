@@ -9,6 +9,7 @@ import io
 import logging
 from pathlib import Path
 
+import matplotlib.image
 import numpy as np
 import pytest
 from astropy import units
@@ -385,7 +386,7 @@ def test_astrometry(tmp_path, caplog):
     table, rdxdir, truth, coords, flux = write_field(tmp_path)
     solver = FakeSolver(truth, coords)
     catalog = FakeCatalog(coords, flux)
-    solved = astrometry_all(table, rdxdir=rdxdir, solver=solver, catalog=catalog)
+    solved = astrometry_all(table, rdxdir=rdxdir, solver=solver, catalog=catalog, qa=False)
 
     assert len(solved) == 4, 'All images should be solved'
     assert len(solver.calls) == 1, 'Only one image should be submitted'
@@ -419,7 +420,7 @@ def test_astrometry(tmp_path, caplog):
 
     # Rerunning changes nothing
     before = {p.name: p.stat().st_mtime_ns for p in solved}
-    astrometry_all(table, rdxdir=rdxdir, solver=solver, catalog=catalog)
+    astrometry_all(table, rdxdir=rdxdir, solver=solver, catalog=catalog, qa=False)
     assert len(solver.calls) == 1, 'A rerun should not submit anything'
     assert {p.name: p.stat().st_mtime_ns for p in solved} == before, (
         'A rerun should not change solved images'
@@ -431,7 +432,7 @@ def test_astrometry(tmp_path, caplog):
         with fits.open(p, mode='update') as hdu:
             header._remove_wcs(hdu[0].header)
     caplog.clear()
-    astrometry_all(table, rdxdir=rdxdir, solver=solver, catalog=catalog)
+    astrometry_all(table, rdxdir=rdxdir, solver=solver, catalog=catalog, qa=False)
     assert len(solver.calls) == 1, 'Rewritten images should not be submitted again'
     assert 'cached astrometry.net solution' in caplog.text, 'The cache should be used'
     for p in solved:
@@ -443,7 +444,7 @@ def test_astrometry(tmp_path, caplog):
     with fits.open(submitted_path, mode='update') as hdu:
         hdu[0].header['RADESYS'] = 'FK5'
         hdu[0].header['EQUINOX'] = 2000.
-    astrometry_all(table, rdxdir=rdxdir, solver=solver, catalog=catalog)
+    astrometry_all(table, rdxdir=rdxdir, solver=solver, catalog=catalog, qa=False)
     hdr = fits.getheader(submitted_path)
     assert hdr['RADESYS'] == 'ICRS' and 'EQUINOX' not in hdr, (
         'An FK5-labeled astrometry.net solution should be relabeled as ICRS'
@@ -451,14 +452,16 @@ def test_astrometry(tmp_path, caplog):
     assert len(solver.calls) == 1, 'Relabeling should not submit anything'
 
     # Re-solving submits again
-    astrometry_all(table, rdxdir=rdxdir, solver=solver, catalog=catalog, resolve=True)
+    astrometry_all(table, rdxdir=rdxdir, solver=solver, catalog=catalog, resolve=True, qa=False)
     assert len(solver.calls) == 2, 'Resolve should submit again'
 
 
 def test_reference_changed(tmp_path, caplog):
     table, rdxdir, truth, coords, flux = write_field(tmp_path)
     solver = FakeSolver(truth, coords)
-    astrometry_all(table, rdxdir=rdxdir, solver=solver, catalog=FakeCatalog(coords, flux))
+    astrometry_all(
+        table, rdxdir=rdxdir, solver=solver, catalog=FakeCatalog(coords, flux), qa=False
+    )
     # NOTE: The order of glob is platform-dependent, so the files are sorted
     bootstrapped = [
         p for p in sorted(rdxdir.glob('*.fits')) if fits.getheader(p)['PNASTMTH'] == 'bootstrap'
@@ -473,7 +476,9 @@ def test_reference_changed(tmp_path, caplog):
     wcs.wcs.crval = wcs.wcs.crval + np.array([0., 1e-5])
     apply_wcs(ref, wcs)
     caplog.clear()
-    astrometry_all(table, rdxdir=rdxdir, solver=solver, catalog=FakeCatalog(coords, flux))
+    astrometry_all(
+        table, rdxdir=rdxdir, solver=solver, catalog=FakeCatalog(coords, flux), qa=False
+    )
     assert 'reference solution for' in caplog.text, 'The changed reference should be noticed'
     for p in dependents:
         hdr = fits.getheader(p)
@@ -505,7 +510,9 @@ def test_points(tmp_path):
     with fits.open(image, mode='update') as hdu:
         header._remove_wcs(hdu[0].header)
     solver = FakeSolver(truth, coords)
-    astrometry_all(table, rdxdir=rdxdir, solver=solver, catalog=FakeCatalog(coords, flux))
+    astrometry_all(
+        table, rdxdir=rdxdir, solver=solver, catalog=FakeCatalog(coords, flux), qa=False
+    )
     assert fits.getheader(image)['PNASTMTH'] == 'points', 'The user solution should be restored'
     assert len(solver.calls) == 0, 'Nothing should be submitted'
     assert solution_error(image, wcs) < 1e-3, 'The restored solution should be unchanged'
@@ -518,7 +525,9 @@ def test_pending_and_failed(tmp_path):
     # The first submission is pending and finishes later; the other image is
     # solved from the catalog once the first is solved
     solver = FakeSolver(truth, coords, status=['pending'])
-    solved = astrometry_all(table, rdxdir=rdxdir, solver=solver, catalog=FakeCatalog(coords, flux))
+    solved = astrometry_all(
+        table, rdxdir=rdxdir, solver=solver, catalog=FakeCatalog(coords, flux), qa=False
+    )
     assert [c[0] for c in solver.calls] == ['sources', 'monitor'], (
         'The pending submission should be monitored'
     )
@@ -532,11 +541,15 @@ def test_pending_and_failed(tmp_path):
     (tmp_path / 'c').mkdir()
     table, rdxdir, truth, coords, flux = write_field(tmp_path / 'c', images=images)
     solver = FakeSolver(truth, coords, status=['pending'], monitor_status=['pending'])
-    solved = astrometry_all(table, rdxdir=rdxdir, solver=solver, catalog=FakeCatalog(coords, flux))
+    solved = astrometry_all(
+        table, rdxdir=rdxdir, solver=solver, catalog=FakeCatalog(coords, flux), qa=False
+    )
     assert len(solved) == 0 and [c[0] for c in solver.calls] == ['sources', 'monitor'], (
         'Nothing should be solved, or submitted, while a submission is pending'
     )
-    solved = astrometry_all(table, rdxdir=rdxdir, solver=solver, catalog=FakeCatalog(coords, flux))
+    solved = astrometry_all(
+        table, rdxdir=rdxdir, solver=solver, catalog=FakeCatalog(coords, flux), qa=False
+    )
     assert [c[0] for c in solver.calls] == ['sources', 'monitor', 'monitor'], (
         'The pending submission should be monitored again, not resubmitted'
     )
@@ -547,11 +560,14 @@ def test_pending_and_failed(tmp_path):
     table, rdxdir, truth, coords, flux = write_field(tmp_path / 'b', images=images)
     solver = FakeSolver(truth, coords, status=['failed'])
     solved = astrometry_all(
-        table, rdxdir=rdxdir, solver=solver, catalog=FakeCatalog(coords, flux), max_submissions=1
+        table, rdxdir=rdxdir, solver=solver, catalog=FakeCatalog(coords, flux), max_submissions=1,
+        qa=False
     )
     assert len(solved) == 0, 'Nothing can be solved without a solved image'
     failed = solver.calls[0][1]
-    astrometry_all(table, rdxdir=rdxdir, solver=solver, catalog=FakeCatalog(coords, flux))
+    astrometry_all(
+        table, rdxdir=rdxdir, solver=solver, catalog=FakeCatalog(coords, flux), qa=False
+    )
     assert [c[1] for c in solver.calls].count(failed) == 1, (
         'An image whose submission failed should not be resubmitted'
     )
@@ -561,7 +577,8 @@ def test_max_submissions(tmp_path):
     table, rdxdir, truth, coords, flux = write_field(tmp_path)
     solver = FakeSolver(truth, coords)
     solved = astrometry_all(
-        table, rdxdir=rdxdir, solver=solver, catalog=FakeCatalog(coords, flux), max_submissions=0
+        table, rdxdir=rdxdir, solver=solver, catalog=FakeCatalog(coords, flux), max_submissions=0,
+        qa=False
     )
     assert len(solver.calls) == 0 and len(solved) == 0, 'The submission limit should be respected'
 
@@ -569,7 +586,7 @@ def test_max_submissions(tmp_path):
 def test_dry_run(tmp_path, caplog):
     table, rdxdir, truth, coords, flux = write_field(tmp_path)
     # The default solver and catalog would contact the services if used
-    solved = astrometry_all(table, rdxdir=rdxdir, dry_run=True)
+    solved = astrometry_all(table, rdxdir=rdxdir, dry_run=True, qa=False)
     assert len(solved) == 0, 'A dry run should not solve anything'
     assert 'At least 1 and' in caplog.text, 'The number of submissions should be reported'
     assert 'Group 2' in caplog.text, 'The pointing groups should be reported'
@@ -586,7 +603,8 @@ def test_upload_image(tmp_path):
     solver = FakeSolver(truth, coords)
     solver.uploaded = next(iter(truth.keys()))
     solved = astrometry_all(
-        table, rdxdir=rdxdir, solver=solver, catalog=FakeCatalog(coords, flux), upload_image=True
+        table, rdxdir=rdxdir, solver=solver, catalog=FakeCatalog(coords, flux), upload_image=True,
+        qa=False
     )
     assert len(solved) == 1 and solver.calls[0][0] == 'image', 'The image should be uploaded'
     assert np.all(solver.calls[0][2][:,100] == 0), 'Masked pixels should be set to 0'
@@ -617,7 +635,9 @@ def test_wide_search(tmp_path, caplog):
     first, stale_1, stale_2 = sorted(truth.keys())
     solve_first(rdxdir, truth)
     solver = FakeSolver(truth, coords)
-    solved = astrometry_all(table, rdxdir=rdxdir, solver=solver, catalog=FakeCatalog(coords, flux))
+    solved = astrometry_all(
+        table, rdxdir=rdxdir, solver=solver, catalog=FakeCatalog(coords, flux), qa=False
+    )
 
     assert len(solved) == 3 and len(solver.calls) == 0, (
         'Images with a stale pointing should be solved without submitting'
@@ -643,7 +663,9 @@ def test_wide_search(tmp_path, caplog):
 
     # A rerun keeps the solutions
     before = {p.name: p.stat().st_mtime_ns for p in solved}
-    astrometry_all(table, rdxdir=rdxdir, solver=solver, catalog=FakeCatalog(coords, flux))
+    astrometry_all(
+        table, rdxdir=rdxdir, solver=solver, catalog=FakeCatalog(coords, flux), qa=False
+    )
     assert {p.name: p.stat().st_mtime_ns for p in solved} == before, (
         'A rerun should not change the solutions'
     )
@@ -654,7 +676,7 @@ def test_wide_search(tmp_path, caplog):
         header._remove_wcs(hdu[0].header)
     caplog.clear()
     catalog = FakeCatalog(coords, flux)
-    astrometry_all(table, rdxdir=rdxdir, solver=solver, catalog=catalog)
+    astrometry_all(table, rdxdir=rdxdir, solver=solver, catalog=catalog, qa=False)
     assert catalog.calls == 0, 'The restored pointing error should be used, without the catalog'
     assert f'{stale_2} is centered at' in caplog.text, (
         'The incorrect pointing should be reported for every affected image'
@@ -675,7 +697,7 @@ def test_wide_search_disabled(tmp_path):
     solver = FakeSolver(truth, coords)
     solved = astrometry_all(
         table, rdxdir=rdxdir, solver=solver, catalog=FakeCatalog(coords, flux), wide_search=0.,
-        max_submissions=0
+        max_submissions=0, qa=False
     )
     assert len(solved) == 1, 'Without the wide search, the stale images should not be solved'
 
@@ -770,7 +792,7 @@ def test_select_images(tmp_path, caplog):
     table, rdxdir, truth, coords, flux = write_field(tmp_path)
     solver = FakeSolver(truth, coords)
     catalog = FakeCatalog(coords, flux)
-    astrometry_all(table, rdxdir=rdxdir, solver=solver, catalog=catalog)
+    astrometry_all(table, rdxdir=rdxdir, solver=solver, catalog=catalog, qa=False)
     names = sorted(truth.keys())
     for name in names[1:3]:
         with fits.open(rdxdir / name, mode='update') as hdu:
@@ -778,7 +800,7 @@ def test_select_images(tmp_path, caplog):
 
     # Only the selected image (by comb_id) is solved
     solved = astrometry_all(
-        table, rdxdir=rdxdir, solver=solver, catalog=catalog, images=['2']
+        table, rdxdir=rdxdir, solver=solver, catalog=catalog, images=['2'], qa=False
     )
     assert names[1] in [p.name for p in solved] and names[2] not in [p.name for p in solved], (
         'Only the selected image should be solved'
@@ -793,7 +815,7 @@ def test_select_images(tmp_path, caplog):
     before = {name: (rdxdir / name).stat().st_mtime_ns for name in names}
     astrometry_all(
         table, rdxdir=rdxdir, solver=solver, catalog=catalog, images=[submitted], resolve=True,
-        max_submissions=1
+        max_submissions=1, qa=False
     )
     changed = [name for name in names if (rdxdir / name).stat().st_mtime_ns != before[name]]
     assert changed == [submitted], 'Resolve should only change the selected image'
@@ -807,7 +829,8 @@ def test_summary(tmp_path, caplog):
     table, rdxdir, truth, coords, flux = write_field(tmp_path)
     solver = FakeSolver(truth, coords)
     astrometry_all(
-        table, rdxdir=rdxdir, solver=solver, catalog=FakeCatalog(coords, flux), max_submissions=0
+        table, rdxdir=rdxdir, solver=solver, catalog=FakeCatalog(coords, flux), max_submissions=0,
+        qa=False
     )
     summary = Table.read(rdxdir / 'astrometry' / 'summary.ecsv')
     assert list(summary['status']) == ['unsolved'] * 4, (
@@ -821,7 +844,9 @@ def test_summary(tmp_path, caplog):
     )
     assert 'is not solved' in caplog.text, 'Unsolved images should be reported'
 
-    astrometry_all(table, rdxdir=rdxdir, solver=solver, catalog=FakeCatalog(coords, flux))
+    astrometry_all(
+        table, rdxdir=rdxdir, solver=solver, catalog=FakeCatalog(coords, flux), qa=False
+    )
     summary = Table.read(rdxdir / 'astrometry' / 'summary.ecsv')
     assert list(summary['status']) == ['solved'] * 4, 'All images should be solved'
     assert np.all(summary['rms'][summary['method'] != 'astrometry.net'] < 0.3), (
@@ -843,7 +868,7 @@ def test_failure_messages(tmp_path, caplog):
     # are rejected
     astrometry_all(
         table, rdxdir=rdxdir, solver=FakeSolver(truth, coords),
-        catalog=FakeCatalog(coords, flux), wide_search=0., max_submissions=0
+        catalog=FakeCatalog(coords, flux), wide_search=0., max_submissions=0, qa=False
     )
     assert 'votes' in caplog.text, 'The details of each match should be logged at debug level'
     summary = Table.read(rdxdir / 'astrometry' / 'summary.ecsv')
@@ -859,7 +884,8 @@ def test_failure_messages(tmp_path, caplog):
     caplog.clear()
     astrometry_all(
         table, rdxdir=rdxdir, solver=FakeSolver(truth, coords),
-        catalog=FakeCatalog(coords, flux), wide_search=0., max_submissions=0, detect_thresh=300.
+        catalog=FakeCatalog(coords, flux), wide_search=0., max_submissions=0, detect_thresh=300.,
+        qa=False
     )
     assert 'matched the' in caplog.text and 'minimum is 4' in caplog.text, (
         'Failures to match should give the numbers of sources'
@@ -888,16 +914,26 @@ def test_qa_and_detection(tmp_path, caplog):
     astrometry_all(table, rdxdir=rdxdir, dry_run=True, detect_thresh=500.)
     assert 'sources were detected in' in caplog.text, 'Images with few sources should be noted'
 
-    # QA figures are only written for images solved in the run
-    for f in (rdxdir / 'astrometry' / 'qa').glob('*.png'):
-        f.unlink()
-    astrometry_all(table, rdxdir=rdxdir, solver=solver, catalog=catalog, qa=True)
-    assert len(list((rdxdir / 'astrometry' / 'qa').glob('*.png'))) == 4, (
-        'A QA figure should be written for each solved image'
+    # QA figures are redrawn for images solved in the run, and drawn for any
+    # image without one
+    qa_dir = rdxdir / 'astrometry' / 'qa'
+    dry = {f.name: f.stat().st_mtime_ns for f in sorted(qa_dir.glob('*.png'))}
+    astrometry_all(table, rdxdir=rdxdir, solver=solver, catalog=catalog)
+    solved = {f.name: f.stat().st_mtime_ns for f in sorted(qa_dir.glob('*.png'))}
+    assert len(solved) == 4 and all(solved[k] != dry[k] for k in dry), (
+        'By default, the QA figure of each image solved in the run should be redrawn'
     )
-    for f in (rdxdir / 'astrometry' / 'qa').glob('*.png'):
-        f.unlink()
-    astrometry_all(table, rdxdir=rdxdir, solver=solver, catalog=catalog, qa=True)
-    assert len(list((rdxdir / 'astrometry' / 'qa').glob('*.png'))) == 0, (
-        'Images solved in an earlier run should not get new QA figures'
+    assert all(matplotlib.image.imread(f).ndim == 3 for f in sorted(qa_dir.glob('*.png'))), (
+        'The QA figures should be readable PNG images'
     )
+    missing = sorted(qa_dir.glob('*.png'))[0]
+    missing.unlink()
+    astrometry_all(table, rdxdir=rdxdir, solver=solver, catalog=catalog)
+    rerun = {f.name: f.stat().st_mtime_ns for f in sorted(qa_dir.glob('*.png'))}
+    assert missing.name in rerun, 'A missing QA figure should be drawn'
+    assert all(rerun[k] == solved[k] for k in rerun if k != missing.name), (
+        'The figures of images solved in an earlier run should not be redrawn'
+    )
+    missing.unlink()
+    astrometry_all(table, rdxdir=rdxdir, solver=solver, catalog=catalog, qa=False)
+    assert not missing.is_file(), 'No QA figure should be drawn if qa is False'
