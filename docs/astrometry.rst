@@ -303,7 +303,7 @@ coordinates are 0-based (the numpy convention, as returned by ``photutils``).
 
    from astropy.coordinates import SkyCoord
    from pipnick.astrometry.fit import fit_wcs
-   from pipnick.pipelines.astrometry import apply_wcs
+   from pipnick.astrometry.header import apply_wcs
 
    coords = SkyCoord(ra, dec, unit='deg')
    wcs, stats = fit_wcs(x, y, coords)

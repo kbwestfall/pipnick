@@ -366,6 +366,27 @@ Under-the-hood Improvements
   and errors written by pipnick, replacing the separate readers of the
   photometry, astrometry, mosaic, and colour-image steps.
 
+- Added ``pipnick.pkg.summary.Summary``, which writes and logs the summary
+  table of every step, with missing values masked.
+
+- Added ``pipnick.qa``, which holds the QA figures of every step
+  (``display``, ``sources``, ``psf``, ``calibration``, and ``mosaic``);
+  ``pipnick.astrometry.qa`` and ``pipnick.photometry.fit`` are removed.
+
+- Added ``pipnick.datamodel.catalog.SourceCatalog``, which wraps the
+  photometry source tables (``ReducedImage.photometry`` returns one), and
+  ``pipnick.datamodel.calibration.Calibration``, which reads and writes the
+  calibration files.
+
+- The large pipeline modules are split: the astrometry into
+  ``pipnick.astrometry.header``, ``cache``, and ``solve``; the calibration
+  into ``pipnick.photometry.standards``, ``nightfit``, and ``apply``; the
+  frame processing of the reduction into ``pipnick.reduction.processing``
+  (with ``pipnick.utils.combiner``, now ``pipnick.reduction.combiner``); and
+  the preparation and scaling of the mosaics into ``pipnick.mosaic.prepare``.
+  ``pipnick.metadata`` is a package, with ``table``, ``setups``, ``groups``,
+  ``names``, and ``build`` modules.
+
 - The tests block internet access (``remote_data_strict``), and replace every
   method that would contact astrometry.net or the Gaia archive.
 

@@ -13,10 +13,12 @@ from astropy.io import fits
 from astropy.table import MaskedColumn, Table
 from astropy.time import Time
 
-from pipnick import metadata
+from pipnick.metadata.build import build_metadata
 from pipnick.astrometry.services import propagate_proper_motion
+from pipnick.datamodel.calibration import Calibration, toml_value
+from pipnick.datamodel.catalog import SourceCatalog
 from pipnick.datamodel.dataset import DataSet
-from pipnick.photometry import extinction, landolt
+from pipnick.photometry import extinction, landolt, nightfit
 from pipnick.photometry.calibrate import (
     CALIBRATION_TERMS, check_terms, design_matrix, fit_calibration, iterate_colors,
     residual_drift, zero_point
@@ -35,6 +37,15 @@ NOISE = 0.004
 EXPTIME = 30.
 # The FWHM of the PSF (pixels)
 FWHM = 4.
+
+
+def read_calibration(path):
+    """
+    Read a calibration file, and return its content and whether it has been
+    edited.
+    """
+    calibration = Calibration.read(path)
+    return calibration.content, calibration.edited
 
 
 def standards():
@@ -113,7 +124,7 @@ def write_night(tmp_path, design, seed=1, science=False, outlier=None):
             rawdir / f'n9{i:03d}.fits', OBJECT=f'{obj} {filt}', FILTER=filt, AIRMASS=airmass,
             XPOSURE=EXPTIME, **{'DATE-BEG': date.isot}
         )
-    files, _ = metadata.build_metadata(rawdir=rawdir, filename=tmp_path / 'n9.ecsv', split=True)
+    files, _ = build_metadata(rawdir=rawdir, filename=tmp_path / 'n9.ecsv', split=True)
     table = files[0]
     rdxdir = tmp_path / 'rdx'
     (rdxdir / 'photometry').mkdir(parents=True)
@@ -368,7 +379,7 @@ def test_calibrate_all(tmp_path, caplog):
     with caplog.at_level(logging.INFO):
         outputs = calibrate.calibrate_all(table, rdxdir=rdxdir, qa=True)
     assert len(outputs) == 1, 'There should be one calibration for the night'
-    content, edited = calibrate.read_calibration(outputs[0])
+    content, edited = read_calibration(outputs[0])
     assert not edited, 'A new calibration file should not be reported as edited'
     assert content['calibration']['night'] == '2026-08-20', 'The night should be the UT date'
     for band, (k0, k1, kc) in TRUE.items():
@@ -407,7 +418,7 @@ def test_calibrate_all(tmp_path, caplog):
     caplog.clear()
     outputs[0].write_text(text.replace('[band.V]\n', '[band.V]\n# edited\n'))
     edited_text = outputs[0].read_text().replace(
-        f'coefficients = {calibrate._toml_value(content["band"]["V"]["coefficients"])}',
+        f'coefficients = {toml_value(content["band"]["V"]["coefficients"])}',
         'coefficients = [-24.0, 0.17, -0.03]'
     )
     outputs[0].write_text(edited_text)
@@ -427,7 +438,7 @@ def test_calibrate_all(tmp_path, caplog):
 
     # Overwrite refits
     calibrate.calibrate_all(table, rdxdir=rdxdir, overwrite=True)
-    content, edited = calibrate.read_calibration(outputs[0])
+    content, edited = read_calibration(outputs[0])
     assert not edited and content['band']['V']['coefficients'][0] != -24.0, (
         '--overwrite should refit an edited file'
     )
@@ -441,7 +452,7 @@ def test_fallback(tmp_path, caplog):
             apply='image'
         )
     cfile = calibration_file(rdxdir)
-    content, _ = calibrate.read_calibration(cfile)
+    content, _ = read_calibration(cfile)
     assert content['calibration']['pipnick_version'] == version, (
         'The calibration file should record the pipnick version'
     )
@@ -485,7 +496,7 @@ def test_fallback(tmp_path, caplog):
     # Without the fallback, every band fails
     with pytest.raises(PipnickDataModelError, match='No band could be calibrated'):
         calibrate.calibrate_all(table, rdxdir=rdxdir, fallback=False, overwrite=True)
-    content, _ = calibrate.read_calibration(cfile)
+    content, _ = read_calibration(cfile)
     assert content['band']['B']['status'] == 'failed', 'The bands should be recorded as failed'
     assert 'fallback is disabled' in content['band']['B']['reason'], (
         'The reason for the failure should be recorded'
@@ -496,24 +507,24 @@ def test_sample_checks(tmp_path, caplog):
     design = [('B', 1.1, 4.), ('B', 1.6, 5.), ('V', 1.1, 4.), ('V', 1.6, 5.)]
     table, rdxdir, _ = write_night(tmp_path, design)
     calibrate.calibrate_all(table, rdxdir=rdxdir)
-    content, _ = calibrate.read_calibration(calibration_file(rdxdir))
+    content, _ = read_calibration(calibration_file(rdxdir))
     assert content['band']['B']['status'] == 'ok', 'Eight standards should be sufficient'
 
     with caplog.at_level(logging.WARNING):
         calibrate.calibrate_all(table, rdxdir=rdxdir, min_stars=10, overwrite=True, force=True)
-    content, _ = calibrate.read_calibration(calibration_file(rdxdir))
+    content, _ = read_calibration(calibration_file(rdxdir))
     assert content['band']['B']['status'] == 'ok' and 'fewer than 10' in caplog.text, (
         '--force should downgrade the minimum-stars error to a warning'
     )
     with pytest.raises(PipnickDataModelError):
         calibrate.calibrate_all(table, rdxdir=rdxdir, min_stars=10, overwrite=True)
-    content, _ = calibrate.read_calibration(calibration_file(rdxdir))
+    content, _ = read_calibration(calibration_file(rdxdir))
     assert 'fewer than 10' in content['band']['B']['reason'], (
         'Too few stars should fail the band'
     )
     with pytest.raises(PipnickDataModelError):
         calibrate.calibrate_all(table, rdxdir=rdxdir, min_color_span=5., overwrite=True)
-    content, _ = calibrate.read_calibration(calibration_file(rdxdir))
+    content, _ = read_calibration(calibration_file(rdxdir))
     assert 'color span' in content['band']['B']['reason'], (
         'A small color span should fail the band'
     )
@@ -532,7 +543,7 @@ def test_band_failure_isolated(tmp_path):
         table, rdxdir=rdxdir, terms=terms, min_airmass_span=0., min_color_span=0., force=True,
         fallback=False
     )
-    content, _ = calibrate.read_calibration(calibration_file(rdxdir))
+    content, _ = read_calibration(calibration_file(rdxdir))
     assert content['band']['V']['status'] == 'ok', 'V should be calibrated'
     assert content['band']['B']['status'] == 'failed', (
         'A band with too few measurements for its terms should fail, even with --force'
@@ -547,7 +558,7 @@ def test_degenerate_terms(tmp_path):
     design = [('B', 1.1, 4.), ('V', 1.1, 4.), ('V', 1.6, 5.)]
     table, rdxdir, _ = write_night(tmp_path, design)
     calibrate.calibrate_all(table, rdxdir=rdxdir, min_airmass_span=0., fallback=False)
-    content, _ = calibrate.read_calibration(calibration_file(rdxdir))
+    content, _ = read_calibration(calibration_file(rdxdir))
     assert content['band']['V']['status'] == 'ok', 'V should be calibrated'
     assert 'degenerate' in content['band']['B']['reason'], (
         'Degenerate terms should fail the band instead of giving an invalid fit'
@@ -569,19 +580,19 @@ def test_neighbors():
     meta = {'psf': {'fwhm_pix': FWHM}, 'aper_radius_pix': 2 * FWHM}
     phot = phot_table(np.zeros(1), np.zeros(1), np.full(1, -12.), meta)
     add_source(phot, 0, 0.5 * FWHM, 0.03, 2)
-    assert calibrate.neighbors(phot, 0) == (1, 0), (
+    assert SourceCatalog(phot).neighbors(0) == (1, 0), (
         'A faint later detection very close to a source should be a residual detection'
     )
     add_source(phot, 0, 1.2 * FWHM, 0.05, 1)
-    assert calibrate.neighbors(phot, 0) == (1, 1), (
+    assert SourceCatalog(phot).neighbors(0) == (1, 1), (
         'A first-iteration neighbor within the aperture should contaminate the source'
     )
     add_source(phot, 0, 1.9 * FWHM, 0.005, 1)
     add_source(phot, 0, 3 * FWHM, 1., 1)
-    assert calibrate.neighbors(phot, 0) == (1, 1), (
+    assert SourceCatalog(phot).neighbors(0) == (1, 1), (
         'Faint neighbors and neighbors beyond the aperture should not contaminate the source'
     )
-    assert calibrate.neighbors(phot, 0, max_neighbor_flux=0.001) == (1, 2), (
+    assert SourceCatalog(phot).neighbors(0, max_neighbor_flux=0.001) == (1, 2), (
         'A lower flux limit should make the faint neighbor contaminating'
     )
 
@@ -722,7 +733,7 @@ def test_leave_one_out(tmp_path):
 
 
 def test_leave_one_out_no_dof(tmp_path):
-    loo = calibrate._leave_one_out
+    loo = nightfit._leave_one_out
     meas = Table(
         {
             'star': ['a', 'b', 'c'], 'airmass': [1.1, 1.5, 2.], 'color': [0.1, 0.5, 1.],
@@ -748,7 +759,7 @@ def test_aperture(tmp_path, caplog):
     assert 'without an aperture correction' in caplog.text, (
         'Calibrating aperture magnitudes should warn about the aperture correction'
     )
-    content, _ = calibrate.read_calibration(calibration_file(rdxdir))
+    content, _ = read_calibration(calibration_file(rdxdir))
     assert content['calibration']['magnitude'] == 'aper', 'The magnitude should be recorded'
     assert 'without an aperture correction' in calibration_file(rdxdir).read_text(), (
         'The calibration file should warn about the aperture correction'
@@ -776,7 +787,7 @@ def test_parse_fix():
         with pytest.raises(PipnickParameterError):
             calibrate.parse_fix(bad)
     with pytest.raises(PipnickParameterError):
-        calibrate._resolve_fixed({'color': 'nominal'}, 'B', ['zp', 'color'], {'B': 0.3})
+        nightfit._resolve_fixed({'color': 'nominal'}, 'B', ['zp', 'color'], {'B': 0.3})
 
 
 def test_toml_round_trip(tmp_path):
@@ -793,8 +804,8 @@ def test_toml_round_trip(tmp_path):
         }
     }
     path = tmp_path / 'cal.toml'
-    calibrate.write_calibration(path, content)
-    parsed, edited = calibrate.read_calibration(path)
+    Calibration(content).write(path)
+    parsed, edited = read_calibration(path)
     assert not edited, 'A written file should not be reported as edited'
     assert parsed['band']['V']['coefficients'] == [-24.123456789, 0.1], (
         'The coefficients should be written exactly'
@@ -803,4 +814,4 @@ def test_toml_round_trip(tmp_path):
         'The file should be valid TOML'
     )
     path.write_text(path.read_text().replace('0.1]', '0.2]'))
-    assert calibrate.read_calibration(path)[1], 'An edited file should be reported as edited'
+    assert Calibration.read(path).edited, 'An edited file should be reported as edited'

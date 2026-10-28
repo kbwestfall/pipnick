@@ -20,51 +20,19 @@ import numpy as np
 from astropy.table import MaskedColumn, Table
 
 from pipnick import log
-from pipnick.astrometry.fit import to_icrs, wcs_from_header
-from pipnick.astrometry.qa import plot_solution
+from pipnick.datamodel.catalog import SourceCatalog, celestial_coordinates
 from pipnick.datamodel.dataset import DataSet
 from pipnick.datamodel.psf import PSFModel
 from pipnick.image.io import invalid_error
 from pipnick.photometry.aperture_photometry import aperture_analysis
-from pipnick.photometry.fit import psf_plot
 from pipnick.photometry.psf_photometry import consolidate_groups, psf_analysis
 from pipnick.pkg.exceptions import PipnickPathError
 from pipnick.pkg.provenance import image_hash, json_hash, solution_hash
 from pipnick.pkg.report import StepReport
+from pipnick.pkg.summary import Summary
 from pipnick.pkg.version import version
-
-
-def celestial_coordinates(header, x, y):
-    """
-    Compute the celestial coordinates of sources, if the image has an
-    astrometric solution found by pipnick.
-
-    Parameters
-    ----------
-    header : :class:`astropy.io.fits.Header`
-        The header of the reduced image.
-    x, y : :class:`numpy.ndarray`
-        The 0-based pixel coordinates of the sources.
-
-    Returns
-    -------
-    ra, dec : :class:`astropy.table.MaskedColumn`
-        The ICRS right ascension and declination in degrees, masked if the
-        image has no solution.
-    """
-    n = len(x)
-    if 'PNASTMTH' not in header or n == 0:
-        masked = np.ones(n, dtype=bool)
-        return (
-            MaskedColumn(np.zeros(n), name='ra', unit='deg', mask=masked),
-            MaskedColumn(np.zeros(n), name='dec', unit='deg', mask=masked)
-        )
-    coords = to_icrs(wcs_from_header(header).pixel_to_world(x, y))
-    unmasked = np.zeros(n, dtype=bool)
-    return (
-        MaskedColumn(coords.ra.deg, name='ra', unit='deg', mask=unmasked),
-        MaskedColumn(coords.dec.deg, name='dec', unit='deg', mask=unmasked)
-    )
+from pipnick.qa.psf import plot_psf
+from pipnick.qa.sources import plot_sources
 
 
 def _masked(values):
@@ -343,7 +311,7 @@ def photometry_all(
     qa : bool, optional
         Write QA figures for each measured image to ``photometry/qa``: the PSF
         model (``<image>_psf.png``; see
-        :func:`~pipnick.photometry.fit.psf_plot`) and the measured sources
+        :func:`~pipnick.qa.psf.plot_psf`) and the measured sources
         (``<image>_sources.png``).
     report : :class:`~pipnick.pkg.report.StepReport`, optional
         Collects the failures and problems of the photometry for its closing
@@ -376,16 +344,12 @@ def photometry_all(
     }
 
     outputs = []
-    summary = []
+    summary = _summary()
     for k, image in enumerate(reduced):
         progress = f'[{k + 1}/{len(reduced)}]'
         path = image.path
         ofile = image.phot_file
-        row = {
-            'image': path.name, 'status': 'failed', 'nsources': -1, 'fwhm_pix': -1.,
-            'fwhm_arcsec': -1., 'nstack': -1, 'wcs': 'none', 'reason': '-'
-        }
-        summary.append(row)
+        row = summary.add(image=path.name, status='failed', wcs='none', reason='-')
         if not image.exists:
             _report.attention(
                 f'{progress} {path.name} does not exist; reduce the data first.  Skipping.'
@@ -397,7 +361,7 @@ def photometry_all(
 
         # Check if the existing table is up to date
         if ofile.is_file() and not overwrite:
-            existing = Table.read(ofile, format='ascii.ecsv')
+            existing = SourceCatalog.read(ofile)
             if (
                 existing.meta.get('image_hash') == image_hash(hdr)
                 and existing.meta.get('settings_hash') == json_hash(settings)
@@ -408,12 +372,8 @@ def photometry_all(
                     log.info(f'{progress} {ofile.name} is up to date.')
                     row['status'] = 'up to date'
                 else:
-                    existing['ra'], existing['dec'] = celestial_coordinates(
-                        hdr, np.asarray(existing['x']), np.asarray(existing['y'])
-                    )
-                    existing.meta['wcs_method'] = hdr.get('PNASTMTH', 'none')
-                    existing.meta['wcs_hash'] = solution_hash(hdr)
-                    existing.write(ofile, format='ascii.ecsv', overwrite=True)
+                    existing.update_coordinates(hdr, solution_hash(hdr))
+                    existing.write()
                     log.info(
                         f'{progress} The astrometric solution of {path.name} changed; updated '
                         f'the celestial coordinates in {ofile.name}.'
@@ -440,18 +400,19 @@ def photometry_all(
             _write_qa(path, tbl, fit, sub, mask, phot_dir / 'qa')
 
     expected = dataset.camera.expected_range('fwhm')
-    for row in summary:
-        if row['fwhm_arcsec'] > 0:
+    for row in summary.rows:
+        if row['fwhm_arcsec'] is not None:
             _report.check_range(
                 f'{row["image"]}: the PSF FWHM', row['fwhm_arcsec'], expected, ' arcsec',
                 advice='Check the focus and tracking.'
             )
-    _summarize(summary, phot_dir)
-    measured = [row for row in summary if row['fwhm_arcsec'] > 0]
+    if summary.write(phot_dir) is None:
+        log.warning('No reduced science images to measure.')
+    measured = [row for row in summary.rows if row['fwhm_arcsec'] is not None]
     counts = ', '.join(
-        f'{sum(row["status"] == s for row in summary)} {s}'
+        f'{sum(row["status"] == s for row in summary.rows)} {s}'
         for s in ['measured', 'up to date', 'coordinates updated', 'missing', 'failed']
-        if any(row['status'] == s for row in summary)
+        if any(row['status'] == s for row in summary.rows)
     )
     text = f'{len(summary)} images ({counts})'
     if len(measured) > 0:
@@ -465,7 +426,7 @@ def photometry_all(
 
 def _summary_values(tbl):
     """
-    Return the summary values of a source table; see :func:`_summarize`.
+    Return the summary values of a source table; see :func:`_summary`.
     """
     return {
         'nsources': len(tbl), 'fwhm_pix': tbl.meta['psf']['fwhm_pix'],
@@ -473,9 +434,9 @@ def _summary_values(tbl):
     }
 
 
-def _summarize(summary, phot_dir):
+def _summary():
     """
-    Log the summary of the photometry of each image, and write it to
+    Return the summary of the photometry, written to
     ``photometry/summary.ecsv``.
 
     The summary gives the status of each image (``measured``, ``up to date``,
@@ -484,22 +445,12 @@ def _summarize(summary, phot_dir):
     to model it, the method of the astrometric solution (``none`` if the
     celestial coordinates are masked), and the reason for any failure.
     """
-    if len(summary) == 0:
-        log.warning('No reduced science images to measure.')
-        return
-    tbl = Table(rows=summary)
-    # Missing values are masked, not set to an invalid number
-    for name in ['nsources', 'fwhm_pix', 'fwhm_arcsec', 'nstack']:
-        tbl[name] = np.ma.MaskedArray(tbl[name], mask=np.asarray(tbl[name]) < 0)
-    for name in ['fwhm_pix', 'fwhm_arcsec']:
-        tbl[name].info.format = '.2f'
-    phot_dir.mkdir(parents=True, exist_ok=True)
-    tbl.meta['pipnick_version'] = version
-    tbl.write(phot_dir / 'summary.ecsv', format='ascii.ecsv', overwrite=True)
-    columns = ['image', 'status', 'nsources', 'fwhm_pix', 'fwhm_arcsec', 'nstack', 'wcs']
-    log.info(
-        'Photometry summary (also in photometry/summary.ecsv):\n'
-        + '\n'.join(tbl[columns].pformat(max_lines=-1, max_width=-1))
+    return Summary(
+        'Photometry',
+        ['image', 'status', 'nsources', 'fwhm_pix', 'fwhm_arcsec', 'nstack', 'wcs', 'reason'],
+        dtypes={'nsources': int, 'fwhm_pix': float, 'fwhm_arcsec': float, 'nstack': int},
+        formats={'fwhm_pix': '.2f', 'fwhm_arcsec': '.2f'},
+        logged=['image', 'status', 'nsources', 'fwhm_pix', 'fwhm_arcsec', 'nstack', 'wcs']
     )
 
 
@@ -509,13 +460,13 @@ def _write_qa(path, tbl, fit, data, mask, qa_dir):
     """
     qa_dir.mkdir(parents=True, exist_ok=True)
     psf = tbl.meta['psf']
-    psf_plot(
+    plot_psf(
         qa_dir / f'{path.stem}_psf.png', fit,
         title=f'{path.name}: PSF FWHM {psf["fwhm_pix"]:.2f} pixels ({psf["fwhm_arcsec"]:.2f} '
               f'arcsec) from {psf["nstack"]} stars'
     )
     order = np.argsort(-tbl['flux_psf'].filled(0.))
-    plot_solution(
+    plot_sources(
         data, mask, tbl[order], qa_dir / f'{path.stem}_sources.png',
         title=f'{path.name}: {len(tbl)} sources, numbered by decreasing PSF flux'
     )

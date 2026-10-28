@@ -1648,3 +1648,83 @@ Checks after the work:
   documents.
 - The status vocabularies of the steps' own summaries are unchanged;
   `pipnick_status` maps them to its common vocabulary.
+
+#### Step 5, Phase A: restructuring (complete, 2026-10-28, branch `qa`)
+
+Decisions made with the author before starting:
+
+- Step 5 is done in three phases on one branch, with a check-in after each:
+  A, the restructuring (no change in the outputs); B, QA by default, the
+  reduction QA page and the P7 fixes; C, `pipnick_report` and
+  `pipnick_inspect`.
+- `metadata` becomes a package, and every caller imports from its modules;
+  there are no re-exports.
+- (For Phase B) the removed sources go in a separate file, and the report
+  uses relative links.
+
+Checks after the work:
+
+- `tox -r -e 3.13-test,codestyle` passes in a fresh environment: 198 tests
+  passed, 1 skipped.
+- The docs build without warnings.
+- All nine scripts start.
+- No pipeline imports `matplotlib` or another pipeline.
+- **End to end:** on scratch copies of the 2026-08-17 n3 (fast) reduction,
+  with the M11 images labelled as four mosaics in one WCS group, `main` and
+  this branch ran the reduction, photometry (remeasured), calibration (zero
+  point, applied to the headers and catalogues, with QA) and mosaics (with
+  QA).
+  - All reduced images (data, masks, errors and headers) are identical.
+  - The source catalogues differ, but by as much as two runs of `main`
+    differ from each other (9–1,800 lines per catalogue): **the photometry
+    is not deterministic from run to run.** This predates the branch; it
+    should be explained (and, if possible, removed) in a later step.
+  - The differences in the calibration (residuals, `_cal.ecsv`) and in the
+    I, R and V mosaic data (their flux scales) follow from the photometry. The other
+    differences are the calibration's creation time and hash, the hashes
+    that include the copies' absolute paths, and the mosaic QA figures,
+    which now hide masked pixels.
+  - Run without `--overwrite` on its own outputs, and on the reduction and
+    photometry made by `main`, this branch reports every product as up to
+    date and rebuilds nothing.
+
+**New modules.**
+
+- `pkg/summary.py`: `Summary`, the step summary tables (declared columns,
+  types and formats; masked missing values; the version in the metadata).
+  Used by every step.
+- `qa/`: the figures of every step, moved out of the pipelines and the
+  algorithm modules: `display` (`show_image`, `save_figure`), `sources`,
+  `psf`, `calibration` and `mosaic`. Only `qa/` imports `matplotlib`.
+- `datamodel/catalog.py`: `SourceCatalog`, the `_phot.ecsv` tables (column
+  access, the PSF model, the celestial coordinates, the usable sources,
+  instrumental magnitudes, and the residual-detection neighbours). It
+  replaces `pipelines.photometry.celestial_coordinates` and
+  `calibrate._instrumental` and `neighbors`.
+- `datamodel/calibration.py`: `Calibration`, the night's calibration TOML
+  (read, write, edits, bands, summary rows), with `toml_value`,
+  `calibration_hash` and `extinction_source`.
+
+**Module splits** (definitions moved unchanged; private names used in more
+than one module were made public).
+
+- `astrometry/qa.py` → `astrometry/header.py` (writing and removing the
+  solution), `cache.py` (the astrometry.net cache and its invalidation) and
+  `solve.py` (the pointing groups and the solving session).
+- `photometry/fit.py` → `photometry/standards.py` (matching the standards),
+  `nightfit.py` (the night's fit and its checks) and `apply.py` (applying
+  the calibration to the headers and catalogues). `landolt_band` was added
+  to `photometry/landolt.py`.
+- `reduction/processing.py` (the frame processing and combination) and
+  `reduction/combiner.py` (moved from `utils/`).
+- `mosaic/prepare.py`: preparing the images and measuring their offsets.
+- `metadata.py` → the `metadata` package: `table`, `setups`, `groups`,
+  `names` and `build`.
+
+**Pipelines** (lines after the work): astrometry 524, calibrate 541, mosaic
+803, photometry 472, reduction 814.
+
+**Tests:** new `test_summary.py` and `test_catalog.py`; the other tests use
+the new modules.
+
+**Updated:** the release notes and the API pages.

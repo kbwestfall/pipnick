@@ -17,12 +17,13 @@ from astropy.io import fits
 from astropy.table import Table
 from astropy.wcs import WCS
 
-from pipnick import metadata
-from pipnick.astrometry import fit, match, services
+from pipnick.metadata.build import build_metadata
+from pipnick.metadata.table import read_metadata
+from pipnick.astrometry import cache, fit, header, match, services, solve
+from pipnick.astrometry.header import apply_wcs
 from pipnick.astrometry.services import AstrometryNetSolver, GaiaCatalog
 from pipnick.datamodel.dataset import DataSet
-from pipnick.pipelines import astrometry
-from pipnick.pipelines.astrometry import apply_wcs, astrometry_all
+from pipnick.pipelines.astrometry import astrometry_all
 from pipnick.pkg.exceptions import PipnickDataModelError, PipnickError
 from pipnick.pkg.version import version
 from pipnick.tests.test_metadata import write_andor
@@ -206,7 +207,7 @@ def write_field(tmp_path, images=IMAGES, stale=None):
             rawdir / f'{name}.fits', OBJECT='M11 V', RA=ra, DEC=dec,
             **{'DATE-BEG': f'2026-08-20T04:{i:02d}:00.000'}
         )
-    files, _ = metadata.build_metadata(rawdir=rawdir, filename=tmp_path / 'n7.ecsv', split=True)
+    files, _ = build_metadata(rawdir=rawdir, filename=tmp_path / 'n7.ecsv', split=True)
     table = files[0]
     rdxdir = tmp_path / 'rdx'
     rdxdir.mkdir()
@@ -428,7 +429,7 @@ def test_astrometry(tmp_path, caplog):
     # solution and redoes the rest, without submitting
     for p in solved:
         with fits.open(p, mode='update') as hdu:
-            astrometry._remove_wcs(hdu[0].header)
+            header._remove_wcs(hdu[0].header)
     caplog.clear()
     astrometry_all(table, rdxdir=rdxdir, solver=solver, catalog=catalog)
     assert len(solver.calls) == 1, 'Rewritten images should not be submitted again'
@@ -502,7 +503,7 @@ def test_points(tmp_path):
 
     # The user solution is restored after the image is rewritten, without submitting
     with fits.open(image, mode='update') as hdu:
-        astrometry._remove_wcs(hdu[0].header)
+        header._remove_wcs(hdu[0].header)
     solver = FakeSolver(truth, coords)
     astrometry_all(table, rdxdir=rdxdir, solver=solver, catalog=FakeCatalog(coords, flux))
     assert fits.getheader(image)['PNASTMTH'] == 'points', 'The user solution should be restored'
@@ -623,7 +624,7 @@ def test_wide_search(tmp_path, caplog):
     )
     hdr = fits.getheader(rdxdir / stale_1)
     assert hdr['PNASTMTH'] == 'gaia', 'The first stale image should be solved by the wide search'
-    tbl = metadata.read_metadata(table)
+    tbl = read_metadata(table)
     pointing = SkyCoord(tbl['ra'][1], tbl['dec'][1], unit=('hourangle', 'deg'))
     center = fit.image_center(truth[stale_1], SHAPE)
     assert np.isclose(hdr['PNASTPOE'], center.separation(pointing).arcmin, atol=0.01), (
@@ -650,7 +651,7 @@ def test_wide_search(tmp_path, caplog):
     # If the second stale image is rewritten, it is solved again using the
     # pointing error of the first, without the wide search
     with fits.open(rdxdir / stale_2, mode='update') as hdu:
-        astrometry._remove_wcs(hdu[0].header)
+        header._remove_wcs(hdu[0].header)
     caplog.clear()
     catalog = FakeCatalog(coords, flux)
     astrometry_all(table, rdxdir=rdxdir, solver=solver, catalog=catalog)
@@ -690,7 +691,7 @@ def test_invalidate_chains():
         hdr = fits.Header({'PNASTMTH': method})
         if ref is not None:
             hdr['PNASTREF'] = ref
-        image = astrometry.AstrometryImage(
+        image = solve.AstrometryImage(
             Path(f'{name}.fits'), hdr, SHAPE, FIELD_CENTER, 2026., SCALE, FWHM, None, {}, ''
         )
         image.status = 'solved'
@@ -698,12 +699,12 @@ def test_invalidate_chains():
         images.append(image)
     by_name = {image.name: image for image in images}
 
-    astrometry._invalidate_chains(images, by_name)
+    cache.invalidate_chains(images, by_name)
     assert all(image.status == 'solved' for image in images), (
         'Valid chains should not be invalidated'
     )
     by_name['b.fits'].status = None
-    astrometry._invalidate_chains(images, by_name)
+    cache.invalidate_chains(images, by_name)
     assert [image.status for image in images] == ['solved', None, None, 'solved'], (
         'Invalidating an image should invalidate the chain bootstrapped from it, and only that '
         'chain'
@@ -773,7 +774,7 @@ def test_select_images(tmp_path, caplog):
     names = sorted(truth.keys())
     for name in names[1:3]:
         with fits.open(rdxdir / name, mode='update') as hdu:
-            astrometry._remove_wcs(hdu[0].header)
+            header._remove_wcs(hdu[0].header)
 
     # Only the selected image (by comb_id) is solved
     solved = astrometry_all(

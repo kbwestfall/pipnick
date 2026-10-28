@@ -83,7 +83,8 @@ class MetaData(scriptbase.ScriptBase):
         from pathlib import Path
         from pipnick import log
         from pipnick.cameras import available_cameras
-        from pipnick.metadata import build_metadata, find_setup_files
+        from pipnick.metadata.build import build_metadata
+        from pipnick.metadata.setups import find_setup_files
         from pipnick.pkg.report import StepReport
 
         # Initialize logger, in the default reduction directory (the parent of

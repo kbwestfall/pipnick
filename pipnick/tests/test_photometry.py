@@ -12,13 +12,14 @@ from astropy.wcs import WCS
 from photutils.aperture import ApertureStats, CircularAperture
 from photutils.psf import MoffatPSF
 
-from pipnick import metadata
+from pipnick.metadata.build import build_metadata
+from pipnick.metadata.table import read_metadata
+from pipnick.astrometry.header import apply_wcs
 from pipnick.datamodel.dataset import DataSet
 from pipnick.datamodel.psf import PSFModel
 from pipnick.photometry import psf_photometry
 from pipnick.photometry.moffat import EllipticalMoffatPSF
 from pipnick.photometry.aperture_photometry import aperture_analysis
-from pipnick.pipelines.astrometry import apply_wcs
 from pipnick.pipelines.photometry import photometry_all
 from pipnick.pkg.exceptions import PipnickParameterError
 from pipnick.pkg.version import version
@@ -96,7 +97,7 @@ def write_field(tmp_path, nimages=1, raw_wcs=False):
             rawdir / f'n800{i+1}.fits', OBJECT='M11 V', RA=ra, DEC=dec, XPOSURE=EXPTIME,
             AIRMASS=1.25 + 0.1 * i, **{'DATE-BEG': f'2026-08-20T04:{i:02d}:00.000'}
         )
-    files, _ = metadata.build_metadata(rawdir=rawdir, filename=tmp_path / 'n8.ecsv', split=True)
+    files, _ = build_metadata(rawdir=rawdir, filename=tmp_path / 'n8.ecsv', split=True)
     table = files[0]
     rdxdir = tmp_path / 'rdx'
     rdxdir.mkdir()
@@ -241,7 +242,7 @@ def test_photometry(tmp_path, caplog):
     assert np.all(np.ma.getmaskarray(tbl['ra'])) and np.all(np.ma.getmaskarray(tbl['dec'])), (
         'Without an astrometric solution, the celestial coordinates should be masked'
     )
-    assert tbl.meta['airmass'] == metadata.read_metadata(table)['airmass'][0], (
+    assert tbl.meta['airmass'] == read_metadata(table)['airmass'][0], (
         'The airmass should come from the metadata table'
     )
     assert tbl.meta['exptime'] == EXPTIME and tbl.meta['filter'] == 'V', (

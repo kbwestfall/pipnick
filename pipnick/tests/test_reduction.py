@@ -8,10 +8,14 @@ from astropy.io import fits
 from astropy.nddata import CCDData
 from astropy.table import Table
 
-from pipnick import cameras, metadata
+from pipnick import cameras
+from pipnick.metadata.build import build_metadata
+from pipnick.metadata.names import safe_name
+from pipnick.metadata.table import read_metadata, write_metadata
 from pipnick.datamodel import dataset
 from pipnick.datamodel.dataset import DataSet, check_comb_groups, check_single_setup
 from pipnick.pipelines import reduction
+from pipnick.reduction import processing
 from pipnick.pipelines.reduction import reduce_all
 from pipnick.pkg.exceptions import PipnickDataModelError
 from pipnick.pkg.report import StepReport
@@ -25,7 +29,7 @@ def test_one_setup(tmp_path):
     write_andor(rawdir / 'n1001.fits')
     write_andor(rawdir / 'n1002.fits', AMPCONF='0.05MHz')
     table = tmp_path / 'raw.ecsv'
-    metadata.build_metadata(rawdir=rawdir, filename=table)
+    build_metadata(rawdir=rawdir, filename=table)
 
     # Data from more than one setup cannot be reduced together
     with pytest.raises(PipnickDataModelError, match='more than one setup'):
@@ -37,12 +41,12 @@ def test_per_setup_file(tmp_path):
     rawdir.mkdir()
     write_andor(rawdir / 'n1001.fits')
     write_andor(rawdir / 'n1002.fits', AMPCONF='0.05MHz')
-    files, _ = metadata.build_metadata(rawdir=rawdir, filename=tmp_path / 'n1.ecsv', split=True)
+    files, _ = build_metadata(rawdir=rawdir, filename=tmp_path / 'n1.ecsv', split=True)
     assert len(files) == 2, 'Each setup should be written to its own file'
 
     # Each per-setup file passes the setup check
     for f in files:
-        _, tbl = metadata.build_metadata(filename=f)
+        _, tbl = build_metadata(filename=f)
         check_single_setup(tbl, f)
 
 
@@ -51,7 +55,7 @@ def test_single_file_table(tmp_path):
     rawdir.mkdir()
     write_andor(rawdir / 'n1001.fits')
     table = tmp_path / 'raw.ecsv'
-    metadata.build_metadata(rawdir=rawdir, filename=table)
+    build_metadata(rawdir=rawdir, filename=table)
 
     # A table with all setups has no combination groups
     with pytest.raises(PipnickDataModelError, match='--split'):
@@ -126,9 +130,9 @@ def test_comb_groups(caplog):
 
 
 def test_names():
-    assert metadata.safe_name('NGC 7331 I') == 'NGC_7331_I', 'Spaces should become underscores'
-    assert metadata.safe_name("Barnard's") == 'Barnards', 'Quotes should be removed'
-    assert metadata.safe_name('SN2026abc+1.5-x/y') == 'SN2026abc+1.5-xy', (
+    assert safe_name('NGC 7331 I') == 'NGC_7331_I', 'Spaces should become underscores'
+    assert safe_name("Barnard's") == 'Barnards', 'Quotes should be removed'
+    assert safe_name('SN2026abc+1.5-x/y') == 'SN2026abc+1.5-xy', (
         'Only letters, digits, underscores, periods, plus, and minus should be kept'
     )
     assert dataset._dark_name(120.004) == 'Dark_120s.fits', (
@@ -223,17 +227,17 @@ def set_column(table, files, column, value):
     Set a column value for a set of frames in a per-setup file, as a user
     would by editing the file.
     """
-    tbl, commented = metadata.read_metadata(table, include_commented=True, expand=False)
+    tbl, commented = read_metadata(table, include_commented=True, expand=False)
     # Rebuild the column, so that longer strings are not truncated
     tbl[column] = [value if f in files else v for f, v in zip(tbl['file'], tbl[column])]
-    metadata.write_metadata(tbl, table, commented=commented)
+    write_metadata(tbl, table, commented=commented)
 
 
 def comb_id(table, file):
     """
     Return the combination group of a frame in a per-setup file.
     """
-    tbl = metadata.read_metadata(table)
+    tbl = read_metadata(table)
     return int(tbl['comb_id'][tbl['file'] == file][0])
 
 
@@ -252,7 +256,7 @@ def night(tmp_path):
     """
     rawdir = tmp_path / 'raw'
     write_night(rawdir)
-    files, _ = metadata.build_metadata(rawdir=rawdir, filename=tmp_path / 'n5.ecsv', split=True)
+    files, _ = build_metadata(rawdir=rawdir, filename=tmp_path / 'n5.ecsv', split=True)
     table = files[0]
     set_comb_id(table, ['n5012.fits'], comb_id(table, 'n5011.fits'))
     return table
@@ -327,7 +331,7 @@ def test_reduce_new_science(night, tmp_path, caplog):
 
     # A new science frame is added in its own group
     write_frame(rawdir / 'n5013.fits', 5000, 'M11 V', 30., 'V', '?', '05:00:00')
-    metadata.build_metadata(rawdir=rawdir, filename=tmp_path / 'n5.ecsv', split=True, append=True)
+    build_metadata(rawdir=rawdir, filename=tmp_path / 'n5.ecsv', split=True, append=True)
     before = mtimes(rdxdir)
     science = reduce_all(night, rdxdir=rdxdir)
     new_name = f'M11_V_V_C{comb_id(night, "n5013.fits"):03d}_2026-08-20.fits'
@@ -355,7 +359,7 @@ def test_reduce_new_bias(night, tmp_path):
 
     # A new bias reprocesses everything that depends on it
     write_frame(rawdir / 'n5013.fits', 300, 'bias', 0.2, 'V', 'DARK', '05:00:00')
-    metadata.build_metadata(rawdir=rawdir, filename=tmp_path / 'n5.ecsv', split=True, append=True)
+    build_metadata(rawdir=rawdir, filename=tmp_path / 'n5.ecsv', split=True, append=True)
     before = mtimes(rdxdir)
     reduce_all(night, rdxdir=rdxdir)
     after = mtimes(rdxdir)
@@ -380,7 +384,7 @@ def test_frame_stats(tmp_path, caplog):
     with fits.open(path, mode='update') as hdu:
         hdu[0].data[100,100:103] = 65535
         hdu[0].data[200,200] = 30000
-    ccd = reduction.process_frame(path, flag_cosmics=True)
+    ccd = processing.process_frame(path, flag_cosmics=True)
 
     assert ccd.meta['PNNSAT'] == 3, 'Saturated pixels should be counted'
     assert ccd.meta['PNOSCAN'] == 300., 'The overscan level should be saved to the header'
@@ -400,7 +404,7 @@ def test_bias_stats(caplog):
             meta={'PROCGAIN': gain, 'PROCRN': readnoise, 'PNOSCAN': 300.}
         ) for _ in range(3)
     ]
-    level, measured = reduction._report_bias_stats(frames, ['b1.fits', 'b2.fits', 'b3.fits'])
+    level, measured = processing.report_bias_stats(frames, ['b1.fits', 'b2.fits', 'b3.fits'])
     assert np.isclose(level, 305., atol=0.1), (
         'The bias level should include the overscan level and be in ADU'
     )
@@ -487,7 +491,7 @@ def test_reduce_airmass(night, tmp_path):
     reduce_all(night, rdxdir=rdxdir)
     cid = comb_id(night, 'n5011.fits')
     name = f'M11_V_V_C{cid:03d}_2026-08-20.fits'
-    tbl = metadata.read_metadata(night)
+    tbl = read_metadata(night)
     airmass = tbl['airmass'][np.isin(tbl['file'], ['n5011.fits', 'n5012.fits'])]
     assert np.isclose(fits.getheader(rdxdir / name)['AIRMASS'], np.mean(airmass)), (
         'The airmass of a combined image should be the mean of its frames'

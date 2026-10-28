@@ -110,7 +110,7 @@ def calibration_file(rdxdir, tag, night):
     rdxdir : str, :class:`pathlib.Path`
         The reduction directory.
     tag : str
-        The setup tag; see :func:`~pipnick.metadata.setup_tag`.
+        The setup tag; see :func:`~pipnick.metadata.setups.setup_tag`.
     night : str
         The night (UT date, ``YYYY-MM-DD``).
 
@@ -133,7 +133,7 @@ def residuals_file(rdxdir, tag, night):
     rdxdir : str, :class:`pathlib.Path`
         The reduction directory.
     tag : str
-        The setup tag; see :func:`~pipnick.metadata.setup_tag`.
+        The setup tag; see :func:`~pipnick.metadata.setups.setup_tag`.
     night : str
         The night (UT date, ``YYYY-MM-DD``).
 

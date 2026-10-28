@@ -11,20 +11,15 @@ Subpackages
    pipnick.cameras
    pipnick.datamodel
    pipnick.image
+   pipnick.metadata
    pipnick.mosaic
    pipnick.photometry
    pipnick.pipelines
    pipnick.pkg
+   pipnick.qa
+   pipnick.reduction
    pipnick.scripts
    pipnick.utils
-
-Submodules
-----------
-
-.. toctree::
-   :maxdepth: 4
-
-   pipnick.metadata
 
 Module contents
 ---------------

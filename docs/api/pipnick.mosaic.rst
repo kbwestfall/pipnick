@@ -8,6 +8,7 @@ Submodules
    :maxdepth: 4
 
    pipnick.mosaic.coadd
+   pipnick.mosaic.prepare
    pipnick.mosaic.psfmatch
    pipnick.mosaic.scaling
 

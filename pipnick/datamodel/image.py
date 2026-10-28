@@ -5,11 +5,11 @@ A reduced science image and the products derived from it.
 import numpy as np
 
 from astropy.io import fits
-from astropy.table import Table
 from astropy.time import Time
 from astropy.wcs.utils import proj_plane_pixel_area
 
 from pipnick.astrometry.fit import wcs_from_header
+from pipnick.datamodel.catalog import SourceCatalog
 from pipnick.image.io import read_reduced
 from pipnick.pkg.exceptions import PipnickDataModelError
 from pipnick.pkg.paths import photometry_table
@@ -230,7 +230,7 @@ class ReducedImage:
 
         Returns
         -------
-        :class:`astropy.table.Table`
+        :class:`~pipnick.datamodel.catalog.SourceCatalog`
             The source table; see
             :func:`~pipnick.pipelines.photometry.photometry_all`.
 
@@ -250,7 +250,7 @@ class ReducedImage:
                     f'{self.name} has no source table; run pipnick_photometry.'
                 )
             return None
-        phot = Table.read(pfile, format='ascii.ecsv')
+        phot = SourceCatalog.read(pfile)
         if phot.meta.get('image_hash') != self.image_hash:
             raise PipnickDataModelError(
                 f'The source table {pfile.name} is out of date: {self.name} has changed since '

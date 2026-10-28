@@ -35,6 +35,23 @@ from pipnick.pkg.exceptions import PipnickParameterError
 from pipnick.utils.crossmatch import match_sky
 
 
+def landolt_band(filtername):
+    """
+    Return the Landolt band of a filter.
+
+    Parameters
+    ----------
+    filtername : str
+        The filter name.
+
+    Returns
+    -------
+    str
+        The band, or None if the filter is not one of UBVRI.
+    """
+    return filtername if filtername in ['U', 'B', 'V', 'R', 'I'] else None
+
+
 def catalog_path():
     """
     Return the path to the Landolt catalog distributed with pipnick.
