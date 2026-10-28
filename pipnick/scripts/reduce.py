@@ -37,10 +37,14 @@ class Reduce(scriptbase.ScriptBase):
 
     @classmethod
     def main(cls, args):
+        from pipnick.datamodel.dataset import reduction_dir
         from pipnick.pipelines.reduction import reduce_all
+        from pipnick.pkg.report import StepReport
 
         # Initialize logger
-        cls.init_log(args)
+        cls.init_log(args, log_dir=cls.log_dir(reduction_dir(args.raw_table, args.rdxdir)))
 
         # Reduce the images
-        reduce_all(args.raw_table, rdxdir=args.rdxdir, overwrite=args.overwrite)
+        report = StepReport('REDUCTION')
+        reduce_all(args.raw_table, rdxdir=args.rdxdir, overwrite=args.overwrite, report=report)
+        return report.exit_status

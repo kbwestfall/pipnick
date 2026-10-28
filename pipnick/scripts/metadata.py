@@ -84,38 +84,59 @@ class MetaData(scriptbase.ScriptBase):
         from pipnick import log
         from pipnick.cameras import available_cameras
         from pipnick.metadata import build_metadata, find_setup_files
+        from pipnick.pkg.report import StepReport
 
-        # Initialize logger
-        cls.init_log(args)
+        # Initialize logger, in the default reduction directory (the parent of
+        # the raw directory)
+        root = None if args.rawdir is None else Path(args.rawdir).absolute().parent
+        cls.init_log(args, log_dir=cls.log_dir(root))
 
         if args.assign_mosaics and not args.split:
             log.error('--assign_mosaics requires --split.')
-            return
+            return 1
         if args.rawdir is None:
             log.error('Must provide the directory with the raw data (--rawdir).')
-            return
+            return 1
         if args.camera is not None and args.camera not in available_cameras():
             log.error(
                 f'Unknown camera {args.camera}.  Available cameras are: '
                 f'{", ".join(available_cameras())}.'
             )
-            return
+            return 1
         if args.raw_table is not None and not args.overwrite and not args.append:
             if args.split and len(find_setup_files(args.raw_table)) > 0:
                 log.error(
                     f'Per-setup files for {args.raw_table} already exist.  Use --append to add '
                     'new files to them, or --overwrite to rebuild them.'
                 )
-                return
+                return 1
             if not args.split and Path(args.raw_table).is_file():
                 log.error(
                     f'{args.raw_table} already exists.  Use --append to add new files to it, '
                     'or --overwrite to rebuild it.'
                 )
-                return
+                return 1
 
-        build_metadata(
+        report = StepReport('METADATA')
+        files, tbl = build_metadata(
             rawdir=args.rawdir, filename=args.raw_table, ext=args.ext, overwrite=args.overwrite,
             append=args.append, camera=args.camera, classify=args.classify, split=args.split,
-            assign=args.assign_mosaics, mosaic_radius=args.mosaic_radius
+            assign=args.assign_mosaics, mosaic_radius=args.mosaic_radius, report=report
         )
+        if args.classify == 'header':
+            report.note(
+                'The checks that need the pixel data (bias level, flat illumination, '
+                'saturation) were skipped; use --classify stats to apply them.'
+            )
+        files = files if isinstance(files, list) else [files]
+        names = ', '.join(Path(f).name for f in files)
+        following = (
+            f'review {names} (comment out bad frames with "#", and check the object names and '
+            'comb_id groups), then run: '
+        )
+        if args.split:
+            following += ' or '.join(f'pipnick_reduce -t {f}' for f in files)
+        else:
+            following += 'pipnick_metadata --split to write a table for each setup'
+        report.finish(f'{len(tbl)} frames in {len(files)} table(s).', next_step=following)
+        return report.exit_status

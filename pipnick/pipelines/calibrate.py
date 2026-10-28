@@ -54,6 +54,8 @@ from pipnick.pkg.exceptions import (
 )
 from pipnick.pkg.paths import calibrated_table, calibration_file, residuals_file, step_dir
 from pipnick.pkg.provenance import file_hash, json_hash
+from pipnick.pkg.report import StepReport
+from pipnick.pkg.version import version
 from pipnick.utils.crossmatch import link_sources
 
 
@@ -869,7 +871,7 @@ def calibrate_night(night, images, standards, catalog, camera, tag, settings, no
             'catalog': 'Landolt (2009, 2013)', 'catalog_hash': file_hash(catalog_path()),
             'magnitude': settings['mag'],
             'created': datetime.datetime.now(datetime.UTC).isoformat(timespec='seconds'),
-            'input_hash': settings['input_hash']
+            'pipnick_version': version, 'input_hash': settings['input_hash']
         },
         'band': {}
     }
@@ -978,7 +980,7 @@ def calibrate_all(
     mag='psf', match_radius=2., max_neighbor_flux=0.01, residual_radius=1.5, max_cat_err=0.05,
     min_cat_obs=1, sys_err=0.01, rej=3., maxiter=5, min_stars=3, min_airmass_span=0.2,
     min_color_span=0.3, force=False, fallback=True, drift_warn=0.02, qa=False, overwrite=False,
-    apply=None, default_color=None
+    apply=None, default_color=None, report=None
 ):
     r"""
     Calibrate the photometry of the reduced science images with the Landolt
@@ -1105,6 +1107,10 @@ def calibrate_all(
     default_color : dict, optional
         The color assumed for sources without a measured color, keyed by the
         color, e.g., ``{'B-V': 0.6}``.  Colors not given default to 0.
+    report : :class:`~pipnick.pkg.report.StepReport`, optional
+        Collects the problems of the calibration for its closing verdict: the
+        bands that could not be calibrated, and those whose extinction was not
+        measured.  If None, a new one is used.
 
     Returns
     -------
@@ -1119,7 +1125,9 @@ def calibrate_all(
         Raised if no source table has celestial coordinates, a source table
         is out of date, or no band is calibrated.
     """
+    _report = StepReport('CALIBRATION') if report is None else report
     dataset = DataSet.from_file(table, rdxdir=rdxdir)
+    _report.check_version(dataset.metafile.name, dataset.table.meta.get('pipnick_version'))
     _rdxdir = dataset.rdxdir
     tag = dataset.tag
     camera = dataset.camera
@@ -1218,10 +1226,15 @@ def calibrate_all(
                     )
                 content = existing
                 status = 'edited (kept)'
+                _report.note(f'{ofile.name} has been edited, and was kept.')
             elif same_inputs:
                 log.info(f'{ofile.name} is up to date.')
                 content = existing
                 status = 'up to date'
+            if content is not None:
+                _report.check_version(
+                    ofile.name, content['calibration'].get('pipnick_version')
+                )
         if content is None:
             if len(standards) == 0:
                 log.warning(
@@ -1232,10 +1245,11 @@ def calibrate_all(
                 night, night_images, standards, catalog, camera, tag, settings, nominal, _fix
             )
             write_calibration(ofile, content)
-            log.info(f'Wrote {ofile}')
+            log.info(f'Wrote calibrate/{ofile.name}')
             rfile = residuals_file(_rdxdir, tag, night)
+            meas.meta['pipnick_version'] = version
             meas.write(rfile, format='ascii.ecsv', overwrite=True)
-            log.info(f'Wrote {rfile}')
+            log.info(f'Wrote calibrate/{rfile.name}')
             if qa:
                 _write_qa(meas, content, cal_dir / 'qa' / f'{tag}_{night}_residuals.png')
             status = 'fit'
@@ -1243,13 +1257,32 @@ def calibrate_all(
         summary += _summary_rows(night, content, status)
 
         if apply in ['image', 'both']:
-            apply_to_headers(night_images, content, ofile)
+            apply_to_headers(night_images, content, ofile, report=_report)
         if apply in ['catalog', 'both']:
             apply_to_catalogs(night_images, content, ofile, settings, _default_color)
 
     _summarize(summary, cal_dir)
-    if not any(row['status'] == 'ok' for row in summary):
+    for row in summary:
+        if row['status'] != 'ok':
+            _report.attention(
+                f'{row["night"]} {row["band"]}: the calibration failed: {row["reason"]}',
+                warn=False
+            )
+        elif row['extinction'] == 'fallback':
+            _report.attention(
+                f'{row["night"]} {row["band"]}: the extinction was not measured; the nominal '
+                'value was used (see the banner above).', warn=False
+            )
+    nok = sum(row['status'] == 'ok' for row in summary)
+    text = f'{nok} of {len(summary)} bands calibrated; summary in calibrate/summary.ecsv.'
+    if nok == 0:
+        _report.fail('No band could be calibrated; see the summary above.')
+        _report.finish(text)
         raise PipnickDataModelError('No band could be calibrated; see the summary above.')
+    following = None
+    if 'mosaic' in dataset.table.colnames and np.any(dataset.table['mosaic'] != ''):
+        following = f'pipnick_mosaic -t {dataset.metafile}'
+    _report.finish(text, next_step=following)
     return outputs
 
 
@@ -1272,7 +1305,7 @@ def _calibrations(content):
     return calibrations
 
 
-def apply_to_headers(images, content, cfile):
+def apply_to_headers(images, content, cfile, report=None):
     r"""
     Record the calibration in the headers of the reduced images.
 
@@ -1311,6 +1344,9 @@ def apply_to_headers(images, content, cfile):
         The calibration; see :func:`write_calibration`.
     cfile : :class:`pathlib.Path`
         The calibration file.
+    report : :class:`~pipnick.pkg.report.StepReport`, optional
+        Records the version (``PNCALVER``) of the calibrations in the headers
+        that are up to date.
 
     Returns
     -------
@@ -1341,6 +1377,8 @@ def apply_to_headers(images, content, cfile):
         hdr = fits.getheader(path)
         if hdr.get('PNCALHSH') == chash:
             log.info(f'{path.name}: header calibration is up to date.')
+            if report is not None:
+                report.check_version(f'{path.name} (calibration)', hdr.get('PNCALVER'))
             continue
         zp = zero_point(cal['terms'], cal['coeff'], cal['cov'], float(image.airmass))
         cards = [
@@ -1354,6 +1392,7 @@ def apply_to_headers(images, content, cfile):
             ('PNCALEXT', cal['extinction'], 'Extinction: fit/fixed/fallback/none'),
             ('PNCALFIL', cfile.name, 'Calibration file'),
             ('PNCALHSH', chash, 'Hash of the calibration file'),
+            ('PNCALVER', version, 'pipnick version (calibration)'),
             ('PHOTZP', zp['zp'], 'Zero point (e-/s) for color 0')
         ]
         with fits.open(path, mode='update') as hdu:
@@ -1465,7 +1504,8 @@ def apply_to_catalogs(images, content, cfile, settings, default_color):
                 'color': cal['color_name'], 'magnitude': mag_type, 'system': 'Vega',
                 'extinction': cal['extinction'], 'calibration': cfile.name,
                 'calibration_hash': chash, 'airmass': image.airmass,
-                'errors': 'statistical only; fixed and fallback terms have no error'
+                'errors': 'statistical only; fixed and fallback terms have no error',
+                'pipnick_version': version
             }
             ofile = calibrated_table(image.path)
             tbl.write(ofile, format='ascii.ecsv', overwrite=True)
@@ -1520,6 +1560,7 @@ def _summarize(summary, cal_dir):
     for name in ['rms', 'rms_loo', 'k_airmass', 'drift', 'drift_err']:
         tbl[name].info.format = '.3f'
     cal_dir.mkdir(parents=True, exist_ok=True)
+    tbl.meta['pipnick_version'] = version
     tbl.write(cal_dir / 'summary.ecsv', format='ascii.ecsv', overwrite=True)
     columns = [
         'night', 'band', 'status', 'n_stars', 'n_meas', 'n_rejected', 'rms', 'rms_loo',

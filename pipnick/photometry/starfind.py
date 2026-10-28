@@ -166,13 +166,13 @@ def detect_sources(
 
     # Determine the clipped statistics.
     mean, median, std = sigma_clipped_stats(_image, sigma=sigma)
-    log.info(f'Median and standard deviation: {median:.1f} {std:.2f}')
+    log.debug(f'Background median and standard deviation: {median:.1f}, {std:.2f}')
 
     # Source detection
     starfind = DAOStarFinder(fwhm=fwhm, threshold=thresh*std)
     sources = starfind((_image - median).filled(0.0), mask=np.ma.getmaskarray(_image))
     nsources = 0 if sources is None else len(sources)
-    log.info(f'Detected {nsources} sources.')
+    log.debug(f'Detected {nsources} sources.')
     if nsources == 0:
         raise ValueError('No sources detected.')
 
@@ -182,7 +182,7 @@ def detect_sources(
         x, y, _image, ap_centers, fwhm, inner_bkg=inner_bkg, outer_bkg=outer_bkg
     )
     mean_kron_radius = sigma_clipped_stats(kron_radius, sigma=3., maxiters=None)[0]
-    log.info(f'Mean Kron radius of sources: {mean_kron_radius:.1f}')
+    log.debug(f'Mean Kron radius of sources: {mean_kron_radius:.1f} pixels')
     kron_bkg, _, kron_flux = kron_stats(
         x, y, _image, ap_centers, fwhm, inner_bkg=inner_bkg, outer_bkg=outer_bkg,
         source_radius=mean_kron_radius
@@ -206,7 +206,7 @@ def detect_sources(
         & (kron_flux.data > min_flux)
         & np.logical_not(np.ma.getmaskarray(kron_flux))
     )
-    log.info(f'Selected {np.sum(good)} well-separated sources with good flux')
+    log.debug(f'Selected {np.sum(good)} well-separated sources with good flux')
 
     meta = {
         'thresh': thresh, 'fwhm': fwhm, 'inner_bkg': inner_bkg, 'outer_bkg': outer_bkg,

@@ -21,6 +21,7 @@ from pipnick.photometry.aperture_photometry import aperture_analysis
 from pipnick.pipelines.astrometry import apply_wcs
 from pipnick.pipelines.photometry import photometry_all
 from pipnick.pkg.exceptions import PipnickParameterError
+from pipnick.pkg.version import version
 from pipnick.tests.test_metadata import write_andor
 
 # The synthetic images: 2x2-binned Andor frames (0.333 arcsec pixels), cut to
@@ -203,6 +204,7 @@ def test_photometry(tmp_path, caplog):
     outputs = photometry_all(table, rdxdir=rdxdir, qa=True)
     assert len(outputs) == 1, 'A source table should be written for the image'
     tbl = Table.read(outputs[0])
+    assert tbl.meta['pipnick_version'] == version, 'The table should record the pipnick version'
     isrc, istar = match_stars(tbl, stars)
     assert len(istar) >= 24, 'Nearly all injected stars should be found'
     assert len(tbl) - len(isrc) <= 2, 'There should be few spurious sources'

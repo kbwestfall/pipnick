@@ -10,10 +10,12 @@ from astropy.table import Table
 
 from pipnick import cameras, metadata
 from pipnick.datamodel import dataset
-from pipnick.datamodel.dataset import check_comb_groups, check_single_setup
+from pipnick.datamodel.dataset import DataSet, check_comb_groups, check_single_setup
 from pipnick.pipelines import reduction
 from pipnick.pipelines.reduction import reduce_all
 from pipnick.pkg.exceptions import PipnickDataModelError
+from pipnick.pkg.report import StepReport
+from pipnick.pkg.version import version
 from pipnick.tests.test_metadata import write_andor, write_andor_image
 
 
@@ -380,15 +382,12 @@ def test_frame_stats(tmp_path, caplog):
         hdu[0].data[200,200] = 30000
     ccd = reduction.process_frame(path, flag_cosmics=True)
 
-    assert 'has 3 saturated pixels' in caplog.text, 'Saturated pixels should be counted'
-    assert 'mean level is 300.0 ADU' in caplog.text, 'The overscan level should be reported'
+    assert ccd.meta['PNNSAT'] == 3, 'Saturated pixels should be counted'
     assert ccd.meta['PNOSCAN'] == 300., 'The overscan level should be saved to the header'
-    assert f'Trimmed image to {ccd.shape[1]} x {ccd.shape[0]}' in caplog.text, (
-        'The size of the trimmed image should be reported'
-    )
-    assert 'Removed cosmic rays from n6001.fits; 1 pixels affected' in caplog.text, (
-        'The number of pixels affected by cosmic rays should be reported'
-    )
+    assert ccd.meta['PNNCR'] == 1, 'The pixels affected by cosmic rays should be counted'
+    assert 'n6001.fits: overscan 300.0 ADU; 3 saturated pixels; 1 cosmic-ray pixels' in (
+        caplog.text
+    ), 'One line should summarize the processing of the frame, naming it'
 
 
 def test_bias_stats(caplog):
@@ -401,11 +400,13 @@ def test_bias_stats(caplog):
             meta={'PROCGAIN': gain, 'PROCRN': readnoise, 'PNOSCAN': 300.}
         ) for _ in range(3)
     ]
-    reduction._report_bias_stats(frames, ['b1.fits', 'b2.fits', 'b3.fits'])
-    assert 'b1.fits: mean bias level is 305.0 ADU' in caplog.text, (
+    level, measured = reduction._report_bias_stats(frames, ['b1.fits', 'b2.fits', 'b3.fits'])
+    assert np.isclose(level, 305., atol=0.1), (
         'The bias level should include the overscan level and be in ADU'
     )
-    measured = float(caplog.text.split('pairs of bias frames: median ')[1].split()[0])
+    assert 'Bias level of the 3 frames: median 305.0 ADU' in caplog.text, (
+        'The bias level should be reported'
+    )
     assert np.isclose(measured, readnoise, rtol=0.05), (
         'The read noise should be the standard deviation of the pair differences divided by '
         'sqrt(2)'
@@ -544,3 +545,102 @@ def test_uncertainty(night, tmp_path):
             f'The uncertainty of {name} should be propagated from the read noise, the overscan, '
             'the counts, and the calibrations'
         )
+
+
+def test_reduce_summary_and_verdict(night, tmp_path, caplog):
+    rdxdir = tmp_path / 'rdx'
+    report = StepReport('REDUCTION')
+    reduce_all(night, rdxdir=rdxdir, report=report)
+
+    summary = Table.read(rdxdir / 'reduce' / 'summary.ecsv')
+    assert list(summary['status']) == ['built'] * 6, 'Every product should be built'
+    assert summary.meta['pipnick_version'] == version, 'The summary should record the version'
+    bias = summary[summary['frametype'] == 'bias'][0]
+    assert bias['bias_level'] == pytest.approx(300., abs=0.5), (
+        'The bias level should be measured in ADU'
+    )
+    assert bias['read_noise'] < 1., 'The synthetic biases have no noise'
+    science = summary[summary['frametype'] == 'science'][0]
+    assert science['flat'] == 'SkyFlat_V.fits' and science['bias'] == 'Bias.fits', (
+        'The summary should list the calibrations used'
+    )
+    assert science['sky'] > 0 and science['cr_frac'] >= 0, (
+        'The sky level and cosmic-ray fraction should be measured'
+    )
+    hdr = fits.getheader(rdxdir / 'Bias.fits')
+    assert hdr['PNVERS'] == version, 'The products should record the pipnick version'
+    assert hdr['PNBIASLV'] == pytest.approx(bias['bias_level']), (
+        'The bias level should be saved to the header of the bias'
+    )
+
+    # The noiseless biases have a read noise far below the nominal value
+    assert report.status == 'NEEDS ATTENTION' and report.exit_status == 0, (
+        'A measurement outside the expected range should need attention, not fail'
+    )
+    assert any('read noise' in p for p in report.problems), (
+        'The read noise should be checked against the nominal value'
+    )
+    assert 'REDUCTION NEEDS ATTENTION' in caplog.text, 'The verdict should be logged'
+    assert 'Next: pipnick_astrometry' in caplog.text, 'The next step should be given'
+    assert '[6/6]' in caplog.text, 'The progress should be logged'
+
+    # The measurements of up-to-date products are read from their headers
+    caplog.clear()
+    report = StepReport('REDUCTION')
+    reduce_all(night, rdxdir=rdxdir, report=report)
+    summary = Table.read(rdxdir / 'reduce' / 'summary.ecsv')
+    assert list(summary['status']) == ['up to date'] * 6, 'Every product should be up to date'
+    level = summary['bias_level'][summary['frametype'] == 'bias'][0]
+    assert level == pytest.approx(300., abs=0.5), (
+        'The measurements of up-to-date products should be reported'
+    )
+    assert len(report.mismatched) == 0, 'Products made by this version should not be reported'
+
+
+def test_reduce_version_mismatch(night, tmp_path, caplog):
+    rdxdir = tmp_path / 'rdx'
+    reduce_all(night, rdxdir=rdxdir)
+    with fits.open(rdxdir / 'DomeFlat_R.fits', mode='update') as hdu:
+        hdu[0].header['PNVERS'] = '0.0.1'
+    with fits.open(rdxdir / 'DomeFlat_V.fits', mode='update') as hdu:
+        del hdu[0].header['PNVERS']
+    report = StepReport('REDUCTION')
+    reduce_all(night, rdxdir=rdxdir, report=report)
+    assert report.mismatched == {'DomeFlat_R.fits': '0.0.1', 'DomeFlat_V.fits': None}, (
+        'Products made by another version, or with no version, should be reported'
+    )
+    assert 'made with a different version of pipnick' in caplog.text, (
+        'The version mismatch should be reported in a warning'
+    )
+    assert report.status != 'FAILED', 'A version mismatch should not fail the step'
+    assert fits.getheader(rdxdir / 'DomeFlat_R.fits')['PNVERS'] == '0.0.1', (
+        'A version mismatch alone should not rebuild a product'
+    )
+
+
+def test_reduce_failure(night, tmp_path):
+    rdxdir = tmp_path / 'rdx'
+    # A corrupt dark frame
+    (tmp_path / 'raw' / 'n5009.fits').write_bytes(b'not a FITS file')
+    report = StepReport('REDUCTION')
+    science = reduce_all(night, rdxdir=rdxdir, report=report)
+    summary = Table.read(rdxdir / 'reduce' / 'summary.ecsv')
+    assert summary['status'][summary['file'] == 'Dark_120s.fits'][0] == 'failed', (
+        'The failed product should be recorded in the summary'
+    )
+    assert science[0].is_file(), 'The other products should still be reduced'
+    assert report.status == 'FAILED' and report.exit_status == 1, (
+        'A failed product should fail the step, with a non-zero exit status'
+    )
+
+
+def test_reduction_status(night, tmp_path):
+    rdxdir = tmp_path / 'rdx'
+    reduce_all(night, rdxdir=rdxdir)
+    image = DataSet.from_file(night, rdxdir=rdxdir).science_images()[0]
+    assert image.reduction_status() == ('ok', '-'), 'The reduced image should be up to date'
+    set_column(night, ['n5011.fits', 'n5012.fits'], 'airmass', 1.5)
+    image = DataSet.from_file(night, rdxdir=rdxdir).science_images()[0]
+    assert image.reduction_status()[0] == 'stale', (
+        'A change in the metadata table values should make the image stale'
+    )

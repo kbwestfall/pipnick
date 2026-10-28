@@ -15,7 +15,7 @@ def test_step_dir():
         'The products of a step should be in a subdirectory named for the step'
     )
     with pytest.raises(PipnickParameterError):
-        paths.step_dir('rdx', 'reduce')
+        paths.step_dir('rdx', 'unknown')
 
 
 def test_image_products():

@@ -289,6 +289,35 @@ Functionality/Performance Improvements and Additions
   define the mosaics, empty by default.  ``pipnick_metadata
   --assign_mosaics`` assigns them by pointing and filter.
 
+- Every script writes a log by default, to a new, timestamped file in
+  ``<rdxdir>/log``; logs are never overwritten or appended to, and
+  ``--log_file`` sets a different file.  The first line is the full pipnick
+  version.
+
+- The pipnick version is recorded in every product (``PNVERS``,
+  ``PNASTVER``, ``PNCALVER``, and ``pipnick_version`` in table metadata).  A
+  step warns if it reuses products made by a different version, recommending
+  that all of the steps be rerun.
+
+- Every step ends with a verdict (``OK``, ``NEEDS ATTENTION``, or
+  ``FAILED``) that repeats its problems, and the next command to run.  The
+  reduction and mosaics continue past a product that fails, and a failed
+  step exits with a non-zero status.  ``pipnick_metadata`` also exits with a
+  non-zero status on invalid arguments.
+
+- The bias level, read noise, PSF FWHM, and astrometric RMS are checked
+  against the expected values of the camera (the new ``[expected]`` section
+  of the camera configurations).
+
+- The reduction logs its progress and one line per frame, and writes
+  ``reduce/summary.ecsv`` with the bias level and read noise, the flat levels,
+  and the sky level and cosmic-ray fraction of each science image (also saved
+  to the headers as ``PNBIASLV``, ``PNRDNOIS``, ``PNLEVEL``, ``PNSKY``, and
+  ``PNCRFRAC``).
+
+- Added ``pipnick_status``, which reports the state of every step for every
+  science image of a per-setup metadata table, and the next command to run.
+
 Under-the-hood Improvements
 ---------------------------
 

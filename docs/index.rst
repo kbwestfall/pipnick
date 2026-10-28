@@ -21,6 +21,7 @@ an issue on our GitHub page, if you have any problems.
    photometry
    calibrate
    mosaic
+   status
    example
    issues
 

@@ -88,14 +88,18 @@ class Photometry(scriptbase.ScriptBase):
 
     @classmethod
     def main(cls, args):
+        from pipnick.datamodel.dataset import reduction_dir
         from pipnick.pipelines.photometry import photometry_all
+        from pipnick.pkg.report import StepReport
 
         # Initialize logger
-        cls.init_log(args)
+        cls.init_log(args, log_dir=cls.log_dir(reduction_dir(args.raw_table, args.rdxdir)))
 
+        report = StepReport('PHOTOMETRY')
         photometry_all(
             args.raw_table, rdxdir=args.rdxdir, images=args.images, overwrite=args.overwrite,
             thresh=args.thresh, fwhm=args.fwhm, fittype=args.fittype, mode=args.mode,
             stack=args.stack, group=args.group, min_sep=args.min_sep, group_sep=args.group_sep,
-            aper_radius=args.aper_radius, psf_thresh=args.psf_thresh, qa=args.qa
+            aper_radius=args.aper_radius, psf_thresh=args.psf_thresh, qa=args.qa, report=report
         )
+        return report.exit_status

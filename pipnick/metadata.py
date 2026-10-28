@@ -77,6 +77,7 @@ from astropy.time import Time
 from pipnick import cameras
 from pipnick import log
 from pipnick.pkg.exceptions import PipnickDataModelError, PipnickPathError
+from pipnick.pkg.version import version
 
 __all__ = [
     'metadata_columns', 'setup_keys', 'setup_file_keys', 'build_camera_datatable',
@@ -1041,7 +1042,7 @@ def _read_setup_files(files):
 
 def build_metadata(
     rawdir=None, filename=None, ext='.fits', overwrite=False, append=False, rdxdir=None,
-    camera=None, classify='header', split=False, assign=False, mosaic_radius=None
+    camera=None, classify='header', split=False, assign=False, mosaic_radius=None, report=None
 ):
     """
     Construct a table with metadata needed for the data processing.
@@ -1104,6 +1105,10 @@ def build_metadata(
     mosaic_radius : float, optional
         The linking length (arcmin) of the pointing groups used to assign the
         mosaics; see :func:`assign_mosaics`.
+    report : :class:`~pipnick.pkg.report.StepReport`, optional
+        Records the pipnick version of an existing table that is appended
+        to.  The version that writes the table is saved in its metadata
+        (``pipnick_version``).
 
     Returns
     -------
@@ -1173,6 +1178,8 @@ def build_metadata(
         if new is None and not (split and assign):
             log.info(f'No new files to add to {_filename}.')
             return setup_files if split else _filename, metadata[np.logical_not(commented)]
+        if report is not None:
+            report.check_version(_filename.name, metadata.meta.get('pipnick_version'))
         meta = metadata.meta.copy()
         if new is None:
             log.info(f'No new files to add to {_filename}; assigning mosaics.')
@@ -1214,6 +1221,7 @@ def build_metadata(
 
     if _rdxdir is not None:
         metadata.meta['rdxdir'] = _rdxdir
+    metadata.meta['pipnick_version'] = version
     summary = summarize(metadata, commented)
     if not split:
         log.info(f'Saving metadata to {_filename}')

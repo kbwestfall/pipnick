@@ -30,6 +30,8 @@ from pipnick.photometry.fit import psf_plot
 from pipnick.photometry.psf_photometry import consolidate_groups, psf_analysis
 from pipnick.pkg.exceptions import PipnickPathError
 from pipnick.pkg.provenance import image_hash, json_hash, solution_hash
+from pipnick.pkg.report import StepReport
+from pipnick.pkg.version import version
 
 
 def celestial_coordinates(header, x, y):
@@ -181,7 +183,7 @@ def measure_image(image, settings):
         'aper_radius_pix': float(settings['aper_radius'] * fwhm), 'removed': removed,
         'settings': settings, 'settings_hash': json_hash(settings),
         'image_hash': image_hash(hdr), 'wcs_method': hdr.get('PNASTMTH', 'none'),
-        'wcs_hash': solution_hash(hdr)
+        'wcs_hash': solution_hash(hdr), 'pipnick_version': version
     }
     if 'PNASTMTH' in hdr:
         coordinates = 'celestial coordinates from the astrometric solution.'
@@ -255,7 +257,7 @@ def vet_sources(phot, shape, fwhm):
 def photometry_all(
     table, rdxdir=None, images=None, overwrite=False, thresh=8., fwhm=None, fittype='circ',
     mode='all', stack='mean', group=False, min_sep=1., group_sep=2., aper_radius=2.,
-    psf_thresh=15., qa=False
+    psf_thresh=15., qa=False, report=None
 ):
     r"""
     Measure the sources in the reduced science images.
@@ -343,6 +345,9 @@ def photometry_all(
         model (``<image>_psf.png``; see
         :func:`~pipnick.photometry.fit.psf_plot`) and the measured sources
         (``<image>_sources.png``).
+    report : :class:`~pipnick.pkg.report.StepReport`, optional
+        Collects the failures and problems of the photometry for its closing
+        verdict.  If None, a new one is used.
 
     Returns
     -------
@@ -354,13 +359,14 @@ def photometry_all(
     :exc:`~pipnick.pkg.exceptions.PipnickPathError`
         Raised if the reduction directory does not exist.
     """
+    _report = StepReport('PHOTOMETRY') if report is None else report
     dataset = DataSet.from_file(table, rdxdir=rdxdir)
     if not dataset.rdxdir.is_dir():
         raise PipnickPathError(f'{dataset.rdxdir} does not exist; reduce the data first.')
+    _report.check_version(dataset.metafile.name, dataset.table.meta.get('pipnick_version'))
     phot_dir = dataset.outdir('photometry')
-    log.info(f'Photometry of the images in {dataset.rdxdir}')
-
     reduced = dataset.science_images(selection=images, include_missing=True)
+    log.info(f'Photometry of {len(reduced)} images in {dataset.rdxdir}')
     settings = {
         'thresh': float(thresh),
         'fwhm': float(dataset.camera.fwhm_guess if fwhm is None else fwhm),
@@ -371,7 +377,8 @@ def photometry_all(
 
     outputs = []
     summary = []
-    for image in reduced:
+    for k, image in enumerate(reduced):
+        progress = f'[{k + 1}/{len(reduced)}]'
         path = image.path
         ofile = image.phot_file
         row = {
@@ -380,7 +387,9 @@ def photometry_all(
         }
         summary.append(row)
         if not image.exists:
-            log.warning(f'{path.name} does not exist; reduce the data first.  Skipping.')
+            _report.attention(
+                f'{progress} {path.name} does not exist; reduce the data first.  Skipping.'
+            )
             row['status'] = 'missing'
             continue
         hdr = image.header
@@ -394,8 +403,9 @@ def photometry_all(
                 and existing.meta.get('settings_hash') == json_hash(settings)
             ):
                 row.update(_summary_values(existing))
+                _report.check_version(ofile.name, existing.meta.get('pipnick_version'))
                 if existing.meta.get('wcs_hash') == solution_hash(hdr):
-                    log.info(f'{ofile.name} is up to date.')
+                    log.info(f'{progress} {ofile.name} is up to date.')
                     row['status'] = 'up to date'
                 else:
                     existing['ra'], existing['dec'] = celestial_coordinates(
@@ -405,29 +415,51 @@ def photometry_all(
                     existing.meta['wcs_hash'] = solution_hash(hdr)
                     existing.write(ofile, format='ascii.ecsv', overwrite=True)
                     log.info(
-                        f'The astrometric solution of {path.name} changed; updated the '
-                        f'celestial coordinates in {ofile.name}.'
+                        f'{progress} The astrometric solution of {path.name} changed; updated '
+                        f'the celestial coordinates in {ofile.name}.'
                     )
                     row['status'] = 'coordinates updated'
                 outputs.append(ofile)
                 continue
 
+        log.info(f'{progress} Measuring {path.name}.')
         try:
             tbl, fit, sub, mask = measure_image(image, settings)
-        except ValueError as e:
-            log.warning(f'Photometry of {path.name} failed: {e}')
-            row['reason'] = str(e)
+        except Exception as e:
+            log.debug(f'Traceback of the failure of {path.name}:', exc_info=True)
+            _report.fail(f'Photometry of {path.name} failed: {type(e).__name__}: {e}')
+            row['reason'] = f'{type(e).__name__}: {e}'
             continue
         phot_dir.mkdir(parents=True, exist_ok=True)
         tbl.write(ofile, format='ascii.ecsv', overwrite=True)
-        log.info(f'Wrote {ofile}')
+        log.info(f'Wrote photometry/{ofile.name}')
         row['status'] = 'measured'
         row.update(_summary_values(tbl))
         outputs.append(ofile)
         if qa:
             _write_qa(path, tbl, fit, sub, mask, phot_dir / 'qa')
 
+    expected = dataset.camera.expected_range('fwhm')
+    for row in summary:
+        if row['fwhm_arcsec'] > 0:
+            _report.check_range(
+                f'{row["image"]}: the PSF FWHM', row['fwhm_arcsec'], expected, ' arcsec',
+                advice='Check the focus and tracking.'
+            )
     _summarize(summary, phot_dir)
+    measured = [row for row in summary if row['fwhm_arcsec'] > 0]
+    counts = ', '.join(
+        f'{sum(row["status"] == s for row in summary)} {s}'
+        for s in ['measured', 'up to date', 'coordinates updated', 'missing', 'failed']
+        if any(row['status'] == s for row in summary)
+    )
+    text = f'{len(summary)} images ({counts})'
+    if len(measured) > 0:
+        text += f'; median FWHM {np.median([r["fwhm_arcsec"] for r in measured]):.2f} arcsec'
+    following = f'pipnick_calibrate -t {dataset.metafile} (for standards)'
+    if 'mosaic' in dataset.table.colnames and np.any(dataset.table['mosaic'] != ''):
+        following += f', or pipnick_mosaic -t {dataset.metafile}'
+    _report.finish(f'{text}; summary in photometry/summary.ecsv.', next_step=following)
     return outputs
 
 
@@ -462,15 +494,13 @@ def _summarize(summary, phot_dir):
     for name in ['fwhm_pix', 'fwhm_arcsec']:
         tbl[name].info.format = '.2f'
     phot_dir.mkdir(parents=True, exist_ok=True)
+    tbl.meta['pipnick_version'] = version
     tbl.write(phot_dir / 'summary.ecsv', format='ascii.ecsv', overwrite=True)
     columns = ['image', 'status', 'nsources', 'fwhm_pix', 'fwhm_arcsec', 'nstack', 'wcs']
     log.info(
         'Photometry summary (also in photometry/summary.ecsv):\n'
         + '\n'.join(tbl[columns].pformat(max_lines=-1, max_width=-1))
     )
-    for row in tbl:
-        if row['status'] == 'failed':
-            log.warning(f'Photometry of {row["image"]} failed: {row["reason"]}')
 
 
 def _write_qa(path, tbl, fit, data, mask, qa_dir):

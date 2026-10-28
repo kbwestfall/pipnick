@@ -61,10 +61,12 @@ from pipnick.pkg.exceptions import (
 )
 from pipnick.pkg.paths import step_dir
 from pipnick.pkg.provenance import image_hash, json_hash, solution_hash
+from pipnick.pkg.report import StepReport
+from pipnick.pkg.version import version
 from pipnick.utils.crossmatch import match_sky
 
 
-def collect_images(tables, require_photometry=True):
+def collect_images(tables, require_photometry=True, report=None):
     """
     Collect the reduced science images assigned to mosaics.
 
@@ -74,6 +76,8 @@ def collect_images(tables, require_photometry=True):
         The per-setup metadata files.
     require_photometry : bool, optional
         Require a current photometry source table for each image.
+    report : :class:`~pipnick.pkg.report.StepReport`, optional
+        Records the pipnick version of each table.
 
     Returns
     -------
@@ -93,6 +97,8 @@ def collect_images(tables, require_photometry=True):
     images = []
     for table in tables:
         dataset = DataSet.from_file(table, check_mosaics=True)
+        if report is not None:
+            report.check_version(dataset.metafile.name, dataset.table.meta.get('pipnick_version'))
         if 'mosaic' not in dataset.table.colnames or np.all(dataset.table['mosaic'] == ''):
             log.warning(f'{dataset.metafile.name} defines no mosaics.')
             continue
@@ -255,6 +261,7 @@ def group_wcs(images, wcs_file, pixel_scale=None, overwrite=False):
     hdr['PNNAXIS1'] = (shape[1], 'Number of columns of the mosaics')
     hdr['PNNAXIS2'] = (shape[0], 'Number of rows of the mosaics')
     hdr['PNGRPHSH'] = (ghash, 'Hash of the WCS group membership')
+    hdr['PNVERS'] = (version, 'pipnick version (mosaic)')
     wcs_file.parent.mkdir(parents=True, exist_ok=True)
     fits.PrimaryHDU(header=hdr).writeto(wcs_file, overwrite=True)
     log.info(f'Wrote the WCS of group {wcs_file.stem} ({shape[1]} x {shape[0]} pixels).')
@@ -475,7 +482,7 @@ def build_mosaic(images, wcs_out, shape_out, target, settings):
             psf, _, _ = _psf(image)
             target_pix = target[0] / image.pixel_scale
             kernel, used, ee_ratio = image_kernel(
-                psf, target_pix, target[1], method=settings['kernel']
+                psf, target_pix, target[1], method=settings['kernel'], name=image.name
             )
             data, var, good = normalized_convolve(data, var, good, kernel)
             kernels.append(used)
@@ -644,6 +651,7 @@ def _product(
     hdr['BUNIT'] = 'electron/s'
     hdr['FILTER'] = (filters[0] if len(filters) == 1 else 'mixed', 'Filter of the images')
     hdr['NCOMBINE'] = (len(images), 'Number of images combined')
+    hdr['PNVERS'] = (version, 'pipnick version (mosaic)')
     hdr['PNMOSAIC'] = (mosaic_label(images[0]), 'Mosaic label')
     hdr['PNWCSGRP'] = (wcs_group(images[0]), 'WCS group label')
     hdr['PNNIGHT'] = (images[0].night, 'UT date of the observations')
@@ -694,7 +702,7 @@ def mosaic_all(
     tables, outdir=None, mosaics=None, psf_match='mosaic', kernel='moffat', psf_margin=1.05,
     scale='sources', reference=None, match_radius=1., min_common=3, min_snr=20.,
     background='constant', match_background=False, reproject='adaptive', pixel_scale=None,
-    rej=3., rej_frac=0.1, overwrite=False, qa=False
+    rej=3., rej_frac=0.1, overwrite=False, qa=False, report=None
 ):
     r"""
     Construct the mosaics defined in the metadata tables.
@@ -791,6 +799,10 @@ def mosaic_all(
         Rebuild the mosaics even if they are up to date.
     qa : bool, optional
         Write a QA figure for each mosaic to the ``qa`` subdirectory.
+    report : :class:`~pipnick.pkg.report.StepReport`, optional
+        Collects the failures of the mosaics for the closing verdict.  A
+        mosaic that fails is recorded, and the others are still constructed.
+        If None, a new one is used.
 
     Returns
     -------
@@ -825,11 +837,13 @@ def mosaic_all(
         'reproject': reproject, 'pixel_scale': pixel_scale,
         'rej': None if rej is None else float(rej), 'rej_frac': float(rej_frac)
     }
+    _report = StepReport('MOSAICS') if report is None else report
     images = collect_images(
-        _tables, require_photometry=psf_match != 'none' or scale == 'sources'
+        _tables, require_photometry=psf_match != 'none' or scale == 'sources', report=_report
     )
     if len(images) == 0:
-        log.warning('No mosaics are defined; see pipnick_metadata --assign_mosaics.')
+        _report.attention('No mosaics are defined; see pipnick_metadata --assign_mosaics.')
+        _report.finish('no mosaics.')
         return []
     if outdir is None:
         _outdir = step_dir(images[0].dataset.rdxdir, 'mosaic')
@@ -850,6 +864,8 @@ def mosaic_all(
     outputs = []
     summary = []
     groups = sorted({wcs_group(image) for image in images})
+    ntotal = len([m for m in mosaic_images if mosaics is None or m in mosaics])
+    k = 0
     for group in groups:
         members = [image for image in images if wcs_group(image) == group]
         labels = sorted({mosaic_label(image) for image in members})
@@ -857,55 +873,93 @@ def mosaic_all(
             labels = [label for label in labels if label in mosaics]
         if len(labels) == 0:
             continue
-        wcs_out, shape_out, ghash = group_wcs(
-            members, _outdir / f'{group}_wcs.fits', pixel_scale=pixel_scale
-        )
-        group_target = (
-            psf_target(members, margin=psf_margin) if psf_match == 'group' else None
-        )
+        try:
+            wcs_out, shape_out, ghash = group_wcs(
+                members, _outdir / f'{group}_wcs.fits', pixel_scale=pixel_scale
+            )
+            group_target = (
+                psf_target(members, margin=psf_margin) if psf_match == 'group' else None
+            )
+        except Exception as e:
+            log.debug(f'Traceback of the failure of WCS group {group}:', exc_info=True)
+            for label in labels:
+                k += 1
+                _report.fail(
+                    f'[{k}/{ntotal}] Mosaic {label} failed: the WCS group {group} failed: '
+                    f'{type(e).__name__}: {e}'
+                )
+                summary.append(
+                    {
+                        'mosaic': label, 'wcs_group': group, 'filter': '-', 'nimages': -1,
+                        'nscaled': -1, 'target_fwhm': -1., 'status': 'failed',
+                        'file': f'{label}.fits', 'reason': f'{type(e).__name__}: {e}'
+                    }
+                )
+            continue
         for label in labels:
+            k += 1
+            progress = f'[{k}/{ntotal}]'
             ofile = _outdir / f'{label}.fits'
             these = [image for image in members if mosaic_label(image) == label]
-            if psf_match == 'group':
-                target = group_target
-            elif psf_match == 'mosaic' and len(these) > 1:
-                target = psf_target(these, margin=psf_margin)
-            else:
-                # A single image is not convolved to match itself; it is only
-                # reprojected
-                target = None
-            mhash = json_hash(
-                {
-                    'settings': settings, 'group': ghash, 'target': target,
-                    'images': sorted(_image_key(image) for image in these)
-                }
-            )
             row = {
                 'mosaic': label, 'wcs_group': group, 'filter': str(these[0].filter),
                 'nimages': len(these), 'nscaled': -1, 'target_fwhm': -1., 'status': 'failed',
-                'file': ofile.name
+                'file': ofile.name, 'reason': '-'
             }
             summary.append(row)
-            if ofile.is_file() and not overwrite:
-                if fits.getheader(ofile).get('PNMOSHSH') == mhash:
-                    log.info(f'{ofile.name} is up to date.')
-                    row.update(_summary_values(ofile))
-                    row['status'] = 'up to date'
-                    outputs.append(ofile)
-                    continue
-            log.info(f'Constructing mosaic {label} from {len(these)} images.')
-            hdus, inputs = build_mosaic(these, wcs_out, shape_out, target, settings)
+            try:
+                if psf_match == 'group':
+                    target = group_target
+                elif psf_match == 'mosaic' and len(these) > 1:
+                    target = psf_target(these, margin=psf_margin)
+                else:
+                    # A single image is not convolved to match itself; it is
+                    # only reprojected
+                    target = None
+                mhash = json_hash(
+                    {
+                        'settings': settings, 'group': ghash, 'target': target,
+                        'images': sorted(_image_key(image) for image in these)
+                    }
+                )
+                if ofile.is_file() and not overwrite:
+                    hdr = fits.getheader(ofile)
+                    if hdr.get('PNMOSHSH') == mhash:
+                        log.info(f'{progress} {ofile.name} is up to date.')
+                        _report.check_version(ofile.name, hdr.get('PNVERS'))
+                        row.update(_summary_values(ofile))
+                        row['status'] = 'up to date'
+                        outputs.append(ofile)
+                        continue
+                log.info(f'{progress} Constructing mosaic {label} from {len(these)} images.')
+                hdus, inputs = build_mosaic(these, wcs_out, shape_out, target, settings)
+            except Exception as e:
+                log.debug(f'Traceback of the failure of mosaic {label}:', exc_info=True)
+                _report.fail(
+                    f'Mosaic {label} failed: {type(e).__name__}: {e}.  Continuing with the other '
+                    'mosaics.'
+                )
+                row['reason'] = f'{type(e).__name__}: {e}'
+                continue
             hdus[0].header['PNMOSHSH'] = (mhash, 'Hash of the mosaic inputs and settings')
             hdus[0].header['PNGRPHSH'] = (ghash, 'Hash of the WCS group membership')
             _outdir.mkdir(parents=True, exist_ok=True)
             hdus.writeto(ofile, overwrite=True)
-            log.info(f'Wrote {ofile}')
+            log.info(f'Wrote {ofile.parent.name}/{ofile.name}')
             row.update(_summary_values(ofile))
             row['status'] = 'constructed'
             outputs.append(ofile)
             if qa:
                 _write_qa(hdus, inputs, _outdir / 'qa' / f'{label}.png')
     _summarize(summary, _outdir)
+    nbuilt = sum(row['status'] == 'constructed' for row in summary)
+    nup = sum(row['status'] == 'up to date' for row in summary)
+    nfail = sum(row['status'] == 'failed' for row in summary)
+    _report.finish(
+        f'{len(summary)} mosaics ({nbuilt} constructed, {nup} up to date, {nfail} failed); '
+        f'summary in {_outdir.name}/summary.ecsv.',
+        next_step='pipnick_rgb, to combine the mosaics of a WCS group into a colour image'
+    )
     return outputs
 
 
@@ -942,6 +996,7 @@ def _summarize(summary, outdir):
     for name in ['nscaled', 'target_fwhm']:
         tbl[name] = np.ma.MaskedArray(tbl[name], mask=np.asarray(tbl[name]) < 0)
     tbl['target_fwhm'].info.format = '.2f'
+    tbl.meta['pipnick_version'] = version
     outdir.mkdir(parents=True, exist_ok=True)
     tbl.write(outdir / 'summary.ecsv', format='ascii.ecsv', overwrite=True)
     log.info(

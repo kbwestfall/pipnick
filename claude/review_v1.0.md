@@ -193,6 +193,8 @@ Proposals:
    **Complete** (2026-10-28, branch `common_objects`; see the
    [progress log](#progress-log)).
 4. Improve the logging and add `pipnick_status`.
+   **Complete** (2026-10-28, branch `status`; see the
+   [progress log](#progress-log)).
 5. Split the large modules, and add `SourceCatalog`, `Summary` and the `qa/`
    package.
 6. Move every step to the common detection function, then add
@@ -1224,7 +1226,7 @@ camera lives in one place.
 | 1 | Remove the unused code and dependencies (§1); fix the convention items (§2), including making the shared private helpers public | cleaner code; no `loess` packaging problem | low | **complete** |
 | 2 | `pkg/provenance.py`, `pkg/paths.py`, `utils/lsq.py`, `utils/crossmatch.py` (§4) | less duplication; one hash implementation | low (needs byte-identical hash tests) | **complete** |
 | 3 | `DataSet`, `Product`, `ReducedImage`, `read_reduced`; `PSFModel` with one FWHM definition (§5) | removes the coupling between pipelines and the FWHM inconsistency | medium (some mosaics are rebuilt) | **complete** |
-| 4 | Logging (run header, progress, verdicts, next steps, default log files, version); a reduction summary; `pipnick_status` (§6, §7 P1–P3) | the most direct benefit to new observers | low | |
+| 4 | Logging (run header, progress, verdicts, next steps, default log files, version); a reduction summary; `pipnick_status` (§6, §7 P1–P3) | the most direct benefit to new observers | low | **complete** |
 | 5 | Split the large modules; `SourceCatalog`, `Summary`, `qa/`; QA on by default; `pipnick_report`, `pipnick_inspect` (§3, §5, §7) | maintainability and interrogation | medium | |
 | 6 | The common detection function and catalogue selections (§4.1); `PipelineStep` (§5.7) | one detection implementation, used with different settings by every step; a common step loop | higher (the astrometry.net cache, unless the astrometry's detections are reproduced exactly) | |
 
@@ -1502,3 +1504,147 @@ Checks after the work:
 
 **Updated:** the release notes, `docs/mosaic.rst` (the major-axis FWHM) and
 the API pages.
+
+#### Step 4: logging, verdicts, and `pipnick_status` (complete, 2026-10-28, branch `status`)
+
+The author's revisions to the plan:
+
+- **Logs:**
+  - written by default to `<rdxdir>/log/`, with a timestamp to the second;
+  - never overwritten or appended to;
+  - `--log_file` still sets a different path.
+- **Version:** the full pipnick version is printed first and recorded in
+  every product. A step warns when it reuses products made by another
+  version, encouraging (but not requiring) a rerun of all the steps.
+- **Range checks:** only the bias level, read noise, FWHM and astrometric
+  RMS. The sky rates and zero points of §6.2 and P6 are dropped.
+
+Decisions made with the author:
+
+- **Version keywords:** one per step (`PNVERS`, `PNASTVER`, `PNCALVER`).
+- **Log directory** for scripts without a single reduction directory: the
+  nearest output directory.
+- **Failures:** the reduction and mosaics continue past a failed product, and
+  a failed step exits non-zero.
+- **Run records** (`runs.jsonl`, §7 P3): deferred.
+
+Checks after the work:
+
+- `tox -r -e 3.13-test,codestyle` passes in a fresh environment: 193 tests
+  passed, 1 skipped.
+- The docs build without warnings.
+- All nine scripts start.
+- **Real data:** the new scripts were run on a scratch copy of the 2026-08-17
+  n3 (fast) reduction.
+  - Each run wrote a new log, starting with the version.
+  - Every product made before this step was reported as made by an earlier
+    version (none recorded), with the rerun recommended, but none was
+    rebuilt.
+  - The reduction's progress was sequential.
+  - The photometry checked every FWHM, including the 2.85″ of M11 V C096
+    (inside 0.8–3.5″).
+  - A dry-run astrometry gave its verdict without submitting anything.
+  - `pipnick_status` reported all 19 images, and left the metadata file
+    unchanged.
+
+**Logs (`scripts/scriptbase.py`, `pkg/logger.py`).**
+
+- `init_log(args, log_dir)` writes
+  `<log_dir>/<script>_<YYYYMMDDTHHMMSS>.log`. A counter is added if the name
+  exists.
+- Files are opened in exclusive-create mode, and an existing `--log_file`
+  is an error.
+- The first lines are the version and the log path.
+- Each script finds its reduction directory before logging starts, with
+  `datamodel.dataset.reduction_dir`, which never changes the table.
+- `entry_point` exits with the status returned by `main`.
+
+**Verdicts (`pkg/report.py`).**
+
+- Each step fills a `StepReport` as it runs, with failures, problems, notes,
+  the versions of the reused products, and the range checks.
+- `finish` logs `<STEP> OK`, `NEEDS ATTENTION` or `FAILED`, repeating the
+  problems, then the version warning (once) and the next command.
+- Each `*_all` takes `report=None`. The scripts pass one and return its exit
+  status.
+
+**Versions.**
+
+- `PNVERS` is written by the reduction and the mosaics (and the group WCS
+  file), `PNASTVER` by the astrometry, and `PNCALVER` by the header
+  calibration.
+- `pipnick_version` is in the metadata table, the source tables, the
+  calibration TOML, the `_cal.ecsv` and residual tables, and every summary.
+- None of these is in a hash.
+
+**Expected ranges.**
+
+- `[expected]` is a new section in both camera TOMLs: `readnoise_tolerance`
+  0.25, `fwhm` 0.8–3.5″, `astrometric_rms` ≤ 0.5″. The bias level reuses
+  `[quality] bias_level`.
+- `NickelCamera.expected_range` returns each range; `StepReport.check_range`
+  applies it.
+
+**Reduction.**
+
+- A run header gives the frame counts and products, then `[n/N]` progress in
+  processing order.
+- One line per frame, naming it; the details are at DEBUG.
+- A failed product is recorded in the summary, and the reduction continues.
+- `PNBIASLV`, `PNRDNOIS`, `PNLEVEL`, `PNSKY` and `PNCRFRAC` are saved to the
+  headers, so the measurements can be reported for products that are up to
+  date.
+- `reduce/summary.ecsv` gives each product's status and measurements.
+- The verdict collects a missing bias, the filters without flats, frames
+  combined with offsets, outputs left from an earlier reduction, and the
+  bias-level and read-noise checks.
+
+**Other steps.**
+
+- **Astrometry:** detection progress, the RMS checks, and the unsolved images
+  in the verdict.
+- **Photometry:**
+  - progress, and the FWHM checks;
+  - any exception in an image is recorded as a failure, and the photometry
+    continues;
+  - the jargon from `starfind` and `psf_photometry` is at DEBUG.
+- **Calibration:** the failed bands and the extinction fallbacks need
+  attention.
+- **Mosaics:**
+  - progress, and a failed mosaic or WCS group is recorded while the others
+    are constructed;
+  - the Gaussian-fallback warning names the image.
+- **`pipnick_metadata`:** non-zero exit status on invalid arguments, a
+  next-step hint, and a note when the checks that need the pixel data were
+  skipped.
+
+**`pipnick_status` (`pipelines/status.py`, `scripts/status.py`).**
+
+- One row per science image, with the states of the reduction, astrometry,
+  photometry, calibration and mosaic (`ok | stale | missing | failed | n/a`),
+  the RMS, number of sources, FWHM and zero point, and an `attention`
+  column.
+- It ends with the next command.
+- The supporting data-model additions:
+  - `DataSet.from_file(read_only=True)`;
+  - `DataSet.calibrations`, the bias and flat the reduction would use;
+  - `ReducedImage.reduction_status`, the reduction's currency check.
+
+**Tests.**
+
+- New: `test_report.py`, `test_scriptbase.py`, `test_status.py`.
+- New cases in `test_reduction.py` (the summary, measurements and verdict;
+  a version mismatch; continuing past a failure; the reduction status) and
+  `test_cameras.py` (the expected ranges).
+- The version is asserted in the tests of every step.
+
+**Docs:** a new `docs/status.rst` (logs, versions, verdicts, expected ranges,
+`pipnick_status`), the release notes, and the API pages.
+
+**Not done:**
+
+- The run records (`runs.jsonl`), deferred.
+- The rewrite of `docs/basics.rst` (P7), deferred with the other usage
+  documents.
+- The status vocabularies of the steps' own summaries are unchanged;
+  `pipnick_status` maps them to its common vocabulary.

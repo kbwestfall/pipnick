@@ -12,6 +12,7 @@ Submodules
    pipnick.pipelines.mosaic
    pipnick.pipelines.photometry
    pipnick.pipelines.reduction
+   pipnick.pipelines.status
 
 Module contents
 ---------------

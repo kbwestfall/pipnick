@@ -69,6 +69,15 @@ binned and windowed equivalents for a given frame are derived from its header.
     ``min_illumination`` (the minimum level of a flat above the bias level, in
     ADU), and ``max_saturated_fraction``.
 
+``[expected]``
+    The expected values of measurements, used only to judge them in the logs
+    and summaries (frames are never rejected by them); see
+    :meth:`NickelCamera.expected_range`.  ``readnoise_tolerance`` (the
+    fractional tolerance of the measured read noise about its nominal value),
+    ``fwhm`` (the ``[min, max]`` seeing FWHM, in arcsec), and
+    ``astrometric_rms`` (the maximum RMS of an astrometric solution, in
+    arcsec).  The expected bias level is ``bias_level`` in ``[quality]``.
+
 ``[frametypes]``
     ``default`` frame type, a ``map`` from explicit header frame-type values
     (see the ``frametype`` keyword) to pipnick frame types, and an ordered list
@@ -243,6 +252,51 @@ class NickelCamera:
         A guess for the seeing FWHM in arcsec.
         """
         return self.config['camera'].get('fwhm_guess')
+
+    def expected_range(self, quantity, nominal=None):
+        """
+        Return the expected range of a measurement.
+
+        The ranges are used to judge the measurements in the logs and
+        summaries; see ``[expected]`` in the module documentation.
+
+        Parameters
+        ----------
+        quantity : str
+            The measurement: ``'bias_level'`` (ADU; ``bias_level`` in
+            ``[quality]``), ``'readnoise'`` (``nominal`` times one plus or
+            minus ``readnoise_tolerance``), ``'fwhm'`` (arcsec), or
+            ``'astrometric_rms'`` (arcsec; a maximum only).
+        nominal : float, optional
+            The nominal value of the read noise.
+
+        Returns
+        -------
+        tuple
+            The lower and upper limits (either can be None), or None if the
+            range is not defined for the camera.
+
+        Raises
+        ------
+        :exc:`~pipnick.pkg.exceptions.PipnickParameterError`
+            Raised if the quantity is unknown.
+        """
+        expected = self.config.get('expected', {})
+        if quantity == 'bias_level':
+            limits = self.config.get('quality', {}).get('bias_level')
+            return None if limits is None else (float(limits[0]), float(limits[1]))
+        if quantity == 'readnoise':
+            if nominal is None or 'readnoise_tolerance' not in expected:
+                return None
+            tol = float(expected['readnoise_tolerance'])
+            return (nominal * (1 - tol), nominal * (1 + tol))
+        if quantity == 'fwhm':
+            limits = expected.get('fwhm')
+            return None if limits is None else (float(limits[0]), float(limits[1]))
+        if quantity == 'astrometric_rms':
+            limit = expected.get('astrometric_rms')
+            return None if limit is None else (None, float(limit))
+        raise PipnickParameterError(f'Unknown measurement {quantity}.')
 
     @property
     def extinction_file(self):

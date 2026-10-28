@@ -17,6 +17,7 @@ from astropy.coordinates import SkyCoord
 from astropy.io import fits
 from astropy.nddata import CCDData, StdDevUncertainty
 from astropy.stats import sigma_clip, sigma_clipped_stats
+from astropy.table import MaskedColumn, Table
 from astropy import units
 import ccdproc
 
@@ -24,11 +25,13 @@ from pipnick import cameras
 from pipnick.datamodel.dataset import DataSet
 from pipnick.pkg.exceptions import PipnickDataModelError
 from pipnick.pkg.provenance import names_hash, values_hash
+from pipnick.pkg.report import StepReport
+from pipnick.pkg.version import version
 from pipnick.utils.combiner import Combiner
 from pipnick import log
 
 
-def reduce_all(table, rdxdir=None, overwrite=False):
+def reduce_all(table, rdxdir=None, overwrite=False, report=None):
     """
     Perform reduction of raw astronomical data frames (overscan subtraction,
     bias subtraction, flat division, cosmic ray masking).
@@ -98,6 +101,9 @@ def reduce_all(table, rdxdir=None, overwrite=False):
         Reprocess all outputs, even if they are up to date.  The metadata
         ``table`` is never rebuilt, to preserve any user edits; use
         ``pipnick_metadata --overwrite`` to rebuild it.
+    report : :class:`~pipnick.pkg.report.StepReport`, optional
+        Collects the failures and problems of the reduction for its closing
+        verdict.  If None, a new one is used.
 
     Returns
     -------
@@ -116,16 +122,13 @@ def reduce_all(table, rdxdir=None, overwrite=False):
     """
     # NOTE: overwrite applies to the reduction products, not the metadata table;
     # rebuilding an existing table would discard any user edits to it.
+    _report = StepReport('REDUCTION') if report is None else report
     dataset = DataSet.from_file(table, rdxdir=rdxdir)
     _rdxdir = dataset.rdxdir
     tag = dataset.tag
     if not _rdxdir.is_dir():
         _rdxdir.mkdir(parents=True)
-
-    log.info('Reducing data:')
-    log.info(f'    Metadata file: {dataset.metafile}')
-    log.info(f'    Setup: {tag}')
-    log.info(f'    Reduction directory: {_rdxdir}')
+    _report.check_version(dataset.metafile.name, dataset.table.meta.get('pipnick_version'))
 
     # Set the output files and check that the directory does not include
     # products from another setup
@@ -139,32 +142,72 @@ def reduce_all(table, rdxdir=None, overwrite=False):
             'products from one setup; use a different directory.'
         )
 
+    log.info('Reducing data:')
+    log.info(f'    Metadata file: {dataset.metafile}')
+    log.info(f'    Setup: {tag} ({dataset.camera.name})')
+    log.info(f'    Reduction directory: {_rdxdir}')
+    frametypes = [p.frametype for p in products]
+    counts = ', '.join(
+        f'{sum(len(p.indx) for p in products if p.frametype == f)} {f}'
+        for f in sorted(set(frametypes))
+    )
+    log.info(f'    Frames: {counts}; {len(products)} products to reduce.')
+
+    rows = []
+    # The progress, in the order the products are reduced: the bias, then the
+    # darks and flats, which depend on the bias, then the science frames
+    order = (
+        dataset.products('bias')
+        + [p for p in products if p.frametype in ['dark', 'domeflat', 'skyflat']]
+        + dataset.products('science')
+    )
+    progress = {product.name: f'[{k + 1}/{len(order)}]' for k, product in enumerate(order)}
+
     # Combine the biases
     bias = None
-    for product in products:
-        if product.frametype == 'bias':
-            bias = _reduce_calibration(product, dataset, overwrite)
+    for product in dataset.products('bias'):
+        bias = _attempt(
+            rows, _report, product, _reduce_calibration, product, dataset, overwrite, _report,
+            progress[product.name]
+        )
     if bias is None:
-        log.warning('No bias frames available.  Attempting to continue anyway...')
+        _report.attention(
+            'There is no bias: the frames are not bias-subtracted.  Add bias frames to the '
+            'metadata table, or fix the failed bias, and rerun.'
+        )
 
     # Combine the darks and flats, which depend on the bias
     flats = {}
     for product in products:
-        if product.frametype == 'dark':
-            _reduce_calibration(product, dataset, overwrite, bias=bias)
-        elif product.frametype in ['domeflat', 'skyflat']:
-            flats[(product.frametype, product.filter)] = _reduce_calibration(
-                product, dataset, overwrite, bias=bias
-            )
+        if product.frametype not in ['dark', 'domeflat', 'skyflat']:
+            continue
+        calib = _attempt(
+            rows, _report, product, _reduce_calibration, product, dataset, overwrite, _report,
+            progress[product.name], bias=bias
+        )
+        if calib is not None and product.frametype != 'dark':
+            flats[(product.frametype, product.filter)] = calib
 
     # Reduce the science frames, which depend on the bias and flat
     science = []
+    unflattened = {}
     for product in dataset.products('science'):
         flat = _select_flat(flats, product.filter)
-        _reduce_science(product, dataset, overwrite, bias=bias, flat=flat)
+        if flat is None:
+            unflattened.setdefault(product.filter, []).append(product.name)
+        _attempt(
+            rows, _report, product, _reduce_science, product, dataset, overwrite, _report,
+            progress[product.name], bias=bias, flat=flat
+        )
         science.append(product.file)
+    for filt, names in unflattened.items():
+        _report.attention(
+            f'There is no {filt} flat: {len(names)} science image(s) are NOT flat-fielded '
+            f'({", ".join(names)}), and their photometry will have spatial errors.  Add {filt} '
+            'flats to the metadata table and rerun.'
+        )
     if len(science) == 0:
-        log.warning('No science frames available.')
+        _report.attention('There are no science frames.')
 
     # Report any outputs for this setup that are no longer produced
     planned = [p.file for p in products]
@@ -172,11 +215,21 @@ def reduce_all(table, rdxdir=None, overwrite=False):
         f.name for f, s in _find_products(_rdxdir).items() if s == tag and f not in planned
     )
     if len(stale) > 0:
-        log.warning(
+        _report.attention(
             f'These files in {_rdxdir} are from setup {tag} but were not produced by this '
             f'reduction and may be out of date: {", ".join(stale)}.  They have not been deleted.'
         )
 
+    _check_measurements(rows, dataset, _report)
+    _summarize(rows, dataset.outdir('reduce'))
+    nup = sum(row['status'] == 'up to date' for row in rows)
+    nbuilt = sum(row['status'] == 'built' for row in rows)
+    nfail = sum(row['status'] == 'failed' for row in rows)
+    _report.finish(
+        f'{len(rows)} products ({nup} up to date, {nbuilt} built, {nfail} failed); summary in '
+        'reduce/summary.ecsv.',
+        next_step=f'pipnick_astrometry -t {dataset.metafile}'
+    )
     return science
 
 
@@ -363,6 +416,7 @@ def _add_provenance(ccd, tag, comb_id, files, raw_hash, calibs):
     """
     if not isinstance(ccd.meta, fits.Header):
         ccd.meta = fits.Header(ccd.meta)
+    ccd.meta['PNVERS'] = (version, 'pipnick version (reduction)')
     ccd.meta['PNSETUP'] = (tag, 'pipnick setup')
     ccd.meta['PNCOMBID'] = (comb_id, 'pipnick combination group')
     ccd.meta['PNNRAW'] = (len(files), 'Number of raw frames')
@@ -401,7 +455,6 @@ def _select_flat(flats, filt):
     for frametype in ['skyflat', 'domeflat']:
         if (frametype, filt) in flats:
             return flats[(frametype, filt)]
-    log.warning(f'No flat available for filter {filt}.  Science frames will not be flat-fielded.')
     return None
 
 
@@ -419,24 +472,29 @@ def _check_pointing(dataset, product):
         The data set.
     product : :class:`~pipnick.datamodel.dataset.Product`
         The product.
+
+    Returns
+    -------
+    bool
+        True if any frame is offset from the first.
     """
     metadata = dataset.table
     indx = product.indx
     camera = dataset.camera
     if len(indx) < 2:
-        return
+        return False
     ra = metadata['ra'][indx]
     dec = metadata['dec'][indx]
     if np.any(np.ma.getmaskarray(ra)) or np.any(np.ma.getmaskarray(dec)):
         log.warning('Cannot check the pointing of frames without coordinates.')
-        return
+        return False
     ra = list(ra)
     dec = list(dec)
     try:
         coo = SkyCoord(ra, dec, unit=(units.hourangle, units.deg))
     except ValueError:
         log.warning('Cannot parse the frame coordinates to check their pointing.')
-        return
+        return False
     sep = coo[0].separation(coo).to('arcsec').value
     nbin = max(int(metadata['xbin'][indx[0]]), int(metadata['ybin'][indx[0]]))
     tolerance = 3 * camera.plate_scale * nbin
@@ -447,6 +505,7 @@ def _check_pointing(dataset, product):
             f'{metadata["file"][indx[0]]}, but are combined without registration: '
             f'{", ".join(metadata["file"][indx[offset]])}'
         )
+    return bool(np.any(offset))
 
 
 def init_ccddata(frame, bpm=None, saturation=None, gain=None, readnoise=None):
@@ -477,7 +536,7 @@ def init_ccddata(frame, bpm=None, saturation=None, gain=None, readnoise=None):
     """
     _frame = Path(frame).absolute()
 
-    log.info(f'Initializing CCD imaging data in {_frame.name}.')
+    log.debug(f'Initializing CCD imaging data in {_frame.name}.')
     ccd = CCDData.read(_frame, unit=units.adu)
 
     # Determine the camera used
@@ -503,12 +562,13 @@ def init_ccddata(frame, bpm=None, saturation=None, gain=None, readnoise=None):
             ccd.mask = np.zeros(ccd.data.shape, dtype=bool)
         saturated = ccd.data >= _sat
         nsat = int(np.sum(saturated))
+        # The number of saturated pixels that are not known bad pixels, which
+        # can read as saturated; see process_frame
+        ccd.meta['PNNSAT'] = int(np.sum(saturated & np.logical_not(ccd.mask)))
         if nsat > 0:
-            # Bad pixels can read as saturated, so these are reported separately
-            nbad = int(np.sum(saturated & ccd.mask))
-            log.info(
-                f'{_frame.name} has {nsat} saturated pixels (>= {_sat} ADU), {nbad} of which '
-                'are known bad pixels.'
+            log.debug(
+                f'{_frame.name} has {nsat} saturated pixels (>= {_sat} ADU), '
+                f'{nsat - ccd.meta["PNNSAT"]} of which are known bad pixels.'
             )
         ccd.mask[saturated] = True
 
@@ -532,9 +592,13 @@ def process_frame(raw_frame, bias=None, flat=None, flag_cosmics=True, photon_noi
     Perform basic image processing
 
     This includes overscan subtraction, trimming, bias subtraction, and
-    field-flattening.  The mean overscan level (in ADU), the size of the
-    trimmed image, and the number of pixels affected by cosmic rays are
-    logged, and the overscan level is saved to the ``PNOSCAN`` header keyword.
+    field-flattening.  One line is logged for the frame, with the mean
+    overscan level (in ADU), the number of saturated pixels (that are not
+    known bad pixels), the calibrations applied, and the number of pixels
+    affected by cosmic rays.  The overscan level is saved to the ``PNOSCAN``
+    header keyword, and the numbers of saturated and cosmic-ray pixels to the
+    ``PNNSAT`` and ``PNNCR`` keywords of the frame's header (which are not
+    written to the combined output; see :func:`_reduce_science`).
 
     The uncertainty of each pixel is propagated through the processing:
 
@@ -574,6 +638,11 @@ def process_frame(raw_frame, bias=None, flat=None, flag_cosmics=True, photon_noi
         Processed CCDData object with overscan subtracted and image trimmed.
     """
     ccd = init_ccddata(raw_frame)
+    name = Path(raw_frame).name
+    # The summary of the processing, logged at the end
+    summary = []
+    if ccd.meta.get('PNNSAT', 0) > 0:
+        summary.append(f'{ccd.meta["PNNSAT"]} saturated pixels')
     readnoise = ccd.meta.get('PROCRN')
     # The number of overscan pixels averaged to set the overscan level of each
     # row; 0 if there is no overscan subtraction
@@ -591,10 +660,11 @@ def process_frame(raw_frame, bias=None, flat=None, flag_cosmics=True, photon_noi
             if ccd.meta['PROCGAIN'] is not None:
                 level /= ccd.meta['PROCGAIN']
             ccd.meta['PNOSCAN'] = (level, 'Mean overscan level (ADU)')
-            log.info(f'Subtracting overscan; mean level is {level:.1f} ADU.')
+            log.debug(f'Subtracting overscan; mean level is {level:.1f} ADU.')
+            summary.insert(0, f'overscan {level:.1f} ADU')
             ccd = ccdproc.subtract_overscan(ccd, fits_section=biassec, overscan_axis=1)
         ccd = ccdproc.trim_image(ccd, fits_section=datasec)
-        log.info(f'Trimmed image to {ccd.shape[1]} x {ccd.shape[0]} (columns x rows).')
+        log.debug(f'Trimmed image to {ccd.shape[1]} x {ccd.shape[0]} (columns x rows).')
     if readnoise is None:
         log.warning('Unknown read noise; the uncertainty of the image is not set.')
     else:
@@ -602,7 +672,8 @@ def process_frame(raw_frame, bias=None, flat=None, flag_cosmics=True, photon_noi
         variance = readnoise**2 * (1 + (0. if noverscan == 0 else 1 / noverscan))
         ccd.uncertainty = StdDevUncertainty(np.full(ccd.shape, np.sqrt(variance)))
     if bias is not None:
-        log.info('Subtracting super bias')
+        log.debug('Subtracting super bias')
+        summary.append('bias subtracted')
         ccd = ccdproc.subtract_bias(ccd, bias)
     if photon_noise and ccd.uncertainty is not None:
         sigma = np.asarray(ccd.uncertainty.array)
@@ -610,7 +681,8 @@ def process_frame(raw_frame, bias=None, flat=None, flag_cosmics=True, photon_noi
             np.sqrt(sigma**2 + np.clip(np.asarray(ccd.data), 0., None))
         )
     if flat is not None:
-        log.info('Applying flat-field correction')
+        log.debug('Applying flat-field correction')
+        summary.append('flat-fielded')
         ccd = ccdproc.flat_correct(ccd, flat)
     if flag_cosmics:
         nmasked = 0 if ccd.mask is None else int(np.sum(ccd.mask))
@@ -618,7 +690,9 @@ def process_frame(raw_frame, bias=None, flat=None, flag_cosmics=True, photon_noi
             ccd, gain_apply=False, gain=1.0, readnoise=ccd.meta['PROCRN'], verbose=False
         )
         ncosmic = 0 if ccd.mask is None else int(np.sum(ccd.mask)) - nmasked
-        log.info(f'Removed cosmic rays from {Path(raw_frame).name}; {ncosmic} pixels affected.')
+        ccd.meta['PNNCR'] = ncosmic
+        summary.append(f'{ncosmic} cosmic-ray pixels ({100 * ncosmic / ccd.data.size:.2f}%)')
+    log.info(f'{name}: ' + ('processed' if len(summary) == 0 else '; '.join(summary)) + '.')
     return ccd
 
 
@@ -697,7 +771,7 @@ def combine_frames(frames, scale=None):
     if len(_frames) == 1:
         combined = _frames[0]
     else:
-        log.info('Identifying outliers using sigma clipping')
+        log.debug('Identifying outliers using sigma clipping')
         combiner = Combiner(_frames)
 
         old_n_masked = 0
@@ -713,7 +787,7 @@ def combine_frames(frames, scale=None):
             old_n_masked = new_n_masked
             new_n_masked = combiner.data_arr.mask.sum()
 
-        log.info('Creating sigma-clipped average image.')
+        log.debug('Creating sigma-clipped average image.')
         propagate = combiner.uncertainty_arr is not None
         if not propagate:
             log.warning(
@@ -733,17 +807,16 @@ def combine_frames(frames, scale=None):
 
 def _report_bias_stats(frames, files):
     r"""
-    Report the bias level of each bias frame and the read noise measured from
-    the set of frames.
+    Report the bias level of the bias frames and the read noise measured from
+    them.
 
-    The bias level is the mean of the unmasked pixels in the data section
-    before overscan subtraction, in ADU, for comparison with the overscan
-    level.  The read noise is measured from the difference of each consecutive
-    pair of frames as :math:`\sigma_{\rm diff}/\sqrt{2}`, where
-    :math:`\sigma_{\rm diff}` is the standard deviation of the difference after
-    rejecting 5-sigma outliers (e.g., cosmic rays).  The frames include the
-    nominal gain, so the read noise is in electrons (unless the gain is
-    unknown).
+    The bias level of each frame is the mean of the unmasked pixels in the
+    data section before overscan subtraction, in ADU, for comparison with the
+    overscan level.  The read noise is measured from the difference of each
+    consecutive pair of frames as :math:`\sigma_{\rm diff}/\sqrt{2}`, where
+    :math:`\sigma_{\rm diff}` is the standard deviation of the difference
+    after rejecting 5-sigma outliers (e.g., cosmic rays).  The frames include
+    the nominal gain, so the read noise is in electrons.
 
     Parameters
     ----------
@@ -751,18 +824,35 @@ def _report_bias_stats(frames, files):
         The processed bias frames; see :func:`process_frames`.
     files : list
         The raw files.
+
+    Returns
+    -------
+    level : float
+        The median bias level of the frames (ADU).
+    readnoise : float
+        The median read noise (e-), or None if there are fewer than two frames
+        or the gain is unknown.
     """
+    levels = []
     for f, frame in zip(files, frames):
         gain = frame.meta['PROCGAIN']
         residual = _masked_mean(frame) / (1. if gain is None else gain)
         oscan = frame.meta.get('PNOSCAN', 0.)
-        log.info(
+        levels.append(oscan + residual)
+        log.debug(
             f'{Path(f).name}: mean bias level is {oscan + residual:.1f} ADU ({residual:.2f} ADU '
             'after overscan subtraction).'
         )
+    log.info(
+        f'Bias level of the {len(levels)} frames: median {np.median(levels):.1f} ADU (range '
+        f'{np.min(levels):.1f}-{np.max(levels):.1f}).'
+    )
     if len(frames) < 2:
         log.info('At least two bias frames are needed to measure the read noise.')
-        return
+        return float(np.median(levels)), None
+    if frames[0].meta['PROCGAIN'] is None:
+        log.info('The gain is unknown, so the read noise cannot be measured in electrons.')
+        return float(np.median(levels)), None
 
     readnoise = []
     for i in range(len(frames) - 1):
@@ -773,21 +863,163 @@ def _report_bias_stats(frames, files):
         diff = np.ma.MaskedArray(frames[i+1].data - frames[i].data, mask=mask)
         _, _, std = sigma_clipped_stats(diff, sigma=5.)
         readnoise.append(std / np.sqrt(2.))
-    unit = frames[0].unit.to_string()
     nominal = frames[0].meta['PROCRN']
     log.info(
         f'Read noise from {len(readnoise)} pairs of bias frames: median {np.median(readnoise):.2f}'
-        f' {unit} (range {np.min(readnoise):.2f}-{np.max(readnoise):.2f}); nominal value is '
-        f'{nominal} electron.'
+        f' e- (range {np.min(readnoise):.2f}-{np.max(readnoise):.2f}); nominal value is '
+        f'{nominal} e-.'
     )
+    return float(np.median(levels)), float(np.median(readnoise))
 
 
-def _reduce_calibration(product, dataset, overwrite, bias=None):
+def _attempt(rows, report, product, func, *args, **kwargs):
+    """
+    Reduce a product, recording a failure instead of stopping the reduction.
+
+    Parameters
+    ----------
+    rows : list
+        The summary rows; the row of the product is appended.
+    report : :class:`~pipnick.pkg.report.StepReport`
+        Records any failure.
+    product : :class:`~pipnick.datamodel.dataset.Product`
+        The product.
+    func : callable
+        :func:`_reduce_calibration` or :func:`_reduce_science`, called with
+        ``*args`` and ``**kwargs``.
+
+    Returns
+    -------
+    dict, None
+        The calibration returned by :func:`_reduce_calibration` (None for a
+        science product, or if the reduction failed).
+    """
+    try:
+        calib, row = func(*args, **kwargs)
+    except Exception as e:
+        log.debug(f'Traceback of the failure of {product.name}:', exc_info=True)
+        report.fail(
+            f'Failed to build {product.name}: {type(e).__name__}: {e}.  Continuing with the '
+            'other products.'
+        )
+        row = _product_row(product, 'failed', f'{type(e).__name__}: {e}')
+        calib = None
+    rows.append(row)
+    return calib
+
+
+def _product_row(product, status, reason, header=None):
+    """
+    Return the summary row of a product; see :func:`_summarize`.
+
+    The measurements are read from the header of the product, if given; see
+    :func:`_reduce_calibration` and :func:`_reduce_science`.
+    """
+    hdr = {} if header is None else header
+    return {
+        'file': product.name, 'frametype': product.frametype, 'comb_id': product.comb_id,
+        'filter': product.filter, 'nframes': len(product.indx), 'status': status,
+        'reason': reason, 'bias_level': hdr.get('PNBIASLV'), 'read_noise': hdr.get('PNRDNOIS'),
+        'nominal_rn': hdr.get('PROCRN'), 'level': hdr.get('PNLEVEL'), 'sky': hdr.get('PNSKY'),
+        'cr_frac': hdr.get('PNCRFRAC'), 'bias': hdr.get('PNBIAS'), 'flat': hdr.get('PNFLAT')
+    }
+
+
+def _check_measurements(rows, dataset, report):
+    """
+    Check the bias level and read noise measured from the bias against the
+    expected values for the camera; see
+    :meth:`~pipnick.cameras.cameras.NickelCamera.expected_range`.
+    """
+    camera = dataset.camera
+    for row in rows:
+        if row['frametype'] != 'bias' or row['status'] == 'failed':
+            continue
+        if row['bias_level'] is None:
+            report.note(
+                f'{row["file"]} predates the recorded bias level and read noise; rebuild it '
+                '(--overwrite) to check them.'
+            )
+            continue
+        ok = report.check_range(
+            f'{row["file"]}: the bias level', row['bias_level'],
+            camera.expected_range('bias_level'), ' ADU',
+            advice='Check the detector and readout settings before trusting the reduction.'
+        )
+        if ok:
+            log.info(f'{row["file"]}: bias level {row["bias_level"]:.1f} ADU (expected) OK.')
+        if row['read_noise'] is None:
+            continue
+        nominal = row['nominal_rn']
+        ok = report.check_range(
+            f'{row["file"]}: the read noise', row['read_noise'],
+            camera.expected_range('readnoise', nominal=nominal), ' e-',
+            advice=f'The nominal value is {nominal} e-; check for pattern noise or a mislabeled '
+                   'readout speed before trusting the errors.'
+        )
+        if ok:
+            log.info(
+                f'{row["file"]}: read noise {row["read_noise"]:.2f} e- (nominal {nominal} e-) '
+                'OK.'
+            )
+
+
+def _summarize(rows, outdir):
+    """
+    Log the summary of the reduction, and write it to ``summary.ecsv``.
+
+    The summary gives each product, its frame type, combination group,
+    filter, number of frames, status (``built``, ``up to date``, or
+    ``failed``) and the reason, and its measurements: the bias level (ADU)
+    and read noise (e-) of the bias, with the nominal read noise; the mean
+    level of the flat frames (e-); the median sky level of the science image
+    (e-) and the fraction of its pixels affected by cosmic rays; and the bias
+    and flat used.  Unknown measurements are masked.
+
+    Parameters
+    ----------
+    rows : list
+        The summary rows; see :func:`_product_row`.
+    outdir : :class:`pathlib.Path`
+        The output directory.
+    """
+    columns = [
+        'file', 'frametype', 'comb_id', 'filter', 'nframes', 'status', 'bias_level',
+        'read_noise', 'nominal_rn', 'level', 'sky', 'cr_frac', 'bias', 'flat', 'reason'
+    ]
+    tbl = Table()
+    for name in columns:
+        values = [row[name] for row in rows]
+        missing = [v is None for v in values]
+        if name in ['bias_level', 'read_noise', 'nominal_rn', 'level', 'sky', 'cr_frac']:
+            values = [0. if v is None else float(v) for v in values]
+            tbl[name] = MaskedColumn(values, mask=missing, dtype=float)
+            tbl[name].info.format = '.4f' if name == 'cr_frac' else '.2f'
+        elif name in ['bias', 'flat']:
+            tbl[name] = MaskedColumn(['' if v is None else str(v) for v in values], mask=missing)
+        else:
+            tbl[name] = values
+    tbl.meta['pipnick_version'] = version
+    outdir.mkdir(parents=True, exist_ok=True)
+    ofile = outdir / 'summary.ecsv'
+    tbl.write(ofile, format='ascii.ecsv', overwrite=True)
+    if len(tbl) > 0:
+        log.info(
+            f'Reduction summary (also in {outdir.name}/{ofile.name}):\n'
+            + '\n'.join(tbl[columns[:-1]].pformat(max_lines=-1, max_width=-1))
+        )
+
+
+def _reduce_calibration(product, dataset, overwrite, report, progress, bias=None):
     """
     Construct a combined calibration frame, unless it is up to date.
 
     Biases are combined directly.  Darks and flats are bias-subtracted, and
-    flats are scaled by their mean before they are combined.
+    flats are scaled by their mean before they are combined.  The bias level
+    (ADU) and read noise (e-) measured from the biases are saved to the
+    ``PNBIASLV`` and ``PNRDNOIS`` header keywords of the combined bias (see
+    :func:`_report_bias_stats`), and the median of the mean levels of the
+    flat frames (e-) to ``PNLEVEL``.
 
     Parameters
     ----------
@@ -797,16 +1029,22 @@ def _reduce_calibration(product, dataset, overwrite, bias=None):
         The data set.
     overwrite : bool
         Reconstruct the calibration even if it is up to date.
+    report : :class:`~pipnick.pkg.report.StepReport`
+        Records the version of an existing calibration that is up to date.
+    progress : str
+        The progress of the reduction, e.g., ``'[3/17]'``.
     bias : dict, optional
         The bias, as returned by this function, used for darks and flats.
 
     Returns
     -------
-    dict
+    calib : dict
         The calibration, with its output file (``file``), the hash of its raw
         frames (``hash``; see :func:`~pipnick.pkg.provenance.names_hash`), and
         its image data (``ccd``), which is None until needed if the
         calibration was up to date; see :func:`_calibration_data`.
+    row : dict
+        The summary row; see :func:`_product_row`.
     """
     frametype = product.frametype
     tag = dataset.tag
@@ -820,20 +1058,30 @@ def _reduce_calibration(product, dataset, overwrite, bias=None):
         product.file, tag, raw_hash, table_hash, _calib_hashes(calibs), overwrite
     )
     if not update:
-        log.info(f'{product.name} is up to date.')
-        return calib
+        log.info(f'{progress} {product.name} is up to date.')
+        hdr = fits.getheader(product.file)
+        report.check_version(product.name, hdr.get('PNVERS'))
+        return calib, _product_row(product, 'up to date', '-', header=hdr)
 
-    log.info(f'Reprocessing {product.name} ({reason}) from {len(files)} frames.')
+    log.info(f'{progress} Building {product.name} ({reason}) from {len(files)} frames.')
     frames = process_frames(
         files, bias=_calibration_data(calibs.get('bias')), flag_cosmics=False,
         photon_noise=frametype != 'bias'
     )
+    bias_level = None
+    readnoise = None
     if frametype == 'bias':
-        _report_bias_stats(frames, files)
+        bias_level, readnoise = _report_bias_stats(frames, files)
     scale = None
+    level = None
     if frametype in ['domeflat', 'skyflat']:
         mean = np.array([float(f.mean().data) for f in frames])
         scale = mean[len(mean)//2] / mean
+        level = float(np.median(mean))
+        log.info(
+            f'{product.name}: {len(frames)} frames with mean levels {np.min(mean):.0f}-'
+            f'{np.max(mean):.0f} {frames[0].unit.to_string()}, scaled to {mean[len(mean)//2]:.0f}.'
+        )
     ccd = combine_frames(frames, scale=scale)
     if frametype == 'bias':
         ccd.meta['OBJECT'] = 'Bias'
@@ -844,13 +1092,19 @@ def _reduce_calibration(product, dataset, overwrite, bias=None):
     _add_provenance(ccd, tag, product.comb_id, files, raw_hash, calibs)
     _apply_table_values(ccd, values, dataset.camera)
     ccd.meta['PNTABH'] = (table_hash, 'Hash of the metadata table values')
+    if bias_level is not None:
+        ccd.meta['PNBIASLV'] = (bias_level, 'Median bias level of the frames (ADU)')
+    if readnoise is not None:
+        ccd.meta['PNRDNOIS'] = (readnoise, 'Read noise measured from the frames (e-)')
+    if level is not None:
+        ccd.meta['PNLEVEL'] = (level, 'Median of the mean levels of the frames (e-)')
     ccd.write(product.file, overwrite=True)
-    log.info(f'Saved {product.file}')
+    log.info(f'Wrote {product.name}')
     calib['ccd'] = ccd
-    return calib
+    return calib, _product_row(product, 'built', reason, header=ccd.meta)
 
 
-def _reduce_science(product, dataset, overwrite, bias=None, flat=None):
+def _reduce_science(product, dataset, overwrite, report, progress, bias=None, flat=None):
     """
     Process and combine a group of science frames, unless the output is up to
     date.
@@ -859,7 +1113,10 @@ def _reduce_science(product, dataset, overwrite, bias=None, flat=None):
     If there is more than one frame, they are scaled to the median exposure
     time of the group and combined, without registration.  The object,
     filter, exposure time (the median), and coordinates in the header are set
-    by the metadata table; see :func:`_apply_table_values`.
+    by the metadata table; see :func:`_apply_table_values`.  The median sky
+    level of the image (e-) and the fraction of the pixels of its frames
+    affected by cosmic rays are saved to the ``PNSKY`` and ``PNCRFRAC`` header
+    keywords.
 
     Parameters
     ----------
@@ -869,10 +1126,22 @@ def _reduce_science(product, dataset, overwrite, bias=None, flat=None):
         The data set.
     overwrite : bool
         Reprocess the frames even if the output is up to date.
+    report : :class:`~pipnick.pkg.report.StepReport`
+        Records the version of an existing image that is up to date, and
+        frames combined with different pointings.
+    progress : str
+        The progress of the reduction, e.g., ``'[3/17]'``.
     bias : dict, optional
         The bias; see :func:`_reduce_calibration`.
     flat : dict, optional
         The flat; see :func:`_reduce_calibration`.
+
+    Returns
+    -------
+    calib : None
+        Science images are not calibrations.
+    row : dict
+        The summary row; see :func:`_product_row`.
     """
     tag = dataset.tag
     files = dataset.raw_files(product)
@@ -884,14 +1153,22 @@ def _reduce_science(product, dataset, overwrite, bias=None, flat=None):
         product.file, tag, raw_hash, table_hash, _calib_hashes(calibs), overwrite
     )
     if not update:
-        log.info(f'{product.name} is up to date.')
-        return
+        log.info(f'{progress} {product.name} is up to date.')
+        hdr = fits.getheader(product.file)
+        report.check_version(product.name, hdr.get('PNVERS'))
+        return None, _product_row(product, 'up to date', '-', header=hdr)
 
-    log.info(f'Reprocessing {product.name} ({reason}) from {len(files)} frames.')
-    _check_pointing(dataset, product)
+    log.info(f'{progress} Building {product.name} ({reason}) from {len(files)} frames.')
+    if _check_pointing(dataset, product):
+        report.attention(
+            f'The frames of {product.name} have different pointings, but are combined without '
+            'registration.', warn=False
+        )
     frames = process_frames(
         files, bias=_calibration_data(bias), flat=_calibration_data(flat), flag_cosmics=True
     )
+    ncosmic = sum(int(f.meta.get('PNNCR', 0)) for f in frames)
+    npix = sum(f.data.size for f in frames)
     scale = None
     if len(frames) > 1:
         if values['exptime'] is None:
@@ -901,8 +1178,17 @@ def _reduce_science(product, dataset, overwrite, bias=None, flat=None):
         else:
             scale = values['exptime'] / np.array(dataset.exptimes(product))
     ccd = combine_frames(frames, scale=scale)
+    for key in ['PNNCR', 'PNNSAT']:
+        ccd.meta.pop(key, None)
     _add_provenance(ccd, tag, product.comb_id, files, raw_hash, calibs)
     _apply_table_values(ccd, values, dataset.camera)
     ccd.meta['PNTABH'] = (table_hash, 'Hash of the metadata table values')
+    sky = float(np.ma.median(np.ma.MaskedArray(ccd.data, mask=ccd.mask)))
+    ccd.meta['PNSKY'] = (sky, 'Median level of the image (e-)')
+    ccd.meta['PNCRFRAC'] = (ncosmic / npix, 'Fraction of pixels affected by cosmic rays')
     ccd.write(product.file, overwrite=True)
-    log.info(f'Saved {product.file}')
+    log.info(
+        f'Wrote {product.name}: sky {sky:.0f} e-, {100 * ncosmic / npix:.2f}% of the pixels '
+        'affected by cosmic rays.'
+    )
+    return None, _product_row(product, 'built', reason, header=ccd.meta)

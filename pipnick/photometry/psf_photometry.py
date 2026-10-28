@@ -75,15 +75,15 @@ def build_moffat_psf_model(
         raise ValueError(f'Unknown stacking method {stack}; must be mean or median.')
     _image = starfind.as_masked_array(image)
     source_data = starfind.detect_sources(_image, thresh=thresh, fwhm=fwhm)
-    log.info(f'Found {len(source_data)} well-separated sources with well-detected fluxes.')
+    log.debug(f'Found {len(source_data)} well-separated sources with well-detected fluxes.')
 
-    log.info('Extracting image stamps.')
+    log.debug('Extracting image stamps.')
     _, stamps = starfind.extract_stamps(_image, source_data)
     npix_stamp = np.prod(stamps.shape[1:])
     mask_fraction = np.sum(np.ma.getmaskarray(stamps), axis=(1,2)) / npix_stamp
     indx = source_data['good'].data & (mask_fraction < 0.01)
     nstack = int(np.sum(indx))
-    log.info(f'Found {nstack} good sources to stack for the PSF measurement.')
+    log.debug(f'Found {nstack} good sources to stack for the PSF measurement.')
     if nstack == 0:
         raise ValueError('No sources are good enough to model the PSF.')
 
@@ -196,7 +196,7 @@ def psf_analysis(
     )
     psf = PSFModel.from_fit(fit)
     fwhm = psf.fwhm
-    log.info(f'Measured Moffat PSF FWHM = {fwhm:.2f} pixels from {nstack} sources.')
+    log.debug(f'Measured Moffat PSF FWHM = {fwhm:.2f} pixels from {nstack} sources.')
 
     # Scales set by the FWHM
     aper_size = fwhm * 1.8
@@ -250,7 +250,7 @@ def consolidate_groups(phot_data, preserve=None):
     group_data = group_data[np.logical_not(np.isin(group_data['group_id'], _preserve))]
 
     group_ids = sorted(set(group_data['group_id']))
-    log.info(f'Consolidating groups {group_ids}')
+    log.debug(f'Consolidating {len(group_ids)} groups of blended sources: {group_ids}')
 
     # Start with non-group data
     new_data = phot_data[np.logical_not(np.isin(phot_data['group_id'], group_ids))]

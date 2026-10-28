@@ -24,6 +24,7 @@ from pipnick.datamodel.dataset import DataSet
 from pipnick.pipelines import astrometry
 from pipnick.pipelines.astrometry import apply_wcs, astrometry_all
 from pipnick.pkg.exceptions import PipnickDataModelError, PipnickError
+from pipnick.pkg.version import version
 from pipnick.tests.test_metadata import write_andor
 
 # The synthetic star field
@@ -494,6 +495,7 @@ def test_points(tmp_path):
     assert hdr['PNASTMTH'] == 'points' and hdr['PNASTNPT'] == 10, (
         'The user solution and its statistics should be recorded'
     )
+    assert hdr['PNASTVER'] == version, 'The solution should record the pipnick version'
     assert (rdxdir / 'astrometry' / f'{image.stem}_points.fits').is_file(), (
         'The user solution should be saved'
     )

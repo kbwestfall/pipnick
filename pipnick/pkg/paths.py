@@ -23,8 +23,9 @@ def step_dir(rdxdir, step):
     rdxdir : str, :class:`pathlib.Path`
         The reduction directory.
     step : str
-        The step: ``'astrometry'``, ``'photometry'``, ``'calibrate'`` or
-        ``'mosaic'``.  The directory has the same name.
+        The step: ``'reduce'`` (for the reduction summary), ``'astrometry'``,
+        ``'photometry'``, ``'calibrate'`` or ``'mosaic'``; or ``'log'`` for
+        the log files.  The directory has the same name.
 
     Returns
     -------
@@ -36,7 +37,7 @@ def step_dir(rdxdir, step):
     :exc:`~pipnick.pkg.exceptions.PipnickParameterError`
         Raised if the step is not one of the above.
     """
-    if step not in ('astrometry', 'photometry', 'calibrate', 'mosaic'):
+    if step not in ('reduce', 'astrometry', 'photometry', 'calibrate', 'mosaic', 'log'):
         raise PipnickParameterError(f'Unknown pipnick step: {step}.')
     return Path(rdxdir) / step
 
