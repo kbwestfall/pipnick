@@ -9,7 +9,7 @@ from matplotlib.figure import Figure
 from astropy.modeling.functional_models import Moffat1D
 from astropy.visualization import AsinhStretch, ZScaleInterval, ImageNormalize
 
-from pipnick.photometry.moffat import FitMoffat2D, make_ellipse
+from pipnick.photometry.moffat import FitMoffat2D, gamma_to_fwhm, make_ellipse
 
 
 def psf_plot(plot_file, fit, plot_fit=True, title=None):
@@ -45,12 +45,12 @@ def psf_plot(plot_file, fit, plot_fit=True, title=None):
     amp = fit.par[2]  # Amplitude of the fit
     if isinstance(fit, FitMoffat2D):
         beta = fit.par[4]  # Moffat beta parameter
-        fwhm1 = FitMoffat2D.to_fwhm(fit.par[3], beta)  # Calculate FWHM
+        fwhm1 = gamma_to_fwhm(fit.par[3], beta)  # Calculate FWHM
         ell_x, ell_y = make_ellipse(fwhm1, fwhm1, 0.)  # Create ellipse for plotting
     else:
         beta = fit.par[6]  # Moffat beta parameter
-        fwhm1 = FitMoffat2D.to_fwhm(fit.par[3], beta)  # Calculate FWHM1
-        fwhm2 = FitMoffat2D.to_fwhm(fit.par[4], beta)  # Calculate FWHM2
+        fwhm1 = gamma_to_fwhm(fit.par[3], beta)  # Calculate FWHM1
+        fwhm2 = gamma_to_fwhm(fit.par[4], beta)  # Calculate FWHM2
         ell_x, ell_y = make_ellipse(fwhm1, fwhm2, fit.par[5])  # Create ellipse for plotting
         if fwhm1 < fwhm2:
             fwhm1, fwhm2 = fwhm2, fwhm1  # Swap FWHMs if necessary

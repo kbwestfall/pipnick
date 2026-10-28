@@ -40,6 +40,7 @@ from astropy.time import Time
 from matplotlib.figure import Figure
 
 from pipnick import log
+from pipnick.datamodel.dataset import DataSet
 from pipnick.photometry.calibrate import (
     CALIBRATION_TERMS, check_terms, fit_calibration, iterate_colors, reject_outliers,
     residual_drift, zero_point
@@ -48,15 +49,11 @@ from pipnick.photometry.extinction import nominal_extinction
 from pipnick.photometry.landolt import (
     catalog_color, catalog_path, load_landolt, match_landolt, parse_color
 )
-from pipnick.pipelines.photometry import select_products
-from pipnick.pipelines.reduction import load_setup, plan_products
 from pipnick.pkg.exceptions import (
     PipnickDataModelError, PipnickParameterError, PipnickPathError
 )
-from pipnick.pkg.paths import (
-    calibrated_table, calibration_file, photometry_table, residuals_file, step_dir
-)
-from pipnick.pkg.provenance import file_hash, image_hash, json_hash, solution_hash
+from pipnick.pkg.paths import calibrated_table, calibration_file, residuals_file, step_dir
+from pipnick.pkg.provenance import file_hash, json_hash
 from pipnick.utils.crossmatch import link_sources
 
 
@@ -173,18 +170,23 @@ def _resolve_fixed(fix, band, terms, nominal):
     return fixed
 
 
-def _night(mjd):
+def _band(image):
     """
-    Return the UT date (``YYYY-MM-DD``) of an MJD.
+    Return the Landolt band of the filter of an image, or None if it is not
+    one of UBVRI.
     """
-    return Time(mjd, format='mjd', scale='utc').to_value('iso', subfmt='date')
+    return image.filter if image.filter in ['U', 'B', 'V', 'R', 'I'] else None
 
 
-def _band(filtername):
+def _has_coordinates(image):
     """
-    Return the Landolt band of a filter, or None if it is not one of UBVRI.
+    Return True if the source table of an image has celestial coordinates.
     """
-    return filtername if filtername in ['U', 'B', 'V', 'R', 'I'] else None
+    phot = image.photometry()
+    return (
+        phot.meta.get('wcs_method', 'none') != 'none'
+        and np.any(np.logical_not(np.ma.getmaskarray(np.ma.asarray(phot['ra']))))
+    )
 
 
 def _instrumental(phot, mag):
@@ -293,17 +295,17 @@ def match_standards(images, catalog, settings):
     """
     rows = []
     for image in images:
-        phot = image['phot']
+        phot = image.photometry()
         ra = np.ma.asarray(phot['ra'], dtype=float)
         dec = np.ma.asarray(phot['dec'], dtype=float)
         good = np.logical_not(np.ma.getmaskarray(ra) | np.ma.getmaskarray(dec))
-        epoch = Time(image['mjd'], format='mjd', scale='utc').jyear
+        epoch = Time(image.mjd, format='mjd', scale='utc').jyear
         isrc, icat, sep = match_landolt(
             catalog, ra[good].filled(0.), dec[good].filled(0.), epoch,
             radius=settings['match_radius']
         )
         isrc = np.where(good)[0][isrc]
-        band = image['band']
+        band = _band(image)
         mag_i, err_i = _instrumental(phot, settings['mag'])
         cat = catalog[icat]
         mag_c = np.ma.asarray(cat[band], dtype=float)
@@ -338,10 +340,10 @@ def match_standards(images, catalog, settings):
                 reason = '-'
             rows.append(
                 {
-                    'image': image['path'].stem, 'band': band, 'star': str(cat['name'][j]),
+                    'image': image.path.stem, 'band': band, 'star': str(cat['name'][j]),
                     'nobs': int(cat['nobs'][j]), 'source_id': int(phot['id'][s]),
-                    'sep': float(sep[j]), 'airmass': float(image['airmass']),
-                    'mjd': float(image['mjd']), 'mag_cat': mag_c[j], 'mag_cat_err': err_c[j],
+                    'sep': float(sep[j]), 'airmass': float(image.airmass),
+                    'mjd': float(image.mjd), 'mag_cat': mag_c[j], 'mag_cat_err': err_c[j],
                     'color': color[j], 'color_err': color_err[j], 'mag_inst': mag_i[s],
                     'mag_inst_err': err_i[s], 'n_residual': n_residual, 'reason': reason
                 }
@@ -757,14 +759,24 @@ def read_calibration(path):
     return content, calibration_hash(content) != content['calibration'].get('fit_hash')
 
 
-def _collect_images(products, tag):
+def _collect_images(dataset):
     """
-    Collect the reduced science images and their source tables.
+    Collect the reduced science images with source tables.
 
-    Images that do not exist, or have no source table, are skipped with a
-    warning.  The other images are returned as dictionaries with the path,
-    the source table, the band (None if the filter is not one of UBVRI), the
-    MJD, airmass, and night, and whether the table has celestial coordinates.
+    Images that do not exist, or have no source table or observation time,
+    are skipped with a warning.  A warning is also issued for images whose
+    filter cannot be calibrated (see :func:`_band`), or whose source table has
+    no celestial coordinates (see :func:`_has_coordinates`).
+
+    Parameters
+    ----------
+    dataset : :class:`~pipnick.datamodel.dataset.DataSet`
+        The data set.
+
+    Returns
+    -------
+    list
+        The :class:`~pipnick.datamodel.image.ReducedImage` objects.
 
     Raises
     ------
@@ -774,58 +786,27 @@ def _collect_images(products, tag):
     """
     images = []
     unsupported = set()
-    for product in products:
-        path = product['file']
-        pfile = photometry_table(path)
-        if not path.is_file():
-            log.warning(f'{path.name} does not exist; reduce the data first.  Skipping.')
+    for image in dataset.science_images():
+        if not image.phot_file.is_file():
+            log.warning(f'{image.name} has no source table; run pipnick_photometry.  Skipping.')
             continue
-        if not pfile.is_file():
-            log.warning(f'{path.name} has no source table; run pipnick_photometry.  Skipping.')
-            continue
-        hdr = fits.getheader(path)
-        if hdr.get('PNSETUP') != tag:
-            raise PipnickDataModelError(f'{path.name} is not from setup {tag}.')
-        phot = Table.read(pfile, format='ascii.ecsv')
-        if phot.meta.get('image_hash') != image_hash(hdr):
-            raise PipnickDataModelError(
-                f'The source table {pfile.name} is out of date: {path.name} has changed since '
-                'it was measured.  Rerun pipnick_photometry.'
-            )
-        if phot.meta.get('wcs_hash') != solution_hash(hdr):
-            raise PipnickDataModelError(
-                f'The celestial coordinates in {pfile.name} are out of date: the astrometric '
-                f'solution of {path.name} has changed.  Rerun pipnick_photometry to update '
-                'them.'
-            )
-        filtername = phot.meta.get('filter')
-        band = None if filtername is None else _band(str(filtername))
-        if band is None and filtername not in unsupported:
-            unsupported.add(filtername)
+        # Check that the source table is up to date
+        image.photometry()
+        if _band(image) is None and image.filter not in unsupported:
+            unsupported.add(image.filter)
             log.warning(
-                f'Filter {filtername} cannot be calibrated: calibration currently requires '
+                f'Filter {image.filter} cannot be calibrated: calibration currently requires '
                 'UBVRI filters.'
             )
-        mjd = phot.meta.get('mjd')
-        if mjd is None:
-            log.warning(f'{path.name} has no observation time; skipping.')
+        if image.mjd is None:
+            log.warning(f'{image.name} has no observation time; skipping.')
             continue
-        coords = (
-            phot.meta.get('wcs_method', 'none') != 'none'
-            and np.any(np.logical_not(np.ma.getmaskarray(np.ma.asarray(phot['ra']))))
-        )
-        if not coords:
+        if not _has_coordinates(image):
             log.warning(
-                f'{pfile.name} has no celestial coordinates, so it cannot be searched for '
-                'standards; run pipnick_astrometry, then pipnick_photometry.'
+                f'{image.phot_file.name} has no celestial coordinates, so it cannot be searched '
+                'for standards; run pipnick_astrometry, then pipnick_photometry.'
             )
-        images.append(
-            {
-                'path': path, 'phot_file': pfile, 'phot': phot, 'band': band, 'mjd': float(mjd),
-                'airmass': phot.meta.get('airmass'), 'night': _night(float(mjd)),
-                'coords': coords, 'product': product
-            }
-        )
+        images.append(image)
     return images
 
 
@@ -876,10 +857,10 @@ def calibrate_night(night, images, standards, catalog, camera, tag, settings, no
     meas['resid_loo'] = MaskedColumn(np.zeros(nmeas), mask=np.ones(nmeas, dtype=bool))
     meas['used'] = np.zeros(nmeas, dtype=bool)
     meas['rejected'] = np.zeros(nmeas, dtype=bool)
-    mjd0 = min(image['mjd'] for image in images)
+    mjd0 = min(image.mjd for image in images)
 
     bands = sorted(
-        {image['band'] for image in images if image['band'] is not None},
+        {_band(image) for image in images if _band(image) is not None},
         key='UBVRI'.index
     )
     content = {
@@ -1138,7 +1119,10 @@ def calibrate_all(
         Raised if no source table has celestial coordinates, a source table
         is out of date, or no band is calibrated.
     """
-    metafile, metadata, _rdxdir, tag, camera = load_setup(table, rdxdir=rdxdir)
+    dataset = DataSet.from_file(table, rdxdir=rdxdir)
+    _rdxdir = dataset.rdxdir
+    tag = dataset.tag
+    camera = dataset.camera
     if not _rdxdir.is_dir():
         raise PipnickPathError(f'{_rdxdir} does not exist; reduce the data first.')
     if mag not in ['psf', 'aper']:
@@ -1181,12 +1165,12 @@ def calibrate_all(
             + ', '.join(f'{b} {k:.3f}' for b, k in nominal.items())
         )
 
-    products = [p for p in plan_products(metadata, _rdxdir) if p['frametype'] == 'science']
     selected = {
-        p['comb_id'] for p in (products if images is None else select_products(products, images))
+        p.comb_id
+        for p in (dataset.products('science') if images is None else dataset.select(images))
     }
-    all_images = _collect_images(products, tag)
-    if not any(image['coords'] for image in all_images):
+    all_images = _collect_images(dataset)
+    if not any(_has_coordinates(image) for image in all_images):
         raise PipnickDataModelError(
             'No source table has celestial coordinates, so no standards can be found; run '
             'pipnick_astrometry, then pipnick_photometry.'
@@ -1195,13 +1179,13 @@ def calibrate_all(
 
     outputs = []
     summary = []
-    nights = sorted({image['night'] for image in all_images})
+    nights = sorted({image.night for image in all_images})
     for night in nights:
-        night_images = [image for image in all_images if image['night'] == night]
+        night_images = [image for image in all_images if image.night == night]
         standards = [
             image for image in night_images
-            if image['coords'] and image['band'] is not None and image['airmass'] is not None
-            and image['product']['comb_id'] in selected
+            if _has_coordinates(image) and _band(image) is not None and image.airmass is not None
+            and image.product.comb_id in selected
         ]
         settings['input_hash'] = json_hash(
             {
@@ -1209,12 +1193,13 @@ def calibrate_all(
                 'fix': _fix, 'nominal': nominal, 'catalog': file_hash(catalog_path()),
                 'tables': [
                     [
-                        image['phot_file'].name, image['phot'].meta.get('settings_hash'),
-                        image['phot'].meta.get('image_hash'), image['phot'].meta.get('wcs_hash')
+                        image.phot_file.name, image.photometry().meta.get('settings_hash'),
+                        image.photometry().meta.get('image_hash'),
+                        image.photometry().meta.get('wcs_hash')
                     ]
                     for image in standards
                 ],
-                'bands': sorted({str(i['band']) for i in night_images})
+                'bands': sorted({str(_band(i)) for i in night_images})
             }
         )
         ofile = calibration_file(_rdxdir, tag, night)
@@ -1336,12 +1321,12 @@ def apply_to_headers(images, content, cfile):
     chash = file_hash(cfile)
     skipped = []
     for image in images:
-        path = image['path']
-        cal = calibrations.get(image['band'])
-        if cal is None or image['airmass'] is None:
+        path = image.path
+        cal = calibrations.get(_band(image))
+        if cal is None or image.airmass is None:
             skipped.append(path.name)
             log.warning(
-                f'{path.name}: no calibration for filter {image["phot"].meta.get("filter")}'
+                f'{path.name}: no calibration for filter {image.photometry().meta.get("filter")}'
                 + ('' if cal is None else ' (no airmass)') + '; its header is not calibrated.'
             )
             stale = [
@@ -1357,7 +1342,7 @@ def apply_to_headers(images, content, cfile):
         if hdr.get('PNCALHSH') == chash:
             log.info(f'{path.name}: header calibration is up to date.')
             continue
-        zp = zero_point(cal['terms'], cal['coeff'], cal['cov'], float(image['airmass']))
+        zp = zero_point(cal['terms'], cal['coeff'], cal['cov'], float(image.airmass))
         cards = [
             ('PNCALZP', zp['zp'], 'Zero point (e-/s) at this airmass, color 0'),
             ('PNCALZE', zp['zp_err'], 'Statistical error of PNCALZP'),
@@ -1426,43 +1411,43 @@ def apply_to_catalogs(images, content, cfile, settings, default_color):
     outputs = []
     usable = []
     for image in images:
-        if image['band'] not in calibrations or image['airmass'] is None:
+        if _band(image) not in calibrations or image.airmass is None:
             log.warning(
-                f'{image["path"].name}: its band is not calibrated; not calibrating its source '
+                f'{image.name}: its band is not calibrated; not calibrating its source '
                 'table.'
             )
             continue
         usable.append(image)
-    objects = sorted({str(image['phot'].meta.get('object')) for image in usable})
+    objects = sorted({str(image.photometry().meta.get('object')) for image in usable})
     for obj in objects:
-        group = [image for image in usable if str(image['phot'].meta.get('object')) == obj]
+        group = [image for image in usable if str(image.photometry().meta.get('object')) == obj]
         # Images without celestial coordinates are not matched
         ra = [
-            np.ma.asarray(i['phot']['ra'], dtype=float) if i['coords']
-            else np.ma.masked_all(len(i['phot'])) for i in group
+            np.ma.asarray(i.photometry()['ra'], dtype=float) if _has_coordinates(i)
+            else np.ma.masked_all(len(i.photometry())) for i in group
         ]
         dec = [
-            np.ma.asarray(i['phot']['dec'], dtype=float) if i['coords']
-            else np.ma.masked_all(len(i['phot'])) for i in group
+            np.ma.asarray(i.photometry()['dec'], dtype=float) if _has_coordinates(i)
+            else np.ma.masked_all(len(i.photometry())) for i in group
         ]
         ids = link_sources(ra, dec, settings['match_radius'])
         mags = []
         errs = []
         for image in group:
-            m, e = _instrumental(image['phot'], mag_type)
+            m, e = _instrumental(image.photometry(), mag_type)
             mags.append(m)
             errs.append(e)
         n = [len(m) for m in mags]
         mag, mag_err, color, assumed = iterate_colors(
             np.ma.concatenate(mags), np.ma.concatenate(errs),
-            np.concatenate([np.full(k, float(i['airmass'])) for k, i in zip(n, group)]),
-            np.concatenate(ids), np.concatenate([[i['band']] * k for k, i in zip(n, group)]),
+            np.concatenate([np.full(k, float(i.airmass)) for k, i in zip(n, group)]),
+            np.concatenate(ids), np.concatenate([[_band(i)] * k for k, i in zip(n, group)]),
             calibrations, default_color=defaults
         )
         start = 0
         for image, k, sid, m, e in zip(group, n, ids, mags, errs):
-            phot = image['phot']
-            cal = calibrations[image['band']]
+            phot = image.photometry()
+            cal = calibrations[_band(image)]
             tbl = Table()
             for name in ['id', 'x', 'y', 'ra', 'dec']:
                 tbl[name] = phot[name]
@@ -1476,13 +1461,13 @@ def apply_to_catalogs(images, content, cfile, settings, default_color):
             for name in ['mag_inst', 'mag_inst_err', 'mag', 'mag_err', 'color_used']:
                 tbl[name].info.format = '.4f'
             tbl.meta = {
-                'image': image['path'].name, 'object': obj, 'band': image['band'],
+                'image': image.name, 'object': obj, 'band': _band(image),
                 'color': cal['color_name'], 'magnitude': mag_type, 'system': 'Vega',
                 'extinction': cal['extinction'], 'calibration': cfile.name,
-                'calibration_hash': chash, 'airmass': image['airmass'],
+                'calibration_hash': chash, 'airmass': image.airmass,
                 'errors': 'statistical only; fixed and fallback terms have no error'
             }
-            ofile = calibrated_table(image['path'])
+            ofile = calibrated_table(image.path)
             tbl.write(ofile, format='ascii.ecsv', overwrite=True)
             outputs.append(ofile)
             log.info(

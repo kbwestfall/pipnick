@@ -13,12 +13,14 @@ from photutils.aperture import ApertureStats, CircularAperture
 from photutils.psf import MoffatPSF
 
 from pipnick import metadata
+from pipnick.datamodel.dataset import DataSet
+from pipnick.datamodel.psf import PSFModel
 from pipnick.photometry import psf_photometry
 from pipnick.photometry.moffat import EllipticalMoffatPSF
 from pipnick.photometry.aperture_photometry import aperture_analysis
 from pipnick.pipelines.astrometry import apply_wcs
 from pipnick.pipelines.photometry import photometry_all
-from pipnick.pipelines.reduction import load_setup, plan_products
+from pipnick.pkg.exceptions import PipnickParameterError
 from pipnick.tests.test_metadata import write_andor
 
 # The synthetic images: 2x2-binned Andor frames (0.333 arcsec pixels), cut to
@@ -97,12 +99,13 @@ def write_field(tmp_path, nimages=1, raw_wcs=False):
     table = files[0]
     rdxdir = tmp_path / 'rdx'
     rdxdir.mkdir()
-    _, tbl, _, tag, _ = load_setup(table, rdxdir=rdxdir)
+    dataset = DataSet.from_file(table, rdxdir=rdxdir)
+    tag = dataset.tag
     x, y, flux = star_list()
-    for product in plan_products(tbl, rdxdir):
+    for product in dataset.products():
         hdr = fits.Header(
             {
-                'PNSETUP': tag, 'PNRAWHSH': f'raw{product["comb_id"]}', 'PNTABH': 'table',
+                'PNSETUP': tag, 'PNRAWHSH': f'raw{product.comb_id}', 'PNTABH': 'table',
                 'PROCRN': READNOISE, 'NCOMBINE': 1, 'BUNIT': 'electron'
             }
         )
@@ -110,14 +113,14 @@ def write_field(tmp_path, nimages=1, raw_wcs=False):
             hdr.update(true_wcs().to_header())
         mask = np.zeros(SHAPE, dtype=np.uint8)
         mask[:,150] = 1
-        image, sigma = render(x, y, flux, seed=product['comb_id'], error=True)
+        image, sigma = render(x, y, flux, seed=product.comb_id, error=True)
         uncert = fits.Header({'UTYPE': 'StdDevUncertainty'})
         fits.HDUList(
             [
                 fits.PrimaryHDU(data=image, header=hdr), fits.ImageHDU(data=mask, name='MASK'),
                 fits.ImageHDU(data=sigma, header=uncert, name='UNCERT')
             ]
-        ).writeto(product['file'])
+        ).writeto(product.file)
     return table, rdxdir, (x, y, flux)
 
 
@@ -186,13 +189,13 @@ def test_psf_model(tmp_path):
         fit, nstack = psf_photometry.build_moffat_psf_model(
             np.ma.MaskedArray(data), thresh=15., fwhm=5., stack=stack
         )
-        fwhm = psf_photometry.process_par(fit.par, 'circ')
+        fwhm = PSFModel.from_fit(fit).fwhm
         assert np.isclose(fwhm, FWHM, rtol=0.03), (
             f'The PSF FWHM from the {stack} stack should match the injected PSF'
         )
         assert nstack > 10, 'Most of the isolated stars should be used to model the PSF'
-    with pytest.raises(ValueError, match='Unknown fit type'):
-        psf_photometry.process_par(fit.par, 'gauss')
+    with pytest.raises(PipnickParameterError, match='Unknown PSF fit type'):
+        PSFModel('gauss', fit.par)
 
 
 def test_photometry(tmp_path, caplog):

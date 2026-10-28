@@ -15,13 +15,13 @@ from astropy.time import Time
 
 from pipnick import metadata
 from pipnick.astrometry.services import propagate_proper_motion
+from pipnick.datamodel.dataset import DataSet
 from pipnick.photometry import extinction, landolt
 from pipnick.photometry.calibrate import (
     CALIBRATION_TERMS, check_terms, design_matrix, fit_calibration, iterate_colors,
     residual_drift, zero_point
 )
 from pipnick.pipelines import calibrate
-from pipnick.pipelines.reduction import load_setup, plan_products
 from pipnick.pkg.exceptions import PipnickDataModelError, PipnickParameterError
 from pipnick.pkg.provenance import image_hash
 from pipnick.tests.test_metadata import write_andor
@@ -116,7 +116,8 @@ def write_night(tmp_path, design, seed=1, science=False, outlier=None):
     table = files[0]
     rdxdir = tmp_path / 'rdx'
     (rdxdir / 'photometry').mkdir(parents=True)
-    _, tbl, _, tag, _ = load_setup(table, rdxdir=rdxdir)
+    dataset = DataSet.from_file(table, rdxdir=rdxdir)
+    tbl, tag = dataset.table, dataset.tag
 
     stars = standards()
     sci = {
@@ -124,22 +125,22 @@ def write_night(tmp_path, design, seed=1, science=False, outlier=None):
         'V': np.linspace(12., 15., 6), 'B-V': np.linspace(0.2, 1.4, 6)
     }
     truth = {'V': sci['V'], 'B': sci['V'] + sci['B-V'], 'B-V': sci['B-V']}
-    for product in plan_products(tbl, rdxdir):
-        i = product['indx'][0]
+    for product in dataset.products():
+        i = product.indx[0]
         obj, filt, airmass, _ = frames[int(str(tbl['file'][i])[2:5])]
         mjd = float(tbl['mjd'][i])
         hdr = fits.Header(
             {
-                'PNSETUP': tag, 'PNRAWHSH': f'raw{product["comb_id"]}', 'PNTABH': 'table',
-                'PNASTMTH': 'gaia', 'PNASTWH': f'wcs{product["comb_id"]}', 'AIRMASS': airmass
+                'PNSETUP': tag, 'PNRAWHSH': f'raw{product.comb_id}', 'PNTABH': 'table',
+                'PNASTMTH': 'gaia', 'PNASTWH': f'wcs{product.comb_id}', 'AIRMASS': airmass
             }
         )
-        fits.PrimaryHDU(data=np.zeros((8, 8)), header=hdr).writeto(product['file'])
+        fits.PrimaryHDU(data=np.zeros((8, 8)), header=hdr).writeto(product.file)
         meta = {
-            'image': product['file'].name, 'setup': tag, 'comb_id': product['comb_id'],
+            'image': product.file.name, 'setup': tag, 'comb_id': product.comb_id,
             'object': obj, 'filter': filt, 'exptime': EXPTIME, 'airmass': airmass, 'mjd': mjd,
             'settings_hash': 'settings', 'image_hash': image_hash(hdr), 'wcs_method': 'gaia',
-            'wcs_hash': f'wcs{product["comb_id"]}'
+            'wcs_hash': f'wcs{product.comb_id}'
         }
         if obj == 'SA110':
             epoch = Time(mjd, format='mjd').jyear
@@ -158,7 +159,7 @@ def write_night(tmp_path, design, seed=1, science=False, outlier=None):
             ra, dec = sci['ra'], sci['dec']
             mag = instrumental(truth[filt], sci['B-V'], airmass, filt, rng)
         phot_table(ra, dec, mag, meta).write(
-            rdxdir / 'photometry' / f'{product["file"].stem}_phot.ecsv', format='ascii.ecsv'
+            rdxdir / 'photometry' / f'{product.file.stem}_phot.ecsv', format='ascii.ecsv'
         )
     return table, rdxdir, truth
 
@@ -441,7 +442,7 @@ def test_fallback(tmp_path, caplog):
     cfile = calibration_file(rdxdir)
     content, _ = calibrate.read_calibration(cfile)
     nominal = extinction.nominal_extinction(
-        load_setup(table, rdxdir=rdxdir)[4], ['B', 'V']
+        DataSet.from_file(table, rdxdir=rdxdir).camera, ['B', 'V']
     )
     for band in ['B', 'V']:
         entry = content['band'][band]

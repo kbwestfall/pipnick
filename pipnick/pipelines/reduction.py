@@ -21,12 +21,10 @@ from astropy import units
 import ccdproc
 
 from pipnick import cameras
-from pipnick.pkg.exceptions import PipnickDataModelError, PipnickPathError
+from pipnick.datamodel.dataset import DataSet
+from pipnick.pkg.exceptions import PipnickDataModelError
 from pipnick.pkg.provenance import names_hash, values_hash
 from pipnick.utils.combiner import Combiner
-from pipnick.metadata import (
-    filter_name, safe_name, build_metadata, frame_path, setup_tag, update_metadata_meta
-)
 from pipnick import log
 
 
@@ -44,7 +42,8 @@ def reduce_all(table, rdxdir=None, overwrite=False):
     each output.
 
     The frames are reduced in the combination groups set by the ``comb_id``
-    column of the metadata table; see :func:`check_comb_groups` for the rules
+    column of the metadata table; see
+    :func:`~pipnick.datamodel.dataset.check_comb_groups` for the rules
     the groups must follow.  Each group produces one output file in ``rdxdir``:
 
         - ``Bias.fits``: the combined bias.
@@ -117,18 +116,20 @@ def reduce_all(table, rdxdir=None, overwrite=False):
     """
     # NOTE: overwrite applies to the reduction products, not the metadata table;
     # rebuilding an existing table would discard any user edits to it.
-    metafile, metadata, _rdxdir, tag, camera = load_setup(table, rdxdir=rdxdir)
+    dataset = DataSet.from_file(table, rdxdir=rdxdir)
+    _rdxdir = dataset.rdxdir
+    tag = dataset.tag
     if not _rdxdir.is_dir():
         _rdxdir.mkdir(parents=True)
 
     log.info('Reducing data:')
-    log.info(f'    Metadata file: {metafile}')
+    log.info(f'    Metadata file: {dataset.metafile}')
     log.info(f'    Setup: {tag}')
     log.info(f'    Reduction directory: {_rdxdir}')
 
     # Set the output files and check that the directory does not include
     # products from another setup
-    products = plan_products(metadata, _rdxdir)
+    products = dataset.products()
     existing = _find_products(_rdxdir)
     other = [s for s in existing.values() if s != tag]
     if len(other) > 0:
@@ -138,39 +139,35 @@ def reduce_all(table, rdxdir=None, overwrite=False):
             'products from one setup; use a different directory.'
         )
 
-    raw = frame_path(metadata, path_key='rawdir')
-
     # Combine the biases
     bias = None
     for product in products:
-        if product['frametype'] == 'bias':
-            bias = _reduce_calibration(product, metadata, raw, tag, overwrite, camera)
+        if product.frametype == 'bias':
+            bias = _reduce_calibration(product, dataset, overwrite)
     if bias is None:
         log.warning('No bias frames available.  Attempting to continue anyway...')
 
     # Combine the darks and flats, which depend on the bias
     flats = {}
     for product in products:
-        if product['frametype'] == 'dark':
-            _reduce_calibration(product, metadata, raw, tag, overwrite, camera, bias=bias)
-        elif product['frametype'] in ['domeflat', 'skyflat']:
-            flats[(product['frametype'], product['filter'])] = _reduce_calibration(
-                product, metadata, raw, tag, overwrite, camera, bias=bias
+        if product.frametype == 'dark':
+            _reduce_calibration(product, dataset, overwrite, bias=bias)
+        elif product.frametype in ['domeflat', 'skyflat']:
+            flats[(product.frametype, product.filter)] = _reduce_calibration(
+                product, dataset, overwrite, bias=bias
             )
 
     # Reduce the science frames, which depend on the bias and flat
     science = []
-    for product in products:
-        if product['frametype'] != 'science':
-            continue
-        flat = _select_flat(flats, product['filter'])
-        _reduce_science(product, metadata, raw, tag, overwrite, camera, bias=bias, flat=flat)
-        science.append(product['file'])
+    for product in dataset.products('science'):
+        flat = _select_flat(flats, product.filter)
+        _reduce_science(product, dataset, overwrite, bias=bias, flat=flat)
+        science.append(product.file)
     if len(science) == 0:
         log.warning('No science frames available.')
 
     # Report any outputs for this setup that are no longer produced
-    planned = [p['file'] for p in products]
+    planned = [p.file for p in products]
     stale = sorted(
         f.name for f, s in _find_products(_rdxdir).items() if s == tag and f not in planned
     )
@@ -181,336 +178,6 @@ def reduce_all(table, rdxdir=None, overwrite=False):
         )
 
     return science
-
-
-def load_setup(table, rdxdir=None):
-    """
-    Read and check a per-setup metadata file for processing.
-
-    Parameters
-    ----------
-    table : str, :class:`pathlib.Path`
-        A per-setup metadata file, written by ``pipnick_metadata --split``.
-    rdxdir : str, :class:`pathlib.Path`, optional
-        Directory for the reduced data.  If None, the directory saved in the
-        metadata file is used or, if there is none, the parent directory of the
-        raw data directory, which is then saved to the metadata file.
-
-    Returns
-    -------
-    metafile : :class:`pathlib.Path`
-        The metadata file.
-    metadata : :class:`astropy.table.Table`
-        The metadata table, excluding commented-out rows.
-    rdxdir : :class:`pathlib.Path`
-        The reduction directory, which may not yet exist.
-    tag : str
-        The setup tag; see :func:`~pipnick.metadata.setup_tag`.
-    camera : :class:`~pipnick.cameras.cameras.NickelCamera`
-        The camera used to obtain the data.
-
-    Raises
-    ------
-    :exc:`~pipnick.pkg.exceptions.PipnickPathError`
-        Raised if the metadata file does not exist.
-    :exc:`~pipnick.pkg.exceptions.PipnickDataModelError`
-        Raised if the table includes more than one setup, has no frames, or
-        has invalid combination groups.
-    """
-    _table = Path(table).absolute()
-    if not _table.is_file():
-        raise PipnickPathError(f'{_table} does not exist.')
-    metafile, metadata = build_metadata(filename=_table, rdxdir=rdxdir)
-    check_single_setup(metadata, metafile)
-    if len(metadata) == 0:
-        raise PipnickDataModelError(f'{metafile} has no frames to reduce.')
-    check_comb_groups(metadata, metafile)
-    tag = setup_tag(metadata.meta['setups'][metadata['setup'][0]])
-    camera = cameras.get_camera(metadata.meta['camera'])
-
-    if 'rdxdir' in metadata.meta:
-        _rdxdir = Path(metadata.meta['rdxdir'])
-    else:
-        _rdxdir = Path(metadata.meta['rawdir']).absolute().parent
-        metadata.meta['rdxdir'] = str(_rdxdir)
-        # Update the file to include the reduction directory
-        update_metadata_meta(metafile, rdxdir=str(_rdxdir))
-    return metafile, metadata, _rdxdir, tag, camera
-
-
-def check_single_setup(metadata, metafile):
-    """
-    Check that a metadata table includes frames from only one setup.
-
-    Parameters
-    ----------
-    metadata : :class:`astropy.table.Table`
-        The metadata table, excluding commented-out rows; see
-        :func:`~pipnick.metadata.read_metadata`.
-    metafile : str, :class:`pathlib.Path`
-        The file the table was read from, used in error messages.
-
-    Raises
-    ------
-    :exc:`~pipnick.pkg.exceptions.PipnickDataModelError`
-        Raised if the table has no ``setup`` column, or includes frames from
-        more than one setup.
-    """
-    if 'setup' not in metadata.colnames:
-        raise PipnickDataModelError(
-            f'{metafile} has no setup column; it was likely built by an older version of '
-            'pipnick.  Rebuild it using pipnick_metadata.'
-        )
-    setups, counts = np.unique(metadata['setup'], return_counts=True)
-    if len(setups) > 1:
-        definitions = metadata.meta.get('setups', {})
-        summary = '\n'.join(
-            f'    {s} ({n} frames): {definitions.get(s)}' for s, n in zip(setups, counts)
-        )
-        raise PipnickDataModelError(
-            f'{metafile} includes frames from more than one setup:\n{summary}\nData from only '
-            'one setup can be reduced at a time.  Comment out the rows for the other setups, '
-            'or use pipnick_metadata --split to write one file per setup.'
-        )
-
-
-def check_comb_groups(metadata, metafile):
-    """
-    Check that the combination groups of a metadata table can be reduced.
-
-    The groups are set by the ``comb_id`` column.  So that the calibrations
-    used for each frame are unambiguous, the groups must follow these rules:
-
-        - all frames in a group have the same frame type;
-        - there is only one group of biases;
-        - the frames in a group of darks have the same exposure time (to
-          within 0.1 s), and there is only one group of darks for each
-          exposure time;
-        - the frames in a group of dome or sky flats have the same filter, and
-          there is only one group of each flat type for each filter;
-        - the frames in a group of science frames have the same filter.
-
-    Science frames in a group with different exposure times are allowed, but a
-    warning is issued.  Frames with other types (e.g., focus or pointing
-    frames) are not reduced, and are only noted.
-
-    Parameters
-    ----------
-    metadata : :class:`astropy.table.Table`
-        The metadata table, excluding commented-out rows; see
-        :func:`~pipnick.metadata.read_metadata`.
-    metafile : str, :class:`pathlib.Path`
-        The file the table was read from, used in error messages.
-
-    Raises
-    ------
-    :exc:`~pipnick.pkg.exceptions.PipnickDataModelError`
-        Raised if the table has no ``comb_id`` column, or if any of the rules
-        above are broken.  All broken rules are listed.
-    """
-    if 'comb_id' not in metadata.colnames:
-        raise PipnickDataModelError(
-            f'{metafile} has no comb_id column.  The reduction requires a per-setup metadata '
-            'file, which defines the frames to combine; use pipnick_metadata --split to write '
-            'one.'
-        )
-    violations = []
-    bias_groups = []
-    darks = {}
-    flats = {}
-    ignored = []
-    for comb_id, indx in _group_indices(metadata).items():
-        files = ', '.join(metadata['file'][indx])
-        frametypes = sorted(set(metadata['frametype'][indx]))
-        if len(frametypes) > 1:
-            violations.append(
-                f'Group {comb_id} mixes frame types ({", ".join(frametypes)}): {files}'
-            )
-            continue
-        frametype = frametypes[0]
-        filters = sorted(set(_filter(metadata, i) for i in indx))
-        exptimes = set(_exptime(metadata, i) for i in indx)
-        exptimes = set(None if e is None else round(e, 1) for e in exptimes)
-        if frametype == 'bias':
-            bias_groups.append(comb_id)
-        elif frametype == 'dark':
-            if len(exptimes) > 1:
-                violations.append(
-                    f'Dark group {comb_id} mixes exposure times '
-                    f'({", ".join(sorted(str(e) for e in exptimes))}): {files}'
-                )
-            elif None in exptimes:
-                violations.append(f'Dark group {comb_id} has no exposure time: {files}')
-            else:
-                darks.setdefault(exptimes.pop(), []).append(comb_id)
-        elif frametype in ['domeflat', 'skyflat']:
-            if len(filters) > 1:
-                violations.append(
-                    f'{frametype} group {comb_id} mixes filters ({", ".join(filters)}): {files}'
-                )
-            else:
-                flats.setdefault((frametype, filters[0]), []).append(comb_id)
-        elif frametype == 'science':
-            if len(filters) > 1:
-                violations.append(
-                    f'Science group {comb_id} mixes filters ({", ".join(filters)}): {files}'
-                )
-            if len(exptimes) > 1:
-                log.warning(
-                    f'Science group {comb_id} mixes exposure times; the frames will be scaled '
-                    f'to the median exposure time before they are combined: {files}'
-                )
-        else:
-            ignored.extend(metadata['file'][indx])
-
-    if len(bias_groups) > 1:
-        violations.append(
-            f'There is more than one bias group ({", ".join(str(c) for c in bias_groups)})'
-        )
-    for exptime, ids in darks.items():
-        if len(ids) > 1:
-            violations.append(
-                f'There is more than one group of {exptime:g} s darks '
-                f'({", ".join(str(c) for c in ids)})'
-            )
-    for (frametype, filt), ids in flats.items():
-        if len(ids) > 1:
-            violations.append(
-                f'There is more than one group of {filt} {frametype} frames '
-                f'({", ".join(str(c) for c in ids)})'
-            )
-    if len(ignored) > 0:
-        log.info(f'These frames have types that are not reduced: {", ".join(ignored)}')
-    if len(violations) > 0:
-        raise PipnickDataModelError(
-            f'{metafile} has invalid combination groups (comb_id):\n'
-            + '\n'.join(f'    {v}' for v in violations)
-        )
-
-
-def _masked_to_none(value):
-    """
-    Return None if a table value is masked, or the value otherwise.
-    """
-    return None if value is np.ma.masked else value
-
-
-def _filter(metadata, i):
-    """
-    Return the filter of a frame in the metadata table, or an empty string if
-    it is unknown.
-    """
-    value = _masked_to_none(metadata['filter'][i])
-    return '' if value is None else str(value)
-
-
-def _exptime(metadata, i):
-    """
-    Return the exposure time of a frame in the metadata table, or None if it is
-    unknown.
-    """
-    value = _masked_to_none(metadata['exptime'][i])
-    return None if value is None else float(value)
-
-
-def _group_indices(metadata):
-    """
-    Find the rows of the metadata table in each combination group.
-
-    Returns
-    -------
-    dict
-        The row indices of each group, keyed by the ``comb_id`` and ordered by
-        it.  The indices are sorted by the MJD of the frame (frames without an
-        MJD are last), and then by the row order.
-    """
-    mjd = np.ma.filled(metadata['mjd'], np.inf)
-    srt = np.lexsort((np.arange(len(metadata)), mjd))
-    comb_id = np.asarray(metadata['comb_id'])
-    return {int(c): srt[comb_id[srt] == c] for c in np.unique(comb_id)}
-
-
-def _dark_name(exptime):
-    """
-    Return the name of the combined dark for an exposure time, which is rounded
-    to 0.1 s; e.g., ``Dark_120s.fits`` or ``Dark_4.3s.fits``.
-    """
-    return f'Dark_{round(exptime, 1):g}s.fits'
-
-
-def _flat_name(frametype, filt):
-    """
-    Return the name of the combined flat of a given type (``'skyflat'`` or
-    ``'domeflat'``) and filter; e.g., ``SkyFlat_V.fits`` or
-    ``SkyFlat_ip.fits`` for the ``i'`` filter (see :func:`~pipnick.metadata.filter_name`).
-    """
-    title = 'SkyFlat' if frametype == 'skyflat' else 'DomeFlat'
-    return f'{title}_{filter_name(filt)}.fits'
-
-
-def _group_object(metadata, indx):
-    """
-    Return the most common object name in a combination group.
-
-    Ties go to the earliest frame.
-
-    Parameters
-    ----------
-    metadata : :class:`astropy.table.Table`
-        The metadata table.
-    indx : :class:`numpy.ndarray`
-        The rows in the group, sorted by MJD; see :func:`_group_indices`.
-
-    Returns
-    -------
-    str, None
-        The object name, as given in the table, or None if it is unknown.
-    """
-    objects = [_masked_to_none(metadata['object'][i]) for i in indx]
-    # max returns the first of the most common objects, i.e., the earliest
-    return max(objects, key=objects.count)
-
-
-def table_values(metadata, indx, frametype):
-    """
-    Return the metadata table values to write to the header of an output.
-
-    The table is the authority for these values, so that edits to it (e.g., a
-    corrected object name) propagate to the reduced images.
-
-    Parameters
-    ----------
-    metadata : :class:`astropy.table.Table`
-        The metadata table.
-    indx : :class:`numpy.ndarray`
-        The rows in the group, sorted by MJD; see :func:`_group_indices`.
-    frametype : str
-        The frame type of the group.
-
-    Returns
-    -------
-    dict
-        The values keyed by the quantity (``'filter'`` and ``'exptime'`` for
-        all frame types, and ``'object'``, ``'ra'``, ``'dec'``, and
-        ``'airmass'`` for science frames).  Unknown values are None.  The
-        object is the most common in the group (see :func:`_group_object`),
-        the exposure time is the median, the airmass is the mean (of the
-        frames with an airmass), and the other values are from the earliest
-        frame.
-    """
-    exptimes = [_exptime(metadata, i) for i in indx]
-    values = {
-        'filter': _masked_to_none(metadata['filter'][indx[0]]),
-        'exptime': None if None in exptimes else float(np.median(exptimes))
-    }
-    if frametype == 'science':
-        values['object'] = _group_object(metadata, indx)
-        airmass = [_masked_to_none(metadata['airmass'][i]) for i in indx]
-        airmass = [float(a) for a in airmass if a is not None]
-        values['airmass'] = None if len(airmass) == 0 else float(np.mean(airmass))
-        values['ra'] = _masked_to_none(metadata['ra'][indx[0]])
-        values['dec'] = _masked_to_none(metadata['dec'][indx[0]])
-    return values
 
 
 def _apply_table_values(ccd, values, camera):
@@ -531,7 +198,8 @@ def _apply_table_values(ccd, values, camera):
         The output image, with a :class:`astropy.io.fits.Header` as its
         ``meta``.  Modified in place.
     values : dict
-        The table values; see :func:`table_values`.
+        The table values; see
+        :meth:`~pipnick.datamodel.dataset.DataSet.table_values`.
     camera : :class:`~pipnick.cameras.cameras.NickelCamera`
         The camera used to obtain the data.
     """
@@ -555,94 +223,6 @@ def _apply_table_values(ccd, values, camera):
                 ccd.meta[orig] = (original, f'{key} in the raw header')
         for k in ([standard] if key is None or key == standard else [key, standard]):
             ccd.meta[k] = value
-
-
-def _science_name(metadata, indx, comb_id):
-    """
-    Return the name of the output science image for a combination group.
-
-    The name is ``<object>_<filter>_C<comb_id>_<date>.fits``, where
-    ``<object>`` is the most common object name in the group (ties go to the
-    earliest frame), ``<filter>`` is the filter of the earliest frame (all
-    frames in a group have the same filter; see :func:`check_comb_groups` and
-    :func:`~pipnick.metadata.filter_name`), ``<comb_id>`` is zero-padded to three digits, and
-    ``<date>`` is the UT date of the earliest frame.
-
-    Parameters
-    ----------
-    metadata : :class:`astropy.table.Table`
-        The metadata table.
-    indx : :class:`numpy.ndarray`
-        The rows in the group, sorted by MJD; see :func:`_group_indices`.
-    comb_id : int
-        The combination group.
-
-    Returns
-    -------
-    str
-        The file name.
-    """
-    obj = _group_object(metadata, indx)
-    obj = '' if obj is None else safe_name(obj)
-    date = _masked_to_none(metadata['date'][indx[0]])
-    date = 'nodate' if date is None else str(date).split('T')[0]
-    filt = filter_name(_filter(metadata, indx[0]))
-    return f'{"unknown" if len(obj) == 0 else obj}_{filt}_C{comb_id:03d}_{date}.fits'
-
-
-def plan_products(metadata, rdxdir):
-    """
-    Set the output file for each combination group to be reduced.
-
-    Parameters
-    ----------
-    metadata : :class:`astropy.table.Table`
-        The metadata table, with valid combination groups; see
-        :func:`check_comb_groups`.
-    rdxdir : :class:`pathlib.Path`
-        The reduction directory.
-
-    Returns
-    -------
-    list
-        A dictionary for each group to be reduced, ordered by ``comb_id``, with
-        the frame type, the ``comb_id``, the row indices of its frames (see
-        :func:`_group_indices`), its filter and exposure time (from its first
-        frame), and the path to its output file.
-
-    Raises
-    ------
-    :exc:`~pipnick.pkg.exceptions.PipnickDataModelError`
-        Raised if two groups would have the same output file, e.g., for flats
-        with filter names that only differ in characters that cannot be used
-        in a file name.
-    """
-    products = []
-    for comb_id, indx in _group_indices(metadata).items():
-        frametype = metadata['frametype'][indx[0]]
-        product = {
-            'frametype': frametype, 'comb_id': comb_id, 'indx': indx,
-            'filter': _filter(metadata, indx[0]), 'exptime': _exptime(metadata, indx[0])
-        }
-        if frametype == 'bias':
-            name = 'Bias.fits'
-        elif frametype == 'dark':
-            name = _dark_name(product['exptime'])
-        elif frametype in ['domeflat', 'skyflat']:
-            name = _flat_name(frametype, product['filter'])
-        elif frametype == 'science':
-            name = _science_name(metadata, indx, comb_id)
-        else:
-            continue
-        product['file'] = rdxdir / name
-        products.append(product)
-    names = [p['file'].name for p in products]
-    duplicates = sorted(set(n for n in names if names.count(n) > 1))
-    if len(duplicates) > 0:
-        raise PipnickDataModelError(
-            f'More than one combination group would be written to: {", ".join(duplicates)}.'
-        )
-    return products
 
 
 def _find_products(rdxdir):
@@ -825,9 +405,9 @@ def _select_flat(flats, filt):
     return None
 
 
-def _check_pointing(metadata, indx, camera):
+def _check_pointing(dataset, product):
     """
-    Warn if the frames in a group have different pointings.
+    Warn if the frames of a product have different pointings.
 
     The frames are combined without registration, so a warning is issued if
     the header coordinates of any frame are more than 3 binned pixels from
@@ -835,20 +415,23 @@ def _check_pointing(metadata, indx, camera):
 
     Parameters
     ----------
-    metadata : :class:`astropy.table.Table`
-        The metadata table.
-    indx : :class:`numpy.ndarray`
-        The rows in the group.
-    camera : :class:`~pipnick.cameras.cameras.NickelCamera`
-        The camera used to obtain the data, which sets the plate scale.
+    dataset : :class:`~pipnick.datamodel.dataset.DataSet`
+        The data set.
+    product : :class:`~pipnick.datamodel.dataset.Product`
+        The product.
     """
+    metadata = dataset.table
+    indx = product.indx
+    camera = dataset.camera
     if len(indx) < 2:
         return
-    ra = [_masked_to_none(metadata['ra'][i]) for i in indx]
-    dec = [_masked_to_none(metadata['dec'][i]) for i in indx]
-    if None in ra or None in dec:
+    ra = metadata['ra'][indx]
+    dec = metadata['dec'][indx]
+    if np.any(np.ma.getmaskarray(ra)) or np.any(np.ma.getmaskarray(dec)):
         log.warning('Cannot check the pointing of frames without coordinates.')
         return
+    ra = list(ra)
+    dec = list(dec)
     try:
         coo = SkyCoord(ra, dec, unit=(units.hourangle, units.deg))
     except ValueError:
@@ -1199,7 +782,7 @@ def _report_bias_stats(frames, files):
     )
 
 
-def _reduce_calibration(product, metadata, raw, tag, overwrite, camera, bias=None):
+def _reduce_calibration(product, dataset, overwrite, bias=None):
     """
     Construct a combined calibration frame, unless it is up to date.
 
@@ -1208,18 +791,12 @@ def _reduce_calibration(product, metadata, raw, tag, overwrite, camera, bias=Non
 
     Parameters
     ----------
-    product : dict
-        The combination group; see :func:`plan_products`.
-    metadata : :class:`astropy.table.Table`
-        The metadata table.
-    raw : list
-        The path to the raw file for each row in the metadata table.
-    tag : str
-        The setup tag; see :func:`~pipnick.metadata.setup_tag`.
+    product : :class:`~pipnick.datamodel.dataset.Product`
+        The combination group.
+    dataset : :class:`~pipnick.datamodel.dataset.DataSet`
+        The data set.
     overwrite : bool
         Reconstruct the calibration even if it is up to date.
-    camera : :class:`~pipnick.cameras.cameras.NickelCamera`
-        The camera used to obtain the data.
     bias : dict, optional
         The bias, as returned by this function, used for darks and flats.
 
@@ -1231,21 +808,22 @@ def _reduce_calibration(product, metadata, raw, tag, overwrite, camera, bias=Non
         its image data (``ccd``), which is None until needed if the
         calibration was up to date; see :func:`_calibration_data`.
     """
-    frametype = product['frametype']
-    files = [raw[i] for i in product['indx']]
+    frametype = product.frametype
+    tag = dataset.tag
+    files = dataset.raw_files(product)
     raw_hash = names_hash(files)
-    calib = {'file': product['file'], 'hash': raw_hash, 'ccd': None}
+    calib = {'file': product.file, 'hash': raw_hash, 'ccd': None}
     calibs = {} if frametype == 'bias' else {'bias': bias}
-    values = table_values(metadata, product['indx'], frametype)
+    values = dataset.table_values(product)
     table_hash = values_hash(values)
     update, reason = _needs_update(
-        product['file'], tag, raw_hash, table_hash, _calib_hashes(calibs), overwrite
+        product.file, tag, raw_hash, table_hash, _calib_hashes(calibs), overwrite
     )
     if not update:
-        log.info(f'{product["file"].name} is up to date.')
+        log.info(f'{product.name} is up to date.')
         return calib
 
-    log.info(f'Reprocessing {product["file"].name} ({reason}) from {len(files)} frames.')
+    log.info(f'Reprocessing {product.name} ({reason}) from {len(files)} frames.')
     frames = process_frames(
         files, bias=_calibration_data(calibs.get('bias')), flag_cosmics=False,
         photon_noise=frametype != 'bias'
@@ -1263,16 +841,16 @@ def _reduce_calibration(product, metadata, raw, tag, overwrite, camera, bias=Non
         ccd.meta['OBJECT'] = 'Dark'
     else:
         ccd.meta['OBJECT'] = 'SkyFlat' if frametype == 'skyflat' else 'DomeFlat'
-    _add_provenance(ccd, tag, product['comb_id'], files, raw_hash, calibs)
-    _apply_table_values(ccd, values, camera)
+    _add_provenance(ccd, tag, product.comb_id, files, raw_hash, calibs)
+    _apply_table_values(ccd, values, dataset.camera)
     ccd.meta['PNTABH'] = (table_hash, 'Hash of the metadata table values')
-    ccd.write(product['file'], overwrite=True)
-    log.info(f'Saved {product["file"]}')
+    ccd.write(product.file, overwrite=True)
+    log.info(f'Saved {product.file}')
     calib['ccd'] = ccd
     return calib
 
 
-def _reduce_science(product, metadata, raw, tag, overwrite, camera, bias=None, flat=None):
+def _reduce_science(product, dataset, overwrite, bias=None, flat=None):
     """
     Process and combine a group of science frames, unless the output is up to
     date.
@@ -1285,38 +863,32 @@ def _reduce_science(product, metadata, raw, tag, overwrite, camera, bias=None, f
 
     Parameters
     ----------
-    product : dict
-        The combination group; see :func:`plan_products`.
-    metadata : :class:`astropy.table.Table`
-        The metadata table.
-    raw : list
-        The path to the raw file for each row in the metadata table.
-    tag : str
-        The setup tag; see :func:`~pipnick.metadata.setup_tag`.
+    product : :class:`~pipnick.datamodel.dataset.Product`
+        The combination group.
+    dataset : :class:`~pipnick.datamodel.dataset.DataSet`
+        The data set.
     overwrite : bool
         Reprocess the frames even if the output is up to date.
-    camera : :class:`~pipnick.cameras.cameras.NickelCamera`
-        The camera used to obtain the data.
     bias : dict, optional
         The bias; see :func:`_reduce_calibration`.
     flat : dict, optional
         The flat; see :func:`_reduce_calibration`.
     """
-    indx = product['indx']
-    files = [raw[i] for i in indx]
+    tag = dataset.tag
+    files = dataset.raw_files(product)
     raw_hash = names_hash(files)
     calibs = {'bias': bias, 'flat': flat}
-    values = table_values(metadata, indx, 'science')
+    values = dataset.table_values(product)
     table_hash = values_hash(values)
     update, reason = _needs_update(
-        product['file'], tag, raw_hash, table_hash, _calib_hashes(calibs), overwrite
+        product.file, tag, raw_hash, table_hash, _calib_hashes(calibs), overwrite
     )
     if not update:
-        log.info(f'{product["file"].name} is up to date.')
+        log.info(f'{product.name} is up to date.')
         return
 
-    log.info(f'Reprocessing {product["file"].name} ({reason}) from {len(files)} frames.')
-    _check_pointing(metadata, indx, camera)
+    log.info(f'Reprocessing {product.name} ({reason}) from {len(files)} frames.')
+    _check_pointing(dataset, product)
     frames = process_frames(
         files, bias=_calibration_data(bias), flat=_calibration_data(flat), flag_cosmics=True
     )
@@ -1327,10 +899,10 @@ def _reduce_science(product, metadata, raw, tag, overwrite, camera, bias=None, f
                 'Some frames have no exposure time; the frames are combined without scaling.'
             )
         else:
-            scale = values['exptime'] / np.array([_exptime(metadata, i) for i in indx])
+            scale = values['exptime'] / np.array(dataset.exptimes(product))
     ccd = combine_frames(frames, scale=scale)
-    _add_provenance(ccd, tag, product['comb_id'], files, raw_hash, calibs)
-    _apply_table_values(ccd, values, camera)
+    _add_provenance(ccd, tag, product.comb_id, files, raw_hash, calibs)
+    _apply_table_values(ccd, values, dataset.camera)
     ccd.meta['PNTABH'] = (table_hash, 'Hash of the metadata table values')
-    ccd.write(product['file'], overwrite=True)
-    log.info(f'Saved {product["file"]}')
+    ccd.write(product.file, overwrite=True)
+    log.info(f'Saved {product.file}')

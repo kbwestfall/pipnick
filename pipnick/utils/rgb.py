@@ -14,12 +14,12 @@ from pathlib import Path
 import matplotlib.image
 import numpy as np
 
-from astropy.io import fits
 from astropy.stats import sigma_clipped_stats
 from astropy.visualization import LinearStretch, LogStretch, ManualInterval
 from astropy.visualization import make_lupton_rgb, make_rgb
 
 from pipnick.astrometry.fit import wcs_from_header
+from pipnick.image.io import read_reduced
 from pipnick.pkg.exceptions import PipnickDataModelError, PipnickParameterError
 
 
@@ -44,13 +44,9 @@ def read_image(path):
     wcs : :class:`astropy.wcs.WCS`
         The celestial WCS, or None if the header has none.
     """
-    with fits.open(path) as hdu:
-        data = np.asarray(hdu[0].data, dtype=float)
-        good = np.isfinite(data)
-        if 'MASK' in hdu:
-            good &= np.asarray(hdu['MASK'].data) == 0
-        wcs = wcs_from_header(hdu[0].header)
-    return np.where(good, data, 0.), good, wcs
+    data, mask, _, header = read_reduced(path)
+    good = np.isfinite(data) & np.logical_not(mask)
+    return np.where(good, data, 0.), good, wcs_from_header(header)
 
 
 def check_same_wcs(paths, wcs_list, shapes, tol=0.01):

@@ -20,9 +20,9 @@ from astropy.wcs import WCS
 from pipnick import metadata
 from pipnick.astrometry import fit, match, services
 from pipnick.astrometry.services import AstrometryNetSolver, GaiaCatalog
+from pipnick.datamodel.dataset import DataSet
 from pipnick.pipelines import astrometry
 from pipnick.pipelines.astrometry import apply_wcs, astrometry_all
-from pipnick.pipelines.reduction import load_setup, plan_products
 from pipnick.pkg.exceptions import PipnickDataModelError, PipnickError
 from pipnick.tests.test_metadata import write_andor
 
@@ -209,10 +209,11 @@ def write_field(tmp_path, images=IMAGES, stale=None):
     table = files[0]
     rdxdir = tmp_path / 'rdx'
     rdxdir.mkdir()
-    _, tbl, _, tag, _ = load_setup(table, rdxdir=rdxdir)
+    dataset = DataSet.from_file(table, rdxdir=rdxdir)
+    tbl, tag = dataset.table, dataset.tag
     truth = {}
-    for product in plan_products(tbl, rdxdir):
-        center, rotation = centers[tbl['file'][product['indx'][0]]]
+    for product in dataset.products():
+        center, rotation = centers[tbl['file'][product.indx[0]]]
         wcs = true_wcs(center, rotation)
         hdr = fits.Header({'PNSETUP': tag, 'OBJECT': 'M11'})
         mask = np.zeros(SHAPE, dtype=np.uint8)
@@ -222,8 +223,8 @@ def write_field(tmp_path, images=IMAGES, stale=None):
                 fits.PrimaryHDU(data=render(wcs, coords, flux), header=hdr),
                 fits.ImageHDU(data=mask, name='MASK')
             ]
-        ).writeto(product['file'])
-        truth[product['file'].name] = wcs
+        ).writeto(product.file)
+        truth[product.file.name] = wcs
     return table, rdxdir, truth, coords, flux
 
 

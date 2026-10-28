@@ -43,7 +43,6 @@ from pathlib import Path
 import numpy as np
 
 from astropy import units
-from astropy.coordinates import SkyCoord
 from astropy.io import fits
 from astropy.table import Table
 from astropy.time import Time
@@ -59,9 +58,10 @@ from pipnick.astrometry.qa import plot_solution
 from pipnick.astrometry.services import (
     AstrometryNetSolver, GaiaCatalog, astrometry_net_hints, icrs_header
 )
-from pipnick.pipelines.reduction import load_setup, plan_products
-from pipnick.pkg.exceptions import PipnickDataModelError, PipnickPathError
-from pipnick.pkg.paths import points_file, step_dir
+from pipnick.datamodel.dataset import DataSet
+from pipnick.image.io import read_reduced
+from pipnick.pkg.exceptions import PipnickPathError
+from pipnick.pkg.paths import points_file
 from pipnick.pkg.provenance import digest, wcs_hash
 
 
@@ -97,12 +97,15 @@ class AstrometryImage:
         cached results; see :func:`_input_hash`.
     comb_id : int, optional
         The combination group of the image.
+    image : :class:`~pipnick.datamodel.image.ReducedImage`, optional
+        The reduced image, with its product and data set.
     """
     def __init__(
         self, path, header, shape, pointing, epoch, scale, fwhm, sources, hints, input_hash,
-        comb_id=None
+        comb_id=None, image=None
     ):
         self.path = path
+        self.image = image
         self.comb_id = comb_id
         self.header = header
         self.shape = shape
@@ -387,22 +390,19 @@ def _input_hash(image_data, sources, hints, upload_image):
 def _read_image(path):
     """
     Read the data of a reduced image, with masked pixels set to 0, and its mask
-    and primary header.
+    and primary header; see :func:`~pipnick.image.io.read_reduced`.
+
+    The masked pixels are set to 0 because the detected sources (see
+    :func:`~pipnick.astrometry.detect.detect_sources`) are part of the key of
+    the cached astrometry.net results (see :func:`_input_hash`), so they must
+    not change.
     """
-    with fits.open(path, memmap=False) as hdu:
-        hdr = hdu[0].header.copy()
-        data = np.asarray(hdu[0].data, dtype=float)
-        try:
-            mask = np.asarray(hdu['MASK'].data, dtype=bool)
-        except KeyError:
-            mask = np.zeros(data.shape, dtype=bool)
+    data, mask, _, hdr = read_reduced(path)
     data[mask] = 0.
     return data, mask, hdr
 
 
-def _load_images(
-    metadata, rdxdir, tag, camera, upload_image, max_sources=100, detect_thresh=5., fwhm=None
-):
+def _load_images(dataset, upload_image, max_sources=100, detect_thresh=5., fwhm=None):
     """
     Read the reduced science images and detect their sources.
 
@@ -411,14 +411,8 @@ def _load_images(
 
     Parameters
     ----------
-    metadata : :class:`astropy.table.Table`
-        The metadata table.
-    rdxdir : :class:`pathlib.Path`
-        The reduction directory.
-    tag : str
-        The setup tag; see :func:`~pipnick.metadata.setup_tag`.
-    camera : :class:`~pipnick.cameras.cameras.NickelCamera`
-        The camera used to obtain the data.
+    dataset : :class:`~pipnick.datamodel.dataset.DataSet`
+        The data set.
     upload_image : bool
         Images will be uploaded to astrometry.net, instead of source lists.
     max_sources : int, optional
@@ -442,25 +436,15 @@ def _load_images(
         Raised if an image is from a different setup.
     """
     images = []
-    for product in plan_products(metadata, rdxdir):
-        if product['frametype'] != 'science':
-            continue
-        path = product['file']
-        if not path.is_file():
-            log.warning(f'{path.name} does not exist; reduce the data first.  Skipping.')
-            continue
+    for image in dataset.science_images():
+        path = image.path
         data, mask, hdr = _read_image(path)
-        if hdr.get('PNSETUP') != tag:
-            raise PipnickDataModelError(f'{path.name} is not from setup {tag}.')
-        i = product['indx'][0]
-        if metadata['ra'][i] is np.ma.masked or metadata['dec'][i] is np.ma.masked:
+        pointing = image.pointing
+        if pointing is None:
             log.warning(f'{path.name} has no coordinates.  Skipping.')
             continue
-        pointing = SkyCoord(
-            metadata['ra'][i], metadata['dec'][i], unit=(units.hourangle, units.deg)
-        )
-        scale = camera.plate_scale * int(metadata['xbin'][i])
-        fwhm_pix = (camera.fwhm_guess if fwhm is None else fwhm) / scale
+        scale = image.nominal_scale
+        fwhm_pix = (dataset.camera.fwhm_guess if fwhm is None else fwhm) / scale
         sources = detect_sources(
             data, mask=mask, fwhm=fwhm_pix, thresh=detect_thresh, nmax=max_sources
         )
@@ -469,9 +453,9 @@ def _load_images(
         hints = astrometry_net_hints(pointing, radius, scale)
         images.append(
             AstrometryImage(
-                path, hdr, data.shape, pointing, Time(metadata['mjd'][i], format='mjd').jyear,
-                scale, fwhm_pix, sources, hints, _input_hash(data, sources, hints, upload_image),
-                comb_id=product['comb_id']
+                path, hdr, data.shape, pointing, image.epoch, scale, fwhm_pix, sources, hints,
+                _input_hash(data, sources, hints, upload_image), comb_id=image.product.comb_id,
+                image=image
             )
         )
         log.info(f'{path.name}: detected {len(sources)} sources.')
@@ -1495,15 +1479,14 @@ def astrometry_all(
     :exc:`~pipnick.pkg.exceptions.PipnickPathError`
         Raised if the reduction directory does not exist.
     """
-    metafile, metadata, _rdxdir, tag, camera = load_setup(table, rdxdir=rdxdir)
-    if not _rdxdir.is_dir():
-        raise PipnickPathError(f'{_rdxdir} does not exist; reduce the data first.')
-    astro_dir = step_dir(_rdxdir, 'astrometry')
-    log.info(f'Astrometric calibration of the images in {_rdxdir}')
+    dataset = DataSet.from_file(table, rdxdir=rdxdir)
+    if not dataset.rdxdir.is_dir():
+        raise PipnickPathError(f'{dataset.rdxdir} does not exist; reduce the data first.')
+    astro_dir = dataset.outdir('astrometry')
+    log.info(f'Astrometric calibration of the images in {dataset.rdxdir}')
 
     _images = _load_images(
-        metadata, _rdxdir, tag, camera, upload_image, max_sources=max_sources,
-        detect_thresh=detect_thresh, fwhm=fwhm
+        dataset, upload_image, max_sources=max_sources, detect_thresh=detect_thresh, fwhm=fwhm
     )
     if len(_images) == 0:
         log.warning('No reduced science images to calibrate.')
