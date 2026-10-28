@@ -23,7 +23,8 @@ from astropy.time import Time
 from pipnick import cameras, log
 from pipnick.datamodel.image import ReducedImage
 from pipnick.metadata import (
-    build_metadata, filter_name, frame_path, safe_name, setup_tag, update_metadata_meta
+    build_metadata, filter_name, frame_path, read_metadata, safe_name, setup_tag,
+    update_metadata_meta
 )
 from pipnick.pkg.exceptions import PipnickDataModelError, PipnickPathError
 from pipnick.pkg.paths import step_dir
@@ -116,7 +117,7 @@ class DataSet:
         self._products = None
 
     @classmethod
-    def from_file(cls, table, rdxdir=None, check_mosaics=False):
+    def from_file(cls, table, rdxdir=None, check_mosaics=False, read_only=False):
         """
         Read and check a per-setup metadata file.
 
@@ -133,6 +134,9 @@ class DataSet:
             also saved; see :func:`~pipnick.metadata.build_metadata`.
         check_mosaics : bool, optional
             Also check the mosaic labels; see :func:`check_mosaic_groups`.
+        read_only : bool, optional
+            Never change the metadata file, e.g., to save the reduction
+            directory; see :func:`reduction_dir`.
 
         Returns
         -------
@@ -150,7 +154,10 @@ class DataSet:
         _table = Path(table).absolute()
         if not _table.is_file():
             raise PipnickPathError(f'{_table} does not exist.')
-        metafile, metadata = build_metadata(filename=_table, rdxdir=rdxdir)
+        if read_only:
+            metafile, metadata = _table, read_metadata(_table)
+        else:
+            metafile, metadata = build_metadata(filename=_table, rdxdir=rdxdir)
         check_single_setup(metadata, metafile)
         if len(metadata) == 0:
             raise PipnickDataModelError(f'{metafile} has no frames to reduce.')
@@ -160,7 +167,9 @@ class DataSet:
         tag = setup_tag(metadata.meta['setups'][metadata['setup'][0]])
         camera = cameras.get_camera(metadata.meta['camera'])
 
-        if 'rdxdir' in metadata.meta:
+        if read_only:
+            _rdxdir = reduction_dir(_table, rdxdir=rdxdir)
+        elif 'rdxdir' in metadata.meta:
             _rdxdir = Path(metadata.meta['rdxdir'])
         else:
             _rdxdir = Path(metadata.meta['rawdir']).absolute().parent
@@ -287,6 +296,39 @@ class DataSet:
             other values are from the earliest frame.
         """
         return _table_values(self.table, product.indx, product.frametype)
+
+    def calibrations(self, product):
+        """
+        Return the calibrations used to reduce a product, as the reduction
+        selects them: the bias for darks, flats, and science frames, and the
+        sky flat of the same filter (or the dome flat, if there is no sky
+        flat) for science frames.
+
+        Parameters
+        ----------
+        product : :class:`Product`
+            The product.
+
+        Returns
+        -------
+        dict
+            The calibration :class:`Product` objects, keyed by their type
+            (``'bias'``, ``'flat'``), with None for any that the data set does
+            not have.
+        """
+        if product.frametype == 'bias':
+            return {}
+        bias = self.products('bias')
+        calibs = {'bias': None if len(bias) == 0 else bias[0]}
+        if product.frametype != 'science':
+            return calibs
+        calibs['flat'] = None
+        for frametype in ['skyflat', 'domeflat']:
+            flats = [p for p in self.products(frametype) if p.filter == product.filter]
+            if len(flats) > 0:
+                calibs['flat'] = flats[0]
+                break
+        return calibs
 
     def raw_files(self, product):
         """
@@ -425,6 +467,41 @@ class DataSet:
         :func:`~pipnick.pkg.paths.step_dir`.
         """
         return step_dir(self.rdxdir, step)
+
+
+def reduction_dir(table, rdxdir=None):
+    """
+    Return the reduction directory of a per-setup metadata file.
+
+    Unlike :meth:`DataSet.from_file`, this only reads the metadata of the
+    table, and never changes the file; it is used to find the log directory
+    before a step starts.
+
+    Parameters
+    ----------
+    table : str, :class:`pathlib.Path`
+        A per-setup metadata file.
+    rdxdir : str, :class:`pathlib.Path`, optional
+        The reduction directory given by the user, which takes precedence.
+
+    Returns
+    -------
+    :class:`pathlib.Path`
+        The reduction directory: ``rdxdir``, the directory saved in the table,
+        or the parent of its raw directory; see :meth:`DataSet.from_file`.
+        None if it cannot be determined (e.g., the table does not exist).
+    """
+    if rdxdir is not None:
+        return Path(rdxdir).absolute()
+    _table = Path(table)
+    if not _table.is_file():
+        return None
+    meta = read_metadata(_table).meta
+    if 'rdxdir' in meta:
+        return Path(meta['rdxdir'])
+    if 'rawdir' in meta:
+        return Path(meta['rawdir']).absolute().parent
+    return None
 
 
 def night(mjd):

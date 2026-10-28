@@ -11,6 +11,7 @@ Submodules
    pipnick.pkg.logger
    pipnick.pkg.paths
    pipnick.pkg.provenance
+   pipnick.pkg.report
 
 Module contents
 ---------------

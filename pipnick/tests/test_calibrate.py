@@ -24,6 +24,7 @@ from pipnick.photometry.calibrate import (
 from pipnick.pipelines import calibrate
 from pipnick.pkg.exceptions import PipnickDataModelError, PipnickParameterError
 from pipnick.pkg.provenance import image_hash
+from pipnick.pkg.version import version
 from pipnick.tests.test_metadata import write_andor
 
 # The standards: well-observed stars of Landolt field SA 110
@@ -441,6 +442,9 @@ def test_fallback(tmp_path, caplog):
         )
     cfile = calibration_file(rdxdir)
     content, _ = calibrate.read_calibration(cfile)
+    assert content['calibration']['pipnick_version'] == version, (
+        'The calibration file should record the pipnick version'
+    )
     nominal = extinction.nominal_extinction(
         DataSet.from_file(table, rdxdir=rdxdir).camera, ['B', 'V']
     )
@@ -663,6 +667,7 @@ def test_apply(tmp_path, caplog):
         'The header should record the extinction source and the color'
     )
     assert hdr['PHOTZP'] == hdr['PNCALZP'], 'PHOTZP should equal PNCALZP'
+    assert hdr['PNCALVER'] == version, 'The calibration should record the pipnick version'
     assert np.all(fits.getdata(path) == 0.), 'The pixels should not be changed'
     assert image_hash(hdr) == phot.meta['image_hash'], (
         'The photometry should still see the image as up to date'

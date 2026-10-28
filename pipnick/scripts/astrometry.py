@@ -110,11 +110,14 @@ class Astrometry(scriptbase.ScriptBase):
 
     @classmethod
     def main(cls, args):
+        from pipnick.datamodel.dataset import reduction_dir
         from pipnick.pipelines.astrometry import astrometry_all
+        from pipnick.pkg.report import StepReport
 
         # Initialize logger
-        cls.init_log(args)
+        cls.init_log(args, log_dir=cls.log_dir(reduction_dir(args.raw_table, args.rdxdir)))
 
+        report = StepReport('ASTROMETRY')
         astrometry_all(
             args.raw_table, rdxdir=args.rdxdir, resolve=args.resolve,
             upload_image=args.upload_image, dry_run=args.dry_run,
@@ -122,5 +125,7 @@ class Astrometry(scriptbase.ScriptBase):
             min_matches=args.min_matches, max_rms=args.max_rms, search=args.search,
             wide_search=args.wide_search,
             wide_min_matches=args.wide_min_matches, images=args.images, qa=args.qa,
-            max_sources=args.max_sources, detect_thresh=args.detect_thresh, fwhm=args.fwhm
+            max_sources=args.max_sources, detect_thresh=args.detect_thresh, fwhm=args.fwhm,
+            report=report
         )
+        return report.exit_status

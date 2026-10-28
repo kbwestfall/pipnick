@@ -110,11 +110,16 @@ class Mosaic(scriptbase.ScriptBase):
 
     @classmethod
     def main(cls, args):
+        from pipnick.datamodel.dataset import reduction_dir
         from pipnick.pipelines.mosaic import mosaic_all
+        from pipnick.pkg.report import StepReport
 
-        # Initialize logger
-        cls.init_log(args)
+        # Initialize logger: in the output directory, or the reduction
+        # directory of the (first) table
+        root = reduction_dir(args.raw_table[0]) if args.outdir is None else args.outdir
+        cls.init_log(args, log_dir=cls.log_dir(root))
 
+        report = StepReport('MOSAICS')
         mosaic_all(
             args.raw_table, outdir=args.outdir, mosaics=args.mosaics, psf_match=args.psf_match,
             kernel=args.kernel, psf_margin=args.psf_margin, scale=args.scale,
@@ -123,5 +128,6 @@ class Mosaic(scriptbase.ScriptBase):
             match_background=args.match_background,
             reproject=args.reproject, pixel_scale=args.pixel_scale,
             rej=None if args.no_reject else args.rej, rej_frac=args.rej_frac,
-            overwrite=args.overwrite, qa=args.qa
+            overwrite=args.overwrite, qa=args.qa, report=report
         )
+        return report.exit_status

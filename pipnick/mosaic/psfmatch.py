@@ -152,7 +152,7 @@ def circular_taper(kernel, start=0.85):
     return tapered / np.sum(tapered)
 
 
-def image_kernel(psf, target_fwhm, target_beta, method='moffat'):
+def image_kernel(psf, target_fwhm, target_beta, method='moffat', name=None):
     """
     Compute the kernel that matches the PSF of an image to the target.
 
@@ -169,6 +169,8 @@ def image_kernel(psf, target_fwhm, target_beta, method='moffat'):
         :func:`matching_kernel`), with a Gaussian kernel as the fallback if it
         fails; or ``'gaussian'``: the Gaussian kernel (see
         :func:`gaussian_kernel`).
+    name : str, optional
+        The name of the image, used in messages.
 
     Returns
     -------
@@ -195,8 +197,8 @@ def image_kernel(psf, target_fwhm, target_beta, method='moffat'):
         kernel, residual = matching_kernel(image, target)
         if kernel is None:
             log.warning(
-                f'The Moffat matching kernel failed (residual {residual:.3f}); using a Gaussian '
-                'kernel instead.'
+                f'The Moffat matching kernel{"" if name is None else f" of {name}"} failed '
+                f'(residual {residual:.3f}); using a Gaussian kernel instead.'
             )
             used = 'gaussian (fallback)'
         else:

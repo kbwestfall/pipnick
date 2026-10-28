@@ -63,6 +63,8 @@ from pipnick.image.io import read_reduced
 from pipnick.pkg.exceptions import PipnickPathError
 from pipnick.pkg.paths import points_file
 from pipnick.pkg.provenance import digest, wcs_hash
+from pipnick.pkg.report import StepReport
+from pipnick.pkg.version import version
 
 
 class AstrometryImage:
@@ -275,6 +277,7 @@ def _solution_header(
     """
     hdr = wcs.to_header(relax=True)
     hdr['PNASTMTH'] = (method, 'Astrometric solution method')
+    hdr['PNASTVER'] = (version, 'pipnick version (astrometry)')
     hdr['PNASTWH'] = (wcs_hash(wcs), 'Hash of the astrometric solution')
     if stats is not None:
         hdr['PNASTNPT'] = (stats['npts'], 'Number of sources used in the solution')
@@ -436,7 +439,9 @@ def _load_images(dataset, upload_image, max_sources=100, detect_thresh=5., fwhm=
         Raised if an image is from a different setup.
     """
     images = []
-    for image in dataset.science_images():
+    reduced = dataset.science_images()
+    for k, image in enumerate(reduced):
+        progress = f'[{k + 1}/{len(reduced)}]'
         path = image.path
         data, mask, hdr = _read_image(path)
         pointing = image.pointing
@@ -458,7 +463,7 @@ def _load_images(dataset, upload_image, max_sources=100, detect_thresh=5., fwhm=
                 image=image
             )
         )
-        log.info(f'{path.name}: detected {len(sources)} sources.')
+        log.info(f'{progress} {path.name}: detected {len(sources)} sources.')
         if len(sources) < 10:
             log.warning(
                 f'Only {len(sources)} sources were detected in {path.name}, which may be hard to '
@@ -881,6 +886,7 @@ def _summarize(images, astro_dir):
     for name in ['nmatch', 'rms', 'pointing_error']:
         tbl[name] = np.ma.MaskedArray(tbl[name], mask=np.asarray(tbl[name]) < 0)
     astro_dir.mkdir(parents=True, exist_ok=True)
+    tbl.meta['pipnick_version'] = version
     tbl.write(astro_dir / 'summary.ecsv', format='ascii.ecsv', overwrite=True)
     columns = ['image', 'status', 'method', 'reference', 'nmatch', 'rms', 'pointing_error']
     log.info(
@@ -1381,7 +1387,7 @@ def astrometry_all(
     table, rdxdir=None, solver=None, catalog=None, api_key=None, resolve=False,
     upload_image=False, dry_run=False, max_submissions=None, group_radius=1., min_matches=4,
     max_rms=0.3, search=60., wide_search=10., wide_min_matches=10, images=None, qa=False,
-    max_sources=100, detect_thresh=5., fwhm=None
+    max_sources=100, detect_thresh=5., fwhm=None, report=None
 ):
     """
     Find the astrometric solutions of the reduced science images.
@@ -1461,6 +1467,11 @@ def astrometry_all(
     fwhm : float, optional
         The FWHM of the sources in arcsec, for their detection.  If None, the
         typical value for the camera is used.
+    report : :class:`~pipnick.pkg.report.StepReport`, optional
+        Collects the problems of the astrometry for its closing verdict: the
+        unsolved images, and solutions with a large RMS (see
+        :meth:`~pipnick.cameras.cameras.NickelCamera.expected_range`).  If
+        None, a new one is used.
 
     Changing ``max_sources``, ``detect_thresh``, or ``fwhm`` changes the
     sources that would be submitted, so cached astrometry.net results for the
@@ -1479,9 +1490,11 @@ def astrometry_all(
     :exc:`~pipnick.pkg.exceptions.PipnickPathError`
         Raised if the reduction directory does not exist.
     """
+    _report = StepReport('ASTROMETRY') if report is None else report
     dataset = DataSet.from_file(table, rdxdir=rdxdir)
     if not dataset.rdxdir.is_dir():
         raise PipnickPathError(f'{dataset.rdxdir} does not exist; reduce the data first.')
+    _report.check_version(dataset.metafile.name, dataset.table.meta.get('pipnick_version'))
     astro_dir = dataset.outdir('astrometry')
     log.info(f'Astrometric calibration of the images in {dataset.rdxdir}')
 
@@ -1489,7 +1502,8 @@ def astrometry_all(
         dataset, upload_image, max_sources=max_sources, detect_thresh=detect_thresh, fwhm=fwhm
     )
     if len(_images) == 0:
-        log.warning('No reduced science images to calibrate.')
+        _report.attention('There are no reduced science images to calibrate.')
+        _report.finish('no images.', next_step=f'pipnick_reduce -t {dataset.metafile}')
         return []
     if images is not None:
         _select(_images, images)
@@ -1501,6 +1515,9 @@ def astrometry_all(
     for image in _images:
         if not image.selected and image.status != 'solved':
             image.status = 'skipped'
+        if image.status == 'solved':
+            # An existing solution, restored above
+            _report.check_version(image.name, image.header.get('PNASTVER'))
     _log_pointing_offset(_images)
     groups = group_by_pointing(_images, group_radius)
 
@@ -1508,6 +1525,11 @@ def astrometry_all(
         _report_dry_run(_images, groups, astro_dir)
         if qa:
             _write_qa(_images, astro_dir)
+        _report.note('This was a dry run: nothing was submitted to astrometry.net.')
+        _report.finish(
+            f'dry run of {len(_images)} images.',
+            next_step=f'pipnick_astrometry -t {dataset.metafile}'
+        )
         return [image.path for image in _images if image.status == 'solved']
 
     session = _Session(
@@ -1544,10 +1566,26 @@ def astrometry_all(
     methods = {}
     for image in solved:
         methods[image.method] = methods.get(image.method, 0) + 1
-    log.info(
-        f'Solved {len(solved)} of {len(_images)} images ('
+    expected = dataset.camera.expected_range('astrometric_rms')
+    for image in solved:
+        if image.header.get('PNASTRMS') is not None:
+            _report.check_range(
+                f'{image.name}: the RMS of the astrometric solution',
+                float(image.header['PNASTRMS']), expected, ' arcsec',
+                advice='Check the QA figure (--qa), and consider solving it again (--resolve).'
+            )
+    unsolved = [image.name for image in _images if image.status not in ['solved', 'skipped']]
+    if len(unsolved) > 0:
+        _report.attention(
+            f'{len(unsolved)} image(s) are not solved or pending ({", ".join(unsolved)}); see '
+            'the reasons and suggestions above.', warn=False
+        )
+    _report.finish(
+        f'{len(solved)} of {len(_images)} images solved ('
         + ', '.join(f'{n} {m}' for m, n in sorted(methods.items()))
-        + f'), with {session.nsubmitted} astrometry.net submissions.'
+        + f'), with {session.nsubmitted} astrometry.net submissions; summary in '
+        'astrometry/summary.ecsv.',
+        next_step=f'pipnick_photometry -t {dataset.metafile}'
     )
     return [image.path for image in solved]
 

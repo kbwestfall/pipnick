@@ -12,6 +12,7 @@ from astropy.utils import iers
 
 from pipnick import cameras, metadata
 from pipnick.pkg.exceptions import PipnickDataModelError, PipnickPathError
+from pipnick.pkg.version import version
 
 
 def write_c2(path, **kwargs):
@@ -392,6 +393,9 @@ def test_split_files(tmp_path):
     rawdir = tmp_path / 'raw'
     write_split_night(rawdir)
     files, used = metadata.build_metadata(rawdir=rawdir, filename=tmp_path / 'n3.ecsv', split=True)
+    assert all(
+        metadata.read_metadata(f).meta['pipnick_version'] == version for f in files
+    ), 'Each table should record the pipnick version'
 
     names = sorted(f.name for f in files)
     expected = [

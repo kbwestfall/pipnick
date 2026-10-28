@@ -145,8 +145,8 @@ class PipnickLogger(logging.Logger):
             Stream for logging messages, which defaults to ``sys.stderr``.
         log_file
             Name for a log file.  If None, logging is only recorded to the
-            console.  **If the file provided already exists, it will be
-            overwritten.**
+            console.  The file must not exist: logs are never overwritten or
+            appended to.  Its directory is created if necessary.
         log_file_level
             The logging level specific to the log file.  If None, adopt the
             console logging level.
@@ -208,7 +208,9 @@ class PipnickLogger(logging.Logger):
             if log_file_level is None:
                 log_file_level = level
             self.log_file = Path(log_file).absolute()
-            self.fh = logging.FileHandler(str(self.log_file), mode='w')
+            self.log_file.parent.mkdir(parents=True, exist_ok=True)
+            # Exclusive creation: an existing log is never overwritten
+            self.fh = logging.FileHandler(str(self.log_file), mode='x')
             self.fh.setFormatter(FileFormatter())
             self.fh.setLevel(log_file_level)
             self.addHandler(self.fh)

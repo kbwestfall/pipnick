@@ -100,6 +100,15 @@ bias_exptime_max = 1.0          # Frames mislabeled as biases can be biases up t
 min_illumination = 1000         # Minimum level of a flat above bias_level
 max_saturated_fraction = 0.1    # Maximum fraction of saturated data pixels
 
+[expected]
+# The expected values of measurements, used only to judge them in the logs
+# and summaries; frames are never rejected by them.  The expected bias level is
+# bias_level in [quality], and the read noise is compared with the nominal
+# value of the readout.
+readnoise_tolerance = 0.25      # Fractional tolerance of the measured read noise
+fwhm = [0.8, 3.5]               # arcsec; typical Mt. Hamilton seeing is 1.2-2.5 arcsec
+astrometric_rms = 0.5           # arcsec; maximum RMS of an astrometric solution
+
 [frametypes]
 default = "science"
 

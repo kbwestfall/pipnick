@@ -66,8 +66,10 @@ class RGB(scriptbase.ScriptBase):
             check_same_wcs, color_image, read_image, write_color_image
         )
 
-        # Initialize logger
-        cls.init_log(args)
+        from pathlib import Path
+
+        # Initialize logger, next to the output image
+        cls.init_log(args, log_dir=cls.log_dir(Path(args.ofile).absolute().parent))
 
         paths = [args.red, args.green, args.blue]
         images = [read_image(p) for p in paths]

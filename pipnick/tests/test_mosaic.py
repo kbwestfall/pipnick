@@ -26,6 +26,7 @@ from pipnick.photometry.moffat import fwhm_to_gamma
 from pipnick.pipelines import mosaic
 from pipnick.pkg.exceptions import PipnickDataModelError, PipnickParameterError
 from pipnick.pkg.provenance import image_hash
+from pipnick.pkg.version import version
 from pipnick.tests.test_metadata import write_andor
 
 SHAPE = (160, 160)
@@ -386,6 +387,9 @@ def test_mosaic(tmp_path, caplog):
         'There should be one mosaic per filter'
     )
     hdus = {f.stem: fits.open(f) for f in outputs}
+    assert hdus['M11_V'][0].header['PNVERS'] == version, (
+        'The mosaic should record the pipnick version'
+    )
     assert hdus['M11_V'][0].data.shape == hdus['M11_R'][0].data.shape, (
         'The mosaics of a WCS group should have the same shape'
     )

@@ -296,3 +296,22 @@ def test_andor_classify(kwargs, frametype):
     assert andor.classify(andor_header(**kwargs)) == frametype, (
         f'A frame with {kwargs} should be classified as {frametype}'
     )
+
+
+def test_expected_range():
+    camera = cameras.get_camera('NickelAndor')
+    assert camera.expected_range('bias_level') == (280., 400.), (
+        'The expected bias level should be the bias level of the quality checks'
+    )
+    lo, hi = camera.expected_range('readnoise', nominal=4.)
+    assert np.isclose(lo, 3.) and np.isclose(hi, 5.), (
+        'The expected read noise should be the nominal value within the tolerance'
+    )
+    assert camera.expected_range('readnoise') is None, (
+        'The read noise cannot be checked without its nominal value'
+    )
+    assert camera.expected_range('astrometric_rms')[0] is None, (
+        'The astrometric RMS should only have a maximum'
+    )
+    with pytest.raises(PipnickParameterError):
+        camera.expected_range('sky')

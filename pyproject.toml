@@ -80,6 +80,7 @@ pipnick_photometry = "pipnick.scripts.photometry:Photometry.entry_point"
 pipnick_calibrate = "pipnick.scripts.calibrate:Calibrate.entry_point"
 pipnick_mosaic = "pipnick.scripts.mosaic:Mosaic.entry_point"
 pipnick_rgb = "pipnick.scripts.rgb:RGB.entry_point"
+pipnick_status = "pipnick.scripts.status:Status.entry_point"
 
 [build-system]
 requires = [

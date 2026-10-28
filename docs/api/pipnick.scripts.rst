@@ -15,6 +15,7 @@ Submodules
    pipnick.scripts.reduce
    pipnick.scripts.rgb
    pipnick.scripts.scriptbase
+   pipnick.scripts.status
    pipnick.scripts.version
 
 Module contents

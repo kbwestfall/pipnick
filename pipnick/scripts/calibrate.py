@@ -144,10 +144,13 @@ class Calibrate(scriptbase.ScriptBase):
 
     @classmethod
     def main(cls, args):
+        from pipnick.datamodel.dataset import reduction_dir
         from pipnick.pipelines.calibrate import calibrate_all, parse_assignments, parse_fix
+        from pipnick.pkg.report import StepReport
 
         # Initialize logger
-        cls.init_log(args)
+        cls.init_log(args, log_dir=cls.log_dir(reduction_dir(args.raw_table, args.rdxdir)))
+        report = StepReport('CALIBRATION')
 
         default_color = {
             k: float(v) for k, v in parse_assignments(args.default_color, 'color').items()
@@ -162,5 +165,7 @@ class Calibrate(scriptbase.ScriptBase):
             maxiter=args.maxiter, min_stars=args.min_stars,
             min_airmass_span=args.min_airmass_span, min_color_span=args.min_color_span,
             force=args.force, fallback=not args.no_fallback, drift_warn=args.drift_warn,
-            qa=args.qa, overwrite=args.overwrite, apply=args.apply, default_color=default_color
+            qa=args.qa, overwrite=args.overwrite, apply=args.apply, default_color=default_color,
+            report=report
         )
+        return report.exit_status

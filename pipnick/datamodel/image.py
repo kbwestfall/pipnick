@@ -13,7 +13,7 @@ from pipnick.astrometry.fit import wcs_from_header
 from pipnick.image.io import read_reduced
 from pipnick.pkg.exceptions import PipnickDataModelError
 from pipnick.pkg.paths import photometry_table
-from pipnick.pkg.provenance import image_hash, solution_hash
+from pipnick.pkg.provenance import image_hash, names_hash, solution_hash, values_hash
 
 
 class ReducedImage:
@@ -73,6 +73,39 @@ class ReducedImage:
         data, mask, error, header = read_reduced(self.path)
         self._header = header
         return data, mask, error, header
+
+    def reduction_status(self):
+        """
+        Determine if the image is up to date with its raw frames, metadata
+        table values, and calibrations, as the reduction does (see
+        :func:`~pipnick.pipelines.reduction.reduce_all`).
+
+        A calibration that has not been reduced is expected to be absent
+        (``'none'``) from the provenance of the image.
+
+        Returns
+        -------
+        status : str
+            ``'ok'``, ``'stale'`` (the image must be reduced again), or
+            ``'missing'`` (the image has not been reduced).
+        reason : str
+            The reason for a stale or missing image.
+        """
+        if not self.exists:
+            return 'missing', 'not reduced'
+        hdr = self.header
+        if hdr.get('PNRAWHSH') != names_hash(self.dataset.raw_files(self.product)):
+            return 'stale', 'the raw frames changed'
+        if hdr.get('PNTABH') != values_hash(self.values):
+            return 'stale', 'the metadata table values changed'
+        for name, calib in self.dataset.calibrations(self.product).items():
+            expected = (
+                'none' if calib is None or not calib.file.is_file()
+                else names_hash(self.dataset.raw_files(calib))
+            )
+            if hdr.get(f'PN{name.upper()}H') != expected:
+                return 'stale', f'the {name} changed'
+        return 'ok', '-'
 
     def check_setup(self):
         """
