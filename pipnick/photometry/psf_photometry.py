@@ -14,11 +14,12 @@ from photutils.background import (
     Background2D, LocalBackground, MADStdBackgroundRMS, MMMBackground
 )
 from photutils.detection import DAOStarFinder
-from photutils.psf import IterativePSFPhotometry, MoffatPSF, SourceGrouper
+from photutils.psf import IterativePSFPhotometry, SourceGrouper
 
 from pipnick import log
+from pipnick.datamodel.psf import PSFModel
 from pipnick.photometry import starfind
-from pipnick.photometry.moffat import EllipticalMoffatPSF, FitEllipticalMoffat2D, FitMoffat2D
+from pipnick.photometry.moffat import FitEllipticalMoffat2D, FitMoffat2D
 
 
 def build_moffat_psf_model(
@@ -178,7 +179,8 @@ def psf_analysis(
     nstack : int
         The number of sources used to model the PSF.
     fwhm : float
-        The FWHM of the PSF in pixels; see :func:`process_par`.
+        The FWHM of the PSF in pixels; see
+        :attr:`~pipnick.datamodel.psf.PSFModel.fwhm`.
     phot_data : :class:`astropy.table.Table`
         The results of the PSF photometry; see
         :class:`photutils.psf.IterativePSFPhotometry`.  Failed fits have NaN
@@ -192,7 +194,8 @@ def psf_analysis(
     fit, nstack = build_moffat_psf_model(
         _image, thresh=psf_thresh, fwhm=guess_fwhm, fittype=fittype, stack=stack
     )
-    fwhm = process_par(fit.par, fittype=fittype)
+    psf = PSFModel.from_fit(fit)
+    fwhm = psf.fwhm
     log.info(f'Measured Moffat PSF FWHM = {fwhm:.2f} pixels from {nstack} sources.')
 
     # Scales set by the FWHM
@@ -213,69 +216,12 @@ def psf_analysis(
     local_bkg = LocalBackground(*local_bkg_range, bkg_estimator=MMMBackground())
 
     # The PSF model, with its shape fixed by the fit to the stack
-    if fittype == 'circ':
-        psf_model = MoffatPSF(alpha=fit.par[3], beta=fit.par[4])
-    else:
-        psf_model = EllipticalMoffatPSF(
-            gamma1=fit.par[3], gamma2=fit.par[4], phi=fit.par[5], alpha=fit.par[6]
-        )
-
     phot = IterativePSFPhotometry(
-        psf_model, win, finder, grouper=grouper, local_bkg_estimator=local_bkg,
+        psf.to_photutils(), win, finder, grouper=grouper, local_bkg_estimator=local_bkg,
         fitter=TRFLSQFitter(), aperture_radius=aper_size, mode=mode
     )
     phot_data = phot(data, mask=mask, error=error)
     return fit, nstack, fwhm, phot_data, data
-
-
-def gamma_to_fwhm(gamma, alpha):
-    """
-    Convert gamma to full-width half-maximum (FWHM).
-
-    Parameters
-    ----------
-    gamma : float
-        Moffat parameter gamma.
-    alpha : float
-        Moffat parameter alpha.
-
-    Returns
-    -------
-    float
-        FWHM value calculated from gamma and alpha.
-    """
-    return 2 * gamma * np.sqrt(2**(1/alpha) - 1)
-
-
-def process_par(par, fittype):
-    """
-    Return the FWHM of a Moffat PSF model.
-
-    Parameters
-    ----------
-    par : array-like
-        Parameters for the Moffat model; see
-        :class:`~pipnick.photometry.moffat.FitMoffat2D` and
-        :class:`~pipnick.photometry.moffat.FitEllipticalMoffat2D`.
-    fittype : str
-        Type of Moffat fit (``'circ'`` or ``'ellip'``).
-
-    Returns
-    -------
-    float
-        The FWHM in pixels; for the elliptical model, the mean of the FWHM
-        along the two axes.
-
-    Raises
-    ------
-    ValueError
-        Raised if ``fittype`` is not valid.
-    """
-    if fittype == 'circ':
-        return gamma_to_fwhm(par[3], par[4])
-    if fittype == 'ellip':
-        return (gamma_to_fwhm(par[3], par[6]) + gamma_to_fwhm(par[4], par[6])) / 2
-    raise ValueError(f'Unknown fit type {fittype}; must be circ or ellip.')
 
 
 def consolidate_groups(phot_data, preserve=None):

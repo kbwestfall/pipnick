@@ -9,8 +9,10 @@ from astropy.nddata import CCDData
 from astropy.table import Table
 
 from pipnick import cameras, metadata
+from pipnick.datamodel import dataset
+from pipnick.datamodel.dataset import check_comb_groups, check_single_setup
 from pipnick.pipelines import reduction
-from pipnick.pipelines.reduction import check_comb_groups, check_single_setup, reduce_all
+from pipnick.pipelines.reduction import reduce_all
 from pipnick.pkg.exceptions import PipnickDataModelError
 from pipnick.tests.test_metadata import write_andor, write_andor_image
 
@@ -127,22 +129,22 @@ def test_names():
     assert metadata.safe_name('SN2026abc+1.5-x/y') == 'SN2026abc+1.5-xy', (
         'Only letters, digits, underscores, periods, plus, and minus should be kept'
     )
-    assert reduction._dark_name(120.004) == 'Dark_120s.fits', (
+    assert dataset._dark_name(120.004) == 'Dark_120s.fits', (
         'Dark exposure times should be rounded to 0.1 s, without trailing zeros'
     )
-    assert reduction._dark_name(4.31) == 'Dark_4.3s.fits', (
+    assert dataset._dark_name(4.31) == 'Dark_4.3s.fits', (
         'Dark exposure times should be rounded to 0.1 s'
     )
-    assert reduction._flat_name('skyflat', 'V') == 'SkyFlat_V.fits', (
+    assert dataset._flat_name('skyflat', 'V') == 'SkyFlat_V.fits', (
         'Flat names should give the type and the filter'
     )
-    assert reduction._flat_name('skyflat', "i'") == 'SkyFlat_ip.fits', (
+    assert dataset._flat_name('skyflat', "i'") == 'SkyFlat_ip.fits', (
         'Primed filters should be named with a p'
     )
-    assert reduction._flat_name('domeflat', 'i') == 'DomeFlat_i.fits', (
+    assert dataset._flat_name('domeflat', 'i') == 'DomeFlat_i.fits', (
         'Unprimed filters should be distinct from primed filters'
     )
-    assert reduction._flat_name('domeflat', '') == 'DomeFlat_none.fits', (
+    assert dataset._flat_name('domeflat', '') == 'DomeFlat_none.fits', (
         'Flats with an unknown filter should be named with none'
     )
 
@@ -157,14 +159,14 @@ def test_names():
             'mjd': [3., 1., 4., 0.]
         }
     )
-    indx = reduction._group_indices(tbl)[7]
+    indx = dataset._group_indices(tbl)[7]
     assert list(indx) == [3, 1, 0, 2], 'Frames in a group should be ordered by MJD'
-    assert reduction._science_name(tbl, indx, 7) == 'M11_V_ip_C007_2026-08-20.fits', (
+    assert dataset._science_name(tbl, indx, 7) == 'M11_V_ip_C007_2026-08-20.fits', (
         'Science names should use the most common object, the filter, and the UT date of the '
         'first frame'
     )
     tbl['object'] = ['b', 'a', 'b', 'a']
-    assert reduction._science_name(tbl, indx, 7) == 'a_ip_C007_2026-08-20.fits', (
+    assert dataset._science_name(tbl, indx, 7) == 'a_ip_C007_2026-08-20.fits', (
         'Ties in the most common object should go to the earliest frame'
     )
 

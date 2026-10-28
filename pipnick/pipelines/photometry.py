@@ -17,19 +17,18 @@ nominal telescope solution, which is not used.
 
 import numpy as np
 
-from astropy.io import fits
-from astropy.nddata import CCDData, StdDevUncertainty
 from astropy.table import MaskedColumn, Table
 
 from pipnick import log
 from pipnick.astrometry.fit import to_icrs, wcs_from_header
 from pipnick.astrometry.qa import plot_solution
+from pipnick.datamodel.dataset import DataSet
+from pipnick.datamodel.psf import PSFModel
+from pipnick.image.io import invalid_error
 from pipnick.photometry.aperture_photometry import aperture_analysis
 from pipnick.photometry.fit import psf_plot
 from pipnick.photometry.psf_photometry import consolidate_groups, psf_analysis
-from pipnick.pipelines.reduction import load_setup, plan_products, table_values
-from pipnick.pkg.exceptions import PipnickDataModelError, PipnickPathError
-from pipnick.pkg.paths import photometry_table, step_dir
+from pipnick.pkg.exceptions import PipnickPathError
 from pipnick.pkg.provenance import image_hash, json_hash, solution_hash
 
 
@@ -76,23 +75,21 @@ def _masked(values):
     return np.ma.MaskedArray(np.where(bad, 0., _values), mask=bad)
 
 
-def measure_image(path, values, mjd, settings, scale):
+def measure_image(image, settings):
     """
     Measure the sources in a reduced image.
 
+    The object, filter, exposure time, and airmass recorded with the sources
+    are the metadata table values of the image (see
+    :attr:`~pipnick.datamodel.image.ReducedImage.values`), and the pixel scale
+    is its nominal scale.
+
     Parameters
     ----------
-    path : :class:`pathlib.Path`
+    image : :class:`~pipnick.datamodel.image.ReducedImage`
         The reduced image.
-    values : dict
-        The metadata table values for the image (object, filter, exposure
-        time, airmass); see :func:`~pipnick.pipelines.reduction.table_values`.
-    mjd : float
-        The MJD of the (first) observation.
     settings : dict
         The photometry settings; see :func:`photometry_all`.
-    scale : float
-        The pixel scale in arcsec per pixel.
 
     Returns
     -------
@@ -106,21 +103,21 @@ def measure_image(path, values, mjd, settings, scale):
     mask : :class:`numpy.ndarray`
         The image mask.
     """
-    ccd = CCDData.read(path)
-    hdr = fits.getheader(path)
-    mask = np.zeros(ccd.data.shape, dtype=bool) if ccd.mask is None else ccd.mask
+    path = image.path
+    values = image.values
+    mjd = image.mjd
+    scale = image.nominal_scale
+    data, mask, error, hdr = image.read()
     # The pixel errors propagated by the reduction (see
     # pipnick.pipelines.reduction.process_frame)
-    if ccd.uncertainty is None:
+    if error is None:
         log.warning(f'{path.name} has no uncertainty; the flux errors are not weighted.')
-        error = None
     else:
-        error = np.asarray(ccd.uncertainty.represent_as(StdDevUncertainty).array, dtype=float)
         # Pixels without a valid error are ignored
-        bad = np.logical_not(np.isfinite(error)) | (error <= 0)
+        bad = invalid_error(error)
         mask = mask | bad
         error = np.where(bad, 1., error)
-    data = np.ma.MaskedArray(np.asarray(ccd.data, dtype=float), mask=mask)
+    data = np.ma.MaskedArray(data, mask=mask)
 
     fit, nstack, fwhm, phot, sub = psf_analysis(
         data, error=error, thresh=settings['thresh'], guess_fwhm=settings['fwhm'] / scale,
@@ -180,10 +177,7 @@ def measure_image(path, values, mjd, settings, scale):
         'image': path.name, 'setup': hdr.get('PNSETUP'), 'comb_id': hdr.get('PNCOMBID'),
         'object': values.get('object'), 'filter': values.get('filter'), 'exptime': exptime,
         'airmass': values.get('airmass'), 'mjd': mjd,
-        'psf': {
-            'fittype': settings['fittype'], 'par': [float(p) for p in fit.par],
-            'fwhm_pix': float(fwhm), 'fwhm_arcsec': float(fwhm * scale), 'nstack': nstack
-        },
+        'psf': PSFModel.from_fit(fit).to_meta(scale, nstack),
         'aper_radius_pix': float(settings['aper_radius'] * fwhm), 'removed': removed,
         'settings': settings, 'settings_hash': json_hash(settings),
         'image_hash': image_hash(hdr), 'wcs_method': hdr.get('PNASTMTH', 'none'),
@@ -256,45 +250,6 @@ def vet_sources(phot, shape, fwhm):
             + ', '.join(f'{n} {k}' for k, n in removed.items() if n > 0) + '.'
         )
     return phot[np.logical_not(failed | outside | moved | nonpositive)], removed
-
-
-def select_products(products, selection):
-    """
-    Select the products to process, by file name, file name without the
-    extension, or combination group (``comb_id``).
-
-    Parameters
-    ----------
-    products : list
-        The products; see :func:`~pipnick.pipelines.reduction.plan_products`.
-    selection : list
-        The file names, file names without the extension, or combination
-        groups of the products to select.
-
-    Returns
-    -------
-    list
-        The selected products, in their original order.
-
-    Raises
-    ------
-    :exc:`ValueError`
-        Raised if an entry does not match any product.
-    """
-    selected = []
-    unknown = []
-    for item in selection:
-        found = [
-            p for p in products
-            if str(item) in [p['file'].name, p['file'].stem]
-            or (str(item).isdigit() and p['comb_id'] == int(item))
-        ]
-        if len(found) == 0:
-            unknown.append(str(item))
-        selected += [p for p in found if p not in selected]
-    if len(unknown) > 0:
-        raise ValueError(f'No reduced science image matches: {", ".join(unknown)}.')
-    return [p for p in products if p in selected]
 
 
 def photometry_all(
@@ -399,17 +354,16 @@ def photometry_all(
     :exc:`~pipnick.pkg.exceptions.PipnickPathError`
         Raised if the reduction directory does not exist.
     """
-    metafile, metadata, _rdxdir, tag, camera = load_setup(table, rdxdir=rdxdir)
-    if not _rdxdir.is_dir():
-        raise PipnickPathError(f'{_rdxdir} does not exist; reduce the data first.')
-    phot_dir = step_dir(_rdxdir, 'photometry')
-    log.info(f'Photometry of the images in {_rdxdir}')
+    dataset = DataSet.from_file(table, rdxdir=rdxdir)
+    if not dataset.rdxdir.is_dir():
+        raise PipnickPathError(f'{dataset.rdxdir} does not exist; reduce the data first.')
+    phot_dir = dataset.outdir('photometry')
+    log.info(f'Photometry of the images in {dataset.rdxdir}')
 
-    products = [p for p in plan_products(metadata, _rdxdir) if p['frametype'] == 'science']
-    if images is not None:
-        products = select_products(products, images)
+    reduced = dataset.science_images(selection=images, include_missing=True)
     settings = {
-        'thresh': float(thresh), 'fwhm': float(camera.fwhm_guess if fwhm is None else fwhm),
+        'thresh': float(thresh),
+        'fwhm': float(dataset.camera.fwhm_guess if fwhm is None else fwhm),
         'fittype': fittype, 'mode': mode, 'stack': stack, 'group': bool(group),
         'min_sep': float(min_sep), 'group_sep': float(group_sep),
         'aper_radius': float(aper_radius), 'psf_thresh': float(psf_thresh)
@@ -417,24 +371,20 @@ def photometry_all(
 
     outputs = []
     summary = []
-    for product in products:
-        path = product['file']
-        ofile = photometry_table(path)
+    for image in reduced:
+        path = image.path
+        ofile = image.phot_file
         row = {
             'image': path.name, 'status': 'failed', 'nsources': -1, 'fwhm_pix': -1.,
             'fwhm_arcsec': -1., 'nstack': -1, 'wcs': 'none', 'reason': '-'
         }
         summary.append(row)
-        if not path.is_file():
+        if not image.exists:
             log.warning(f'{path.name} does not exist; reduce the data first.  Skipping.')
             row['status'] = 'missing'
             continue
-        hdr = fits.getheader(path)
-        if hdr.get('PNSETUP') != tag:
-            raise PipnickDataModelError(f'{path.name} is not from setup {tag}.')
+        hdr = image.header
         row['wcs'] = hdr.get('PNASTMTH', 'none')
-        i = product['indx'][0]
-        scale = camera.plate_scale * int(metadata['xbin'][i])
 
         # Check if the existing table is up to date
         if ofile.is_file() and not overwrite:
@@ -462,11 +412,8 @@ def photometry_all(
                 outputs.append(ofile)
                 continue
 
-        mjd = None if metadata['mjd'][i] is np.ma.masked else float(metadata['mjd'][i])
         try:
-            tbl, fit, sub, mask = measure_image(
-                path, table_values(metadata, product['indx'], 'science'), mjd, settings, scale
-            )
+            tbl, fit, sub, mask = measure_image(image, settings)
         except ValueError as e:
             log.warning(f'Photometry of {path.name} failed: {e}')
             row['reason'] = str(e)

@@ -18,11 +18,12 @@ from photutils.psf import MoffatPSF
 from scipy.signal import fftconvolve
 
 from pipnick import metadata
+from pipnick.datamodel.dataset import DataSet, check_mosaic_groups
+from pipnick.datamodel.psf import PSFModel
 from pipnick.mosaic import coadd, psfmatch, scaling
 from pipnick.photometry.aperture_photometry import aperture_analysis
-from pipnick.photometry.moffat import FitMoffat2D
+from pipnick.photometry.moffat import fwhm_to_gamma
 from pipnick.pipelines import mosaic
-from pipnick.pipelines.reduction import load_setup, plan_products
 from pipnick.pkg.exceptions import PipnickDataModelError, PipnickParameterError
 from pipnick.pkg.provenance import image_hash
 from pipnick.tests.test_metadata import write_andor
@@ -34,14 +35,6 @@ SKY = 50.
 READNOISE = 5.
 EXPTIME = 30.
 CENTER = SkyCoord(282.77, -6.27, unit='deg')
-
-
-def moffat_par(fwhm, beta=BETA):
-    """
-    Return the parameters of a circular Moffat PSF model (see
-    :class:`pipnick.photometry.moffat.FitMoffat2D`).
-    """
-    return [0., 0., 1., FitMoffat2D.to_gamma(fwhm, beta), beta, 0.]
 
 
 def image_wcs(dx=0., dy=0.):
@@ -79,7 +72,7 @@ def render(wcs, stars, fwhm, transparency, background, seed):
     x, y = wcs.world_to_pixel(SkyCoord(ra, dec, unit='deg'))
     yy, xx = np.mgrid[:SHAPE[0], :SHAPE[1]]
     model = np.full(SHAPE, background * EXPTIME)
-    gamma = FitMoffat2D.to_gamma(fwhm, BETA)
+    gamma = fwhm_to_gamma(fwhm, BETA)
     for xi, yi, fi in zip(x, y, flux):
         star = MoffatPSF(
             flux=fi * transparency * EXPTIME, x_0=xi, y_0=yi, alpha=gamma, beta=BETA
@@ -129,9 +122,10 @@ def write_dithers(tmp_path, design, name='n7', stars=None):
     table = files[0]
     rdxdir = tmp_path / f'{name}_rdx'
     (rdxdir / 'photometry').mkdir(parents=True)
-    _, tbl, _, tag, _ = load_setup(table, rdxdir=rdxdir)
-    for product in plan_products(tbl, rdxdir):
-        i = int(str(tbl['file'][product['indx'][0]])[2:5])
+    dataset = DataSet.from_file(table, rdxdir=rdxdir)
+    tbl, tag = dataset.table, dataset.tag
+    for product in dataset.products():
+        i = int(str(tbl['file'][product.indx[0]])[2:5])
         filt, (dx, dy), fwhm, transparency, background, _ = design[i]
         wcs = image_wcs(dx, dy)
         image, sigma, x, y, index = render(wcs, _stars, fwhm, transparency, background, seed=i)
@@ -149,7 +143,7 @@ def write_dithers(tmp_path, design, name='n7', stars=None):
                 fits.ImageHDU(data=np.zeros(SHAPE, dtype=np.uint8), name='MASK'),
                 fits.ImageHDU(data=sigma, header=uncert, name='UNCERT')
             ]
-        ).writeto(product['file'])
+        ).writeto(product.file)
         coo = wcs.pixel_to_world(x, y)
         flux = _stars[2][index] * transparency * EXPTIME
         n = len(x)
@@ -167,15 +161,15 @@ def write_dithers(tmp_path, design, name='n7', stars=None):
         phot['flux_aper_err'] = MaskedColumn(np.sqrt(flux), mask=nomask)
         phot['flags'] = np.zeros(n, dtype=int)
         phot.meta = {
-            'image': product['file'].name, 'filter': filt, 'exptime': EXPTIME,
+            'image': product.file.name, 'filter': filt, 'exptime': EXPTIME,
             'psf': {
-                'fittype': 'circ', 'par': moffat_par(fwhm), 'fwhm_pix': fwhm,
-                'fwhm_arcsec': fwhm * SCALE
+                'fittype': 'circ', 'par': list(PSFModel.circular(fwhm, BETA).par),
+                'fwhm_pix': fwhm, 'fwhm_arcsec': fwhm * SCALE
             },
             'settings_hash': 'settings', 'image_hash': image_hash(hdr), 'wcs_method': 'gaia',
             'wcs_hash': f'wcs{i}'
         }
-        pfile = rdxdir / 'photometry' / f'{product["file"].stem}_phot.ecsv'
+        pfile = rdxdir / 'photometry' / f'{product.file.stem}_phot.ecsv'
         phot.write(pfile, format='ascii.ecsv')
     return table, rdxdir, _stars
 
@@ -196,10 +190,10 @@ def test_moffat_kernel():
     target_fwhm, target_beta = 6.0, 2.5
     size = psfmatch.kernel_size(target_fwhm, factor=10.)
     for fwhm in [4.0, 5.5]:
-        par = moffat_par(fwhm, beta=3.)
-        psf = psfmatch.render_psf(par, 'circ', size)
-        target = psfmatch.target_psf(target_fwhm, target_beta, size)
-        kernel, used, ee = psfmatch.image_kernel(par, 'circ', target_fwhm, target_beta)
+        model = PSFModel.circular(fwhm, 3.)
+        psf = model.render(size)
+        target = PSFModel.circular(target_fwhm, target_beta).render(size)
+        kernel, used, ee = psfmatch.image_kernel(model, target_fwhm, target_beta)
         assert used == 'moffat', 'The Moffat kernel should be accepted'
         assert abs(ee - 1) < 0.01, 'The Moffat kernel should match the encircled energy to 1%'
         gauss = psfmatch.gaussian_kernel(fwhm, target_fwhm, size)
@@ -375,11 +369,11 @@ def test_metadata_columns(tmp_path):
 
 def test_check_mosaic_groups(tmp_path):
     table, rdxdir, _ = write_dithers(tmp_path, three_dithers())
-    _, tbl, _, _, _ = load_setup(table, rdxdir=rdxdir)
+    tbl = DataSet.from_file(table, rdxdir=rdxdir).table
     tbl['wcs_group'] = tbl['wcs_group'].astype('U20')
     tbl['wcs_group'][0] = 'other'
     with pytest.raises(PipnickDataModelError, match='several WCS groups'):
-        mosaic.check_mosaic_groups(tbl, table)
+        check_mosaic_groups(tbl, table)
 
 
 def test_mosaic(tmp_path, caplog):
@@ -434,7 +428,7 @@ def test_mosaic(tmp_path, caplog):
         data, x[use], y[use], radius, local_bkg=bkg, mask=np.logical_not(good)
     )
     size = psfmatch.kernel_size(target_fwhm, factor=10.)
-    target = psfmatch.target_psf(target_fwhm, BETA, size)
+    target = PSFModel.circular(target_fwhm, BETA).render(size)
     c = (size - 1) / 2
     yy, xx = np.mgrid[:size, :size]
     ee = np.sum(target[np.hypot(xx - c, yy - c) < radius])
@@ -483,14 +477,16 @@ def test_mosaic_options(tmp_path, caplog):
 def test_mixed_filters_and_nights(tmp_path, caplog):
     table, rdxdir, _ = write_dithers(tmp_path, three_dithers())
     images = mosaic.collect_images([table])
-    images[1]['filter'] = 'B'
+    images[1].values['filter'] = 'B'
     with caplog.at_level(logging.WARNING):
         mosaic._validate(images)
     assert 'combines images with different filters' in caplog.text, (
         'Mixed filters should give a warning'
     )
+    # The images share their data set
+    tbl = images[0].dataset.table
     for image in images[1:]:
-        image['night'] = '2026-08-21'
+        tbl['mjd'][image.product.indx] += 1.
     with pytest.raises(PipnickDataModelError, match='several nights'):
         mosaic._validate(images)
 

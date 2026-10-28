@@ -6,7 +6,9 @@ kernel :math:`K` such that :math:`P \ast K = T`, where :math:`P` is the PSF of
 the image and :math:`T` is the target PSF.  Convolution can only broaden a
 PSF, so the target must be broader than every PSF, and its wings must be at
 least as extended.  The target is a circular Moffat function with a FWHM
-slightly larger than the largest FWHM of the images (see :func:`target_psf`).
+slightly larger than the largest FWHM of the images.  For an elliptical PSF,
+the FWHM along its major axis is used, so that the kernel broadens the PSF in
+every direction (see :attr:`~pipnick.datamodel.psf.PSFModel.fwhm_major`).
 Its power index is the median of those of the images: in principle, the
 smallest power index (the most extended wings) should be used, but the power
 indices of the PSF models are poorly constrained (they are measured from
@@ -14,7 +16,8 @@ stacks of a few stars, and are degenerate with the FWHM), and the smallest
 selects the noisiest measurement.
 
 The PSF of each image is the Moffat model fit by the photometry (see
-:func:`~pipnick.photometry.psf_photometry.build_moffat_psf_model`).  The
+:func:`~pipnick.photometry.psf_photometry.build_moffat_psf_model` and
+:class:`~pipnick.datamodel.psf.PSFModel`).  The
 kernel is computed with :func:`photutils.psf.matching.make_kernel` (see
 :func:`matching_kernel`), or, if that fails, approximated by a Gaussian (see
 :func:`gaussian_kernel`).
@@ -30,105 +33,11 @@ single pixels, whose noise becomes correlated; see
 import numpy as np
 
 from astropy.convolution import Gaussian2DKernel
-from photutils.psf import MoffatPSF
 from photutils.psf_matching import SplitCosineBellWindow, make_kernel
 from scipy.signal import fftconvolve
 
 from pipnick import log
-from pipnick.photometry.moffat import EllipticalMoffatPSF, FitMoffat2D
-
-
-def moffat_fwhm(par, fittype):
-    """
-    Return the FWHM (pixels) of a Moffat PSF model.
-
-    For an elliptical model, this is the FWHM along its major axis.
-
-    Parameters
-    ----------
-    par : array-like
-        The parameters of the model fit by the photometry: ``x0``, ``y0``,
-        amplitude, ``gamma``, ``alpha``, and background for a circular model,
-        or ``x0``, ``y0``, amplitude, ``gamma1``, ``gamma2``, ``phi``,
-        ``alpha``, and background for an elliptical model; see
-        :class:`~pipnick.photometry.moffat.FitMoffat2D` and
-        :class:`~pipnick.photometry.moffat.FitEllipticalMoffat2D`.
-    fittype : str
-        ``'circ'`` or ``'ellip'``.
-
-    Returns
-    -------
-    float
-        The FWHM in pixels.
-    """
-    if fittype == 'circ':
-        return float(FitMoffat2D.to_fwhm(par[3], par[4]))
-    return float(FitMoffat2D.to_fwhm(max(par[3], par[4]), par[6]))
-
-
-def moffat_beta(par, fittype):
-    """
-    Return the power index of a Moffat PSF model; see :func:`moffat_fwhm`.
-    """
-    return float(par[4] if fittype == 'circ' else par[6])
-
-
-def render_psf(par, fittype, size, scale=1.):
-    """
-    Render a Moffat PSF model, normalized to unit sum, at the center of an
-    image.
-
-    Parameters
-    ----------
-    par : array-like
-        The parameters of the model; see :func:`moffat_fwhm`.
-    fittype : str
-        ``'circ'`` or ``'ellip'``.
-    size : int
-        The size of the (square) image; must be odd.
-    scale : float, optional
-        The ratio of the pixel size of the model to that of the image, used
-        to render a model fit to an image with a different pixel scale.
-
-    Returns
-    -------
-    :class:`numpy.ndarray`
-        The PSF image.
-    """
-    yy, xx = np.mgrid[:size, :size]
-    c = (size - 1) / 2
-    if fittype == 'circ':
-        model = MoffatPSF(flux=1., x_0=c, y_0=c, alpha=par[3] * scale, beta=par[4])
-    else:
-        model = EllipticalMoffatPSF(
-            flux=1., x_0=c, y_0=c, gamma1=par[3] * scale, gamma2=par[4] * scale, phi=par[5],
-            alpha=par[6]
-        )
-    psf = model(xx, yy)
-    return psf / np.sum(psf)
-
-
-def target_psf(fwhm, beta, size):
-    """
-    Render the target PSF: a circular Moffat function, normalized to unit
-    sum, at the center of an image.
-
-    Parameters
-    ----------
-    fwhm : float
-        The FWHM in pixels.
-    beta : float
-        The power index.
-    size : int
-        The size of the (square) image; must be odd.
-
-    Returns
-    -------
-    :class:`numpy.ndarray`
-        The PSF image.
-    """
-    par = [0., 0., 1., FitMoffat2D.to_gamma(fwhm, beta), beta, 0.]
-    return render_psf(par, 'circ', size)
+from pipnick.datamodel.psf import PSFModel
 
 
 def kernel_size(fwhm, factor=6.):
@@ -243,17 +152,14 @@ def circular_taper(kernel, start=0.85):
     return tapered / np.sum(tapered)
 
 
-def image_kernel(par, fittype, target_fwhm, target_beta, method='moffat'):
+def image_kernel(psf, target_fwhm, target_beta, method='moffat'):
     """
     Compute the kernel that matches the PSF of an image to the target.
 
     Parameters
     ----------
-    par : array-like
-        The parameters of the Moffat PSF model of the image; see
-        :func:`moffat_fwhm`.
-    fittype : str
-        ``'circ'`` or ``'ellip'``.
+    psf : :class:`~pipnick.datamodel.psf.PSFModel`
+        The PSF model of the image.
     target_fwhm : float
         The FWHM of the target, in pixels of the image.
     target_beta : float
@@ -280,12 +186,13 @@ def image_kernel(par, fittype, target_fwhm, target_beta, method='moffat'):
     # The kernel is tapered to a circle (see circular_taper), so its size is
     # increased to keep the extent of its wings
     size = kernel_size(target_fwhm, factor=10.)
-    fwhm = moffat_fwhm(par, fittype)
-    psf = render_psf(par, fittype, size)
-    target = target_psf(target_fwhm, target_beta, size)
+    # The extent of the PSF in every direction; see PSFModel
+    fwhm = psf.fwhm_major
+    image = psf.render(size)
+    target = PSFModel.circular(target_fwhm, target_beta).render(size)
     kernel = None
     if method == 'moffat':
-        kernel, residual = matching_kernel(psf, target)
+        kernel, residual = matching_kernel(image, target)
         if kernel is None:
             log.warning(
                 f'The Moffat matching kernel failed (residual {residual:.3f}); using a Gaussian '
@@ -299,7 +206,7 @@ def image_kernel(par, fittype, target_fwhm, target_beta, method='moffat'):
         used = 'gaussian'
     if kernel is None:
         kernel = gaussian_kernel(fwhm, target_fwhm, size)
-    return kernel, used, encircled_energy_ratio(psf, kernel, target, 1.5 * target_fwhm)
+    return kernel, used, encircled_energy_ratio(image, kernel, target, 1.5 * target_fwhm)
 
 
 def encircled_energy_ratio(psf, kernel, target, radius):

@@ -9,6 +9,8 @@ Subpackages
 
    pipnick.astrometry
    pipnick.cameras
+   pipnick.datamodel
+   pipnick.image
    pipnick.mosaic
    pipnick.photometry
    pipnick.pipelines

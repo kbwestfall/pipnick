@@ -190,6 +190,8 @@ Proposals:
    **Complete** (2026-10-27, branch `consolidate_helpers`; see the
    [progress log](#progress-log)).
 3. Add `DataSet`, `ReducedImage` and `PSFModel`.
+   **Complete** (2026-10-28, branch `common_objects`; see the
+   [progress log](#progress-log)).
 4. Improve the logging and add `pipnick_status`.
 5. Split the large modules, and add `SourceCatalog`, `Summary` and the `qa/`
    package.
@@ -1221,7 +1223,7 @@ camera lives in one place.
 |---|---|---|---|---|
 | 1 | Remove the unused code and dependencies (§1); fix the convention items (§2), including making the shared private helpers public | cleaner code; no `loess` packaging problem | low | **complete** |
 | 2 | `pkg/provenance.py`, `pkg/paths.py`, `utils/lsq.py`, `utils/crossmatch.py` (§4) | less duplication; one hash implementation | low (needs byte-identical hash tests) | **complete** |
-| 3 | `DataSet`, `Product`, `ReducedImage`, `read_reduced`; `PSFModel` with one FWHM definition (§5) | removes the coupling between pipelines and the FWHM inconsistency | medium (some mosaics are rebuilt) | |
+| 3 | `DataSet`, `Product`, `ReducedImage`, `read_reduced`; `PSFModel` with one FWHM definition (§5) | removes the coupling between pipelines and the FWHM inconsistency | medium (some mosaics are rebuilt) | **complete** |
 | 4 | Logging (run header, progress, verdicts, next steps, default log files, version); a reduction summary; `pipnick_status` (§6, §7 P1–P3) | the most direct benefit to new observers | low | |
 | 5 | Split the large modules; `SourceCatalog`, `Summary`, `qa/`; QA on by default; `pipnick_report`, `pipnick_inspect` (§3, §5, §7) | maintainability and interrogation | medium | |
 | 6 | The common detection function and catalogue selections (§4.1); `PipelineStep` (§5.7) | one detection implementation, used with different settings by every step; a common step loop | higher (the astrometry.net cache, unless the astrometry's detections are reproduced exactly) | |
@@ -1401,3 +1403,102 @@ Checks after the work:
 `test_crossmatch.py`.
 
 **Updated:** the release notes and the API pages.
+
+#### Step 3: common objects (complete, 2026-10-28, branch `common_objects`)
+
+Decisions made with the author before starting:
+
+- **FWHM:** `PSFModel.fwhm` is the mean of the two axes, as the source
+  tables already record it. The PSF matching of the mosaics explicitly uses
+  `fwhm_major`, since it must broaden the widest axis, and `fwhm_in` is
+  documented as the major-axis FWHM. Because both behaviours were kept, no
+  product changed and no mosaic was rebuilt, contrary to the review's
+  estimate (§5.4).
+- **No wrappers:** `load_setup`, `plan_products`, `table_values` and
+  `select_products` are removed, and every caller and test uses `DataSet`.
+- **Scope:** `ReducedImage` is used by all four later steps.
+- **Unchanged:** a reduction directory given to `DataSet.from_file` is still
+  saved to the table (§3.2, item 4); to be revisited in Step 4.
+
+Checks after the work:
+
+- `tox -r -e 3.13-test,codestyle` passes in a fresh environment: 180 tests
+  passed, 1 skipped.
+- The docs build without warnings.
+- All eight scripts start.
+- **Readers:** on eight real reduced images (n2, n3), `read_reduced` returns
+  the same data, mask, error and header as each of the four readers it
+  replaced. The astrometry's inputs, and so its astrometry.net cache keys,
+  are unchanged.
+- **End to end:** on scratch copies of the 2026-08-17 n3 (fast) reduction,
+  with the M11 images labelled as four mosaics in one WCS group, `main` and
+  this branch ran the reduction, photometry, calibration (zero point,
+  applied to the headers and catalogues) and mosaics.
+  - All image, mask, error and table data are identical.
+  - The only header and metadata differences are the calibration file's
+    creation time (and so its hash) and hashes that include the absolute
+    paths of the two copies.
+  - Run on the copy built by `main`, this branch reports every reduction
+    product, source table, calibration, header calibration and mosaic as up
+    to date, and rebuilds nothing.
+
+**`pipnick/datamodel/` (§5.1–5.4).**
+
+- `dataset.py`:
+  - `Product`, a frozen dataclass, replaces the product dictionaries.
+  - `DataSet` replaces the `load_setup` tuple. Its methods are `from_file`,
+    `products`, `select`, `science_images`, `table_values`, `raw_files`,
+    `exptimes`, `pixel_scale`, `pointing`, `mjd`, `night`, `mosaic_labels`
+    and `outdir`.
+  - `check_single_setup`, `check_comb_groups` and `check_mosaic_groups`
+    moved here, with the product-naming helpers, unchanged.
+- `image.py`: `ReducedImage` has:
+  - the header (read when first needed), `read`, `check_setup` and the
+    table values;
+  - the WCS and pixel scale, the solution state and the hashes;
+  - the source table, through `photometry(require=True)`, which checks that
+    it is current;
+  - `zero_point`.
+- `psf.py`: `PSFModel`, with `from_fit`, `from_meta`, `circular`, `fwhm`,
+  `fwhm_major`, `fwhm_minor`, `beta`, `to_photutils`, `render` and
+  `to_meta`.
+
+**`pipnick/image/io.py` (§4.6).**
+
+- `read_reduced` and `invalid_error` replace the readers of the photometry,
+  the astrometry, the mosaics, `utils/rgb.py` and `starfind.as_masked_array`.
+- The reduction still reads its calibration frames with `CCDData`, because
+  `ccdproc` needs `CCDData` objects.
+
+**Pipelines.**
+
+- No pipeline imports another pipeline (§3.2, item 1).
+- Calibration and mosaics:
+  - their image dictionaries are now `ReducedImage` objects;
+  - the calibration's band and coordinate flags are small helpers on the
+    image;
+  - the mosaic labels come from `DataSet.mosaic_labels`.
+- Astrometry: `AstrometryImage` keeps its explicit constructor (the solving
+  state) and holds the `ReducedImage` it came from.
+- `photometry.moffat.fwhm_to_gamma` and `gamma_to_fwhm` replace the
+  duplicated static methods of the fit classes, and the formula in the
+  astropy-model `fwhm` properties.
+
+**Behaviour changes** (minor):
+
+- The calibration takes each image's filter, airmass and MJD from the
+  metadata table, rather than from its source table. They are the same
+  unless the table was edited and the reduction not rerun, in which case
+  the table, as the authority, now wins.
+- An image from another setup now stops the photometry before any image is
+  measured, rather than when the loop reaches it.
+
+**Tests.**
+
+- New: `test_psf.py`.
+- The test fixtures use `DataSet`.
+- The tests of the moved functions import them from
+  `pipnick.datamodel.dataset`.
+
+**Updated:** the release notes, `docs/mosaic.rst` (the major-axis FWHM) and
+the API pages.

@@ -95,7 +95,9 @@ Each mosaic is then constructed as follows.
    during the observations, so by default every image is convolved to the
    worst seeing of its mosaic.  The target is a circular Moffat function with
    ``--psf_margin`` (1.05) times the largest FWHM of the images, and the
-   median of their Moffat power indices.  Each image is convolved with the
+   median of their Moffat power indices.  For an elliptical PSF model
+   (``pipnick_photometry --fittype ellip``), the FWHM along its major axis is
+   used, so that the PSF is broadened to the target in every direction.  Each image is convolved with the
    kernel that matches its PSF model (from the photometry) to the target,
    computed with :func:`photutils.psf_matching.make_kernel` and tapered to a
    circle; if that fails, a Gaussian kernel is used.  For colour images, use
@@ -196,7 +198,8 @@ Each mosaic is written to ``<mosaic>.fits``, with the extensions:
 - ``NREJECT``: the number of images whose pixels were rejected;
 - ``INPUTS``: a table of the input images, with their tables, setups, nights,
   provenance hashes, exposure times, airmasses, PSF FWHM before and after the
-  matching (``fwhm_in``, ``fwhm_out``), kernels, the accuracy of the matching
+  matching (``fwhm_in``, along the major axis of an elliptical PSF;
+  ``fwhm_out``), kernels, the accuracy of the matching
   (``match_ee``, the ratio of the encircled energy of the matched PSF model
   to that of the target within 1.5 times the target FWHM), magnitude offsets
   and scales, the number of magnitude differences used, the reference, the

@@ -17,6 +17,53 @@ from astropy.modeling.parameters import Parameter
 from astropy.units import UnitsError
 from astropy.stats import sigma_clipped_stats
 
+
+def fwhm_to_gamma(fwhm, alpha):
+    r"""
+    Convert the full width at half maximum (FWHM) of a Moffat function to its
+    core width.
+
+    The Moffat function is :math:`A [1 + (r/\gamma)^2]^{-\alpha}`, with core
+    width :math:`\gamma` and power index :math:`\alpha` (the parameter names
+    of :class:`~astropy.modeling.functional_models.Moffat2D`; ``photutils``
+    calls them ``alpha`` and ``beta``).  Its FWHM is
+    :math:`2 \gamma \sqrt{2^{1/\alpha} - 1}`.
+
+    Parameters
+    ----------
+    fwhm : float, :class:`numpy.ndarray`
+        The FWHM.
+    alpha : float, :class:`numpy.ndarray`
+        The power index.
+
+    Returns
+    -------
+    float, :class:`numpy.ndarray`
+        The core width, in the units of ``fwhm``.
+    """
+    return fwhm / 2 / np.sqrt(2**(1/alpha)-1)
+
+
+def gamma_to_fwhm(gamma, alpha):
+    """
+    Convert the core width of a Moffat function to its full width at half
+    maximum (FWHM); see :func:`fwhm_to_gamma`.
+
+    Parameters
+    ----------
+    gamma : float, :class:`numpy.ndarray`
+        The core width.
+    alpha : float, :class:`numpy.ndarray`
+        The power index.
+
+    Returns
+    -------
+    float, :class:`numpy.ndarray`
+        The FWHM, in the units of ``gamma``.
+    """
+    return 2 * gamma * np.sqrt(2**(1/alpha)-1)
+
+
 class FitMoffat2D:
     """
     Fit a 2D Moffat model to the given data.
@@ -86,7 +133,7 @@ class FitMoffat2D:
         # Set the width based on the first moment of the radius
         r = np.sqrt((self.x-par[0])**2 + (self.y-par[1])**2)
         fwhm = 2 * np.ma.sum(r * c_bkg)/np.ma.sum(c_bkg)
-        par[3] = self.to_gamma(fwhm, par[4])
+        par[3] = fwhm_to_gamma(fwhm, par[4])
         return par
 
     def default_bounds(self):
@@ -215,20 +262,6 @@ class FitMoffat2D:
         ) #, jac=self.deriv_resid)
         self._set_par(result.x)
 
-    @staticmethod
-    def to_gamma(fwhm, alpha):
-        """
-        Convert full-width half-maximum (FWHM) to gamma.
-        """
-        return fwhm / 2 / np.sqrt(2**(1/alpha)-1)
-    
-    @staticmethod
-    def to_fwhm(gamma, alpha):
-        """
-        Convert gamma to full-width half-maximum (FWHM).
-        """
-        return 2 * gamma * np.sqrt(2**(1/alpha)-1)
-
 
 
 class FitEllipticalMoffat2D:
@@ -321,7 +354,7 @@ class FitEllipticalMoffat2D:
         # Set the width based on the first moment of the radius
         r = np.sqrt((self.x-par[0])**2 + (self.y-par[1])**2)
         fwhm = 2 * np.ma.sum(r * c_bkg)/np.ma.sum(c_bkg)
-        par[3] = self.to_gamma(fwhm, par[6])
+        par[3] = fwhm_to_gamma(fwhm, par[6])
         # Guess it's circular
         par[4] = par[3]
         # And that the rotation angle is 0.
@@ -560,20 +593,6 @@ class FitEllipticalMoffat2D:
         self._set_par(new_par)
 
     @staticmethod
-    def to_gamma(fwhm, alpha):
-        """
-        Convert full-width half-maximum (FWHM) to gamma.
-        """
-        return fwhm / 2 / np.sqrt(2**(1/alpha)-1)
-
-    @staticmethod
-    def to_fwhm(gamma, alpha):
-        """
-        Convert gamma to full-width half-maximum (FWHM).
-        """
-        return 2 * gamma * np.sqrt(2**(1/alpha)-1)
-
-    @staticmethod
     def get_nice_phi(par):
         """
         Convert phi to angle between semi-major axis and +x-axis in degrees.
@@ -697,8 +716,7 @@ class EllipticalMoffat2DModel(Fittable2DModel):
         <https://github.com/ysbach/AO_2017/blob/master/04_Ground_Based_Concept.ipynb>`_
         (section 1.2, Moffat).
         """
-        gamma = (np.abs(self.gamma1) + np.abs(self.gamma2)) / 2
-        return 2.0 * gamma * np.sqrt(2.0 ** (1.0 / self.alpha) - 1.0)
+        return gamma_to_fwhm((np.abs(self.gamma1) + np.abs(self.gamma2)) / 2, self.alpha)
 
     def bounding_box(self, factor=10.0):
         """
@@ -850,8 +868,7 @@ class EllipticalMoffatPSF(Fittable2DModel):
         """
         The mean of the FWHM along the two axes.
         """
-        gamma = (np.abs(self.gamma1) + np.abs(self.gamma2)) / 2
-        return 2.0 * gamma * np.sqrt(2.0 ** (1.0 / self.alpha) - 1.0)
+        return gamma_to_fwhm((np.abs(self.gamma1) + np.abs(self.gamma2)) / 2, self.alpha)
 
     def bounding_box(self, factor=10.0):
         """

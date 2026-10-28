@@ -293,9 +293,9 @@ Under-the-hood Improvements
 ---------------------------
 
 - Functions used by more than one module are public: ``metadata.safe_name``
-  and ``metadata.filter_name``, and ``pipelines.photometry.select_products``.
-  The code follows the conventions in ``AGENTS.md``, which no longer allow
-  private functions to be imported into other modules.
+  and ``metadata.filter_name``.  The code follows the conventions in
+  ``AGENTS.md``, which no longer allow private functions to be imported into
+  other modules.
 
 - Added ``pipnick.pkg.provenance``, which provides every hash recorded with
   the products (e.g., ``image_hash``, ``solution_hash``, ``wcs_hash``),
@@ -311,6 +311,31 @@ Under-the-hood Improvements
   ``link_sources``, used to match the Landolt standards, the sources of the
   images of a mosaic, and the sources of the images calibrated together.
   ``mosaic.scaling.mutual_matches`` is removed.
+
+- Added ``pipnick.datamodel``, with the objects shared by the steps:
+  ``DataSet`` (a per-setup metadata table, its reduction directory and
+  camera), ``Product`` (a combination group and its output file),
+  ``ReducedImage`` (a reduced science image and its source table), and
+  ``PSFModel`` (the Moffat model of a PSF).  ``DataSet`` replaces
+  ``pipelines.reduction.load_setup``, ``plan_products``, and
+  ``table_values``, and ``pipelines.photometry.select_products``;
+  ``check_single_setup``, ``check_comb_groups``, and
+  ``check_mosaic_groups`` moved to ``pipnick.datamodel.dataset``.  No
+  pipeline imports another pipeline.
+
+- ``PSFModel`` replaces ``psf_photometry.process_par`` and
+  ``gamma_to_fwhm``, and ``psfmatch.moffat_fwhm``, ``moffat_beta``,
+  ``render_psf``, and ``target_psf``.  Its FWHM is the mean of the FWHM along
+  the two axes of an elliptical model, as recorded in the source tables; the
+  PSF matching of the mosaics uses the FWHM along the major axis
+  (``fwhm_major``), so ``fwhm_in`` in the ``INPUTS`` table of a mosaic is the
+  major-axis FWHM.  The Moffat FWHM conversions are
+  ``photometry.moffat.fwhm_to_gamma`` and ``gamma_to_fwhm``, replacing the
+  ``to_fwhm`` and ``to_gamma`` methods of the fit classes.
+
+- Added ``pipnick.image.io.read_reduced``, which reads the images, masks,
+  and errors written by pipnick, replacing the separate readers of the
+  photometry, astrometry, mosaic, and colour-image steps.
 
 - The tests block internet access (``remote_data_strict``), and replace every
   method that would contact astrometry.net or the Gaia archive.

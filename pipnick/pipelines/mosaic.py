@@ -39,66 +39,29 @@ from astropy.coordinates import SkyCoord
 from astropy.io import fits
 from astropy.stats import sigma_clipped_stats
 from astropy.table import Table
-from astropy.time import Time
 from astropy.visualization import ZScaleInterval
-from astropy.wcs.utils import proj_plane_pixel_area
 from matplotlib.figure import Figure
 from photutils.aperture import ApertureStats, CircularAnnulus
 from photutils.segmentation import detect_sources, detect_threshold
 
 from pipnick import log
 from pipnick.astrometry.fit import wcs_from_header
+from pipnick.datamodel.dataset import DataSet
+from pipnick.datamodel.psf import PSFModel
+from pipnick.image.io import invalid_error, read_reduced
 from pipnick.mosaic.coadd import (
     combine, footprint_bbox, output_wcs, overlap_differences, reproject_image
 )
-from pipnick.mosaic.psfmatch import (
-    image_kernel, moffat_beta, moffat_fwhm, normalized_convolve
-)
+from pipnick.mosaic.psfmatch import image_kernel, normalized_convolve
 from pipnick.mosaic.scaling import solve_offsets
 from pipnick.photometry.aperture_photometry import aperture_analysis
 from pipnick.photometry.psf_photometry import build_moffat_psf_model, subtract_background
-from pipnick.pipelines.reduction import load_setup, plan_products, table_values
 from pipnick.pkg.exceptions import (
     PipnickDataModelError, PipnickParameterError, PipnickPathError
 )
-from pipnick.pkg.paths import photometry_table, step_dir
+from pipnick.pkg.paths import step_dir
 from pipnick.pkg.provenance import image_hash, json_hash, solution_hash
 from pipnick.utils.crossmatch import match_sky
-
-
-def check_mosaic_groups(metadata, metafile):
-    """
-    Check the mosaic labels of a per-setup metadata table.
-
-    Parameters
-    ----------
-    metadata : :class:`astropy.table.Table`
-        The metadata table; see :func:`~pipnick.pipelines.reduction.load_setup`.
-    metafile : :class:`pathlib.Path`
-        The metadata file, used in messages.
-
-    Raises
-    ------
-    :exc:`~pipnick.pkg.exceptions.PipnickDataModelError`
-        Raised if the frames of one combination group (``comb_id``) have
-        different labels, or one mosaic has several WCS groups.
-    """
-    if 'mosaic' not in metadata.colnames:
-        return
-    errors = []
-    for comb_id in np.unique(metadata['comb_id']):
-        rows = metadata[metadata['comb_id'] == comb_id]
-        for name in ['mosaic', 'wcs_group']:
-            if len(set(str(v) for v in rows[name])) > 1:
-                errors.append(
-                    f'the frames of combination group {comb_id} have different {name} labels'
-                )
-    for label in set(str(v) for v in metadata['mosaic']) - {''}:
-        groups = set(str(v) for v in metadata['wcs_group'][metadata['mosaic'] == label])
-        if len(groups) > 1:
-            errors.append(f'mosaic {label} has several WCS groups: {", ".join(sorted(groups))}')
-    if len(errors) > 0:
-        raise PipnickDataModelError(f'Invalid mosaics in {metafile.name}: ' + '; '.join(errors))
 
 
 def collect_images(tables, require_photometry=True):
@@ -115,81 +78,54 @@ def collect_images(tables, require_photometry=True):
     Returns
     -------
     list
-        One dictionary per image, with the table, its reduction directory and
-        camera, the image ``path``, its header (``hdr``), WCS and shape, its
-        ``mosaic`` and ``wcs_group`` labels (the WCS group defaults to the
-        mosaic label), filter, exposure time, airmass, MJD, night (UT date),
-        and photometry table (``phot``, None if not required and missing).
+        The :class:`~pipnick.datamodel.image.ReducedImage` objects with a
+        mosaic label; see :func:`mosaic_label` and :func:`wcs_group`.
 
     Raises
     ------
     :exc:`~pipnick.pkg.exceptions.PipnickDataModelError`
-        Raised if the labels are invalid (see :func:`check_mosaic_groups`), an
-        image is not from the setup of its table or has no astrometric
-        solution, or its photometry table is missing (when required) or out
-        of date.
+        Raised if the labels are invalid (see
+        :func:`~pipnick.datamodel.dataset.check_mosaic_groups`), an image is
+        not from the setup of its table or has no astrometric solution,
+        exposure time, or MJD, or its photometry table is missing (when
+        required) or out of date.
     """
     images = []
     for table in tables:
-        metafile, metadata, rdxdir, tag, camera = load_setup(table)
-        if 'mosaic' not in metadata.colnames or np.all(metadata['mosaic'] == ''):
-            log.warning(f'{metafile.name} defines no mosaics.')
+        dataset = DataSet.from_file(table, check_mosaics=True)
+        if 'mosaic' not in dataset.table.colnames or np.all(dataset.table['mosaic'] == ''):
+            log.warning(f'{dataset.metafile.name} defines no mosaics.')
             continue
-        check_mosaic_groups(metadata, metafile)
-        for product in plan_products(metadata, rdxdir):
-            if product['frametype'] != 'science':
+        for image in dataset.science_images():
+            if len(mosaic_label(image)) == 0:
                 continue
-            i = product['indx'][0]
-            label = str(metadata['mosaic'][i])
-            if len(label) == 0:
-                continue
-            path = product['file']
-            if not path.is_file():
-                log.warning(f'{path.name} does not exist; reduce the data first.  Skipping.')
-                continue
-            hdr = fits.getheader(path)
-            if hdr.get('PNSETUP') != tag:
-                raise PipnickDataModelError(f'{path.name} is not from setup {tag}.')
-            if 'PNASTMTH' not in hdr:
+            if not image.has_solution:
                 raise PipnickDataModelError(
-                    f'{path.name} has no astrometric solution; run pipnick_astrometry.'
+                    f'{image.name} has no astrometric solution; run pipnick_astrometry.'
                 )
-            pfile = photometry_table(path)
-            phot = None
-            if pfile.is_file():
-                phot = Table.read(pfile, format='ascii.ecsv')
-                if (
-                    phot.meta.get('image_hash') != image_hash(hdr)
-                    or phot.meta.get('wcs_hash') != solution_hash(hdr)
-                ):
-                    raise PipnickDataModelError(
-                        f'The source table {pfile.name} is out of date; rerun '
-                        'pipnick_photometry.'
-                    )
-            elif require_photometry:
-                raise PipnickDataModelError(
-                    f'{path.name} has no source table; run pipnick_photometry.'
-                )
-            values = table_values(metadata, product['indx'], 'science')
-            mjd = None if metadata['mjd'][i] is np.ma.masked else float(metadata['mjd'][i])
-            if values['exptime'] is None or mjd is None:
-                raise PipnickDataModelError(f'{path.name} has no exposure time or MJD.')
-            wcs = wcs_from_header(hdr)
-            group = str(metadata['wcs_group'][i])
-            images.append(
-                {
-                    'table': metafile, 'rdxdir': rdxdir, 'setup': tag, 'camera': camera,
-                    'path': path, 'hdr': hdr, 'wcs': wcs,
-                    'shape': (int(hdr['NAXIS2']), int(hdr['NAXIS1'])), 'mosaic': label,
-                    'wcs_group': label if len(group) == 0 else group,
-                    'filter': values['filter'], 'exptime': float(values['exptime']),
-                    'airmass': values['airmass'], 'mjd': mjd,
-                    'night': Time(mjd, format='mjd', scale='utc').to_value('iso', subfmt='date'),
-                    'phot': phot,
-                    'scale_arcsec': float(np.sqrt(proj_plane_pixel_area(wcs)) * 3600)
-                }
-            )
+            # Check that the photometry table exists (if required) and is up to
+            # date
+            image.photometry(require=require_photometry)
+            if image.exptime is None or image.mjd is None:
+                raise PipnickDataModelError(f'{image.name} has no exposure time or MJD.')
+            images.append(image)
     return images
+
+
+def mosaic_label(image):
+    """
+    Return the mosaic label of an image; see
+    :meth:`~pipnick.datamodel.dataset.DataSet.mosaic_labels`.
+    """
+    return image.dataset.mosaic_labels(image.product)[0]
+
+
+def wcs_group(image):
+    """
+    Return the WCS group of an image, which defaults to its mosaic label; see
+    :meth:`~pipnick.datamodel.dataset.DataSet.mosaic_labels`.
+    """
+    return image.dataset.mosaic_labels(image.product)[1]
 
 
 def _validate(images):
@@ -209,26 +145,26 @@ def _validate(images):
     """
     mosaics = {}
     for image in images:
-        mosaics.setdefault(image['mosaic'], []).append(image)
+        mosaics.setdefault(mosaic_label(image), []).append(image)
     for label, members in mosaics.items():
-        groups = sorted({m['wcs_group'] for m in members})
+        groups = sorted({wcs_group(m) for m in members})
         if len(groups) > 1:
             raise PipnickDataModelError(
                 f'Mosaic {label} has several WCS groups in different tables: '
                 f'{", ".join(groups)}.'
             )
-        nights = sorted({m['night'] for m in members})
+        nights = sorted({m.night for m in members})
         if len(nights) > 1:
             raise PipnickDataModelError(
                 f'Mosaic {label} combines images from several nights ({", ".join(nights)}); '
                 'mosaics of several nights are not yet supported.'
             )
-        filters = sorted({str(m['filter']) for m in members})
+        filters = sorted({str(m.filter) for m in members})
         if len(filters) > 1:
             log.warning(
                 f'Mosaic {label} combines images with different filters: {", ".join(filters)}.'
             )
-        setups = sorted({m['setup'] for m in members})
+        setups = sorted({m.dataset.tag for m in members})
         log.info(
             f'Mosaic {label}: {len(members)} images; WCS group {groups[0]}; night {nights[0]}; '
             f'setups {", ".join(setups)}.'
@@ -238,26 +174,23 @@ def _validate(images):
 
 def _psf(image):
     """
-    Return the Moffat parameters, fit type, FWHM (arcsec), and power index of
-    the PSF of an image, from its photometry table.
+    Return the PSF model of an image, from its photometry table, with its FWHM
+    along the major axis (arcsec; see
+    :attr:`~pipnick.datamodel.psf.PSFModel.fwhm_major`) and its power index.
 
     Raises
     ------
     :exc:`~pipnick.pkg.exceptions.PipnickDataModelError`
         Raised if the image has no photometry table or PSF model.
     """
-    phot = image['phot']
+    phot = image.photometry(require=False)
     if phot is None or phot.meta.get('psf', {}).get('fwhm_pix', -1) <= 0:
         raise PipnickDataModelError(
-            f'{image["path"].name} has no PSF model; run pipnick_photometry, or turn off the '
+            f'{image.name} has no PSF model; run pipnick_photometry, or turn off the '
             'PSF matching.'
         )
-    psf = phot.meta['psf']
-    par = [float(p) for p in psf['par']]
-    return (
-        par, psf['fittype'], moffat_fwhm(par, psf['fittype']) * image['scale_arcsec'],
-        moffat_beta(par, psf['fittype'])
-    )
+    psf = PSFModel.from_meta(phot.meta['psf'])
+    return psf, psf.fwhm_major * image.pixel_scale, psf.beta
 
 
 def psf_target(images, margin=1.05, outlier=1.5):
@@ -270,16 +203,16 @@ def psf_target(images, margin=1.05, outlier=1.5):
     the median, because they degrade the resolution of all of the others.
     """
     psfs = [_psf(image) for image in images]
-    fwhm = np.array([p[2] for p in psfs])
+    fwhm = np.array([p[1] for p in psfs])
     median = np.median(fwhm)
     for image, f in zip(images, fwhm):
         if f > outlier * median:
             log.warning(
-                f'The PSF FWHM of {image["path"].name} ({f:.2f} arcsec) is much larger than the '
+                f'The PSF FWHM of {image.name} ({f:.2f} arcsec) is much larger than the '
                 f'median ({median:.2f} arcsec), and sets the target of the PSF matching.  '
                 'Consider excluding it from the mosaic.'
             )
-    return margin * float(np.max(fwhm)), float(np.median([p[3] for p in psfs]))
+    return margin * float(np.max(fwhm)), float(np.median([p[2] for p in psfs]))
 
 
 def group_wcs(images, wcs_file, pixel_scale=None, overwrite=False):
@@ -304,7 +237,7 @@ def group_wcs(images, wcs_file, pixel_scale=None, overwrite=False):
     ghash = json_hash(
         {
             'images': sorted(
-                [str(image['path']), solution_hash(image['hdr'])] for image in images
+                [str(image.path), solution_hash(image.header)] for image in images
             ),
             'pixel_scale': pixel_scale
         }
@@ -315,7 +248,7 @@ def group_wcs(images, wcs_file, pixel_scale=None, overwrite=False):
             return wcs_from_header(hdr), (int(hdr['PNNAXIS2']), int(hdr['PNNAXIS1'])), ghash
         log.info(f'The membership of WCS group {wcs_file.stem} changed; recomputing its WCS.')
     wcs, shape = output_wcs(
-        [image['wcs'] for image in images], [image['shape'] for image in images],
+        [image.wcs for image in images], [image.shape for image in images],
         pixel_scale=pixel_scale
     )
     hdr = wcs.to_header()
@@ -360,16 +293,12 @@ def prepare_image(image, background='constant'):
     good : :class:`numpy.ndarray`
         Boolean array selecting the good pixels.
     """
-    with fits.open(image['path']) as hdu:
-        data = np.asarray(hdu[0].data, dtype=float)
-        mask = np.asarray(hdu['MASK'].data) > 0 if 'MASK' in hdu else np.zeros(data.shape, bool)
-        if 'UNCERT' in hdu:
-            err = np.asarray(hdu['UNCERT'].data, dtype=float)
-        else:
-            log.warning(f'{image["path"].name} has no uncertainty; using unit errors.')
-            err = np.ones(data.shape, dtype=float)
-    good = np.logical_not(mask) & np.isfinite(data) & np.isfinite(err) & (err > 0)
-    t = image['exptime']
+    data, mask, err, _ = read_reduced(image.path)
+    if err is None:
+        log.warning(f'{image.name} has no uncertainty; using unit errors.')
+        err = np.ones(data.shape, dtype=float)
+    good = np.logical_not(mask | invalid_error(err)) & np.isfinite(data)
+    t = image.exptime
     data = np.where(good, data, 0.) / t
     var = np.where(good, err, 0.)**2 / t**2
     data = np.where(good, data - _background(data, good, background), 0.)
@@ -391,7 +320,7 @@ def _source_mags(image, data, var, good, target_pix, settings):
     Sources with a signal-to-noise ratio below ``settings['min_snr']``, or
     without a local background, are excluded.
     """
-    phot = image['phot']
+    phot = image.photometry(require=False)
     ok = (
         (np.asarray(phot['flags']) == 0)
         & np.logical_not(np.ma.getmaskarray(np.ma.asarray(phot['flux_aper'])))
@@ -418,7 +347,7 @@ def _source_mags(image, data, var, good, target_pix, settings):
         flux = np.where(has_bkg, np.ma.filled(flux, 0.), 0.)
         err = np.where(has_bkg, np.ma.filled(err, 0.), 0.)
     else:
-        t = image['exptime']
+        t = image.exptime
         flux = np.ma.filled(np.ma.asarray(phot['flux_psf'], dtype=float), 0.)[ok] / t
         err = np.ma.filled(np.ma.asarray(phot['flux_psf_err'], dtype=float), 0.)[ok] / t
     keep = (flux > 0) & (err > 0) & (flux > settings['min_snr'] * err)
@@ -461,7 +390,7 @@ def measure_offsets(images, prepared, targets, settings):
     if settings['scale'] == 'none' or n == 1:
         return np.zeros(n), np.zeros(n), np.ones(n, dtype=bool), np.zeros(n, dtype=int), reference
     if settings['scale'] == 'calib':
-        zp = [image['hdr'].get('PNCALZP') for image in images]
+        zp = [image.header.get('PNCALZP') for image in images]
         if any(z is None for z in zp):
             raise PipnickDataModelError(
                 'Not all images have a photometric calibration (PNCALZP); run pipnick_calibrate '
@@ -491,7 +420,7 @@ def measure_offsets(images, prepared, targets, settings):
     for image, s in zip(images, scaled):
         if not s:
             log.warning(
-                f'{image["path"].name} shares too few sources with the other images (fewer than '
+                f'{image.name} shares too few sources with the other images (fewer than '
                 f'{settings["min_common"]} per pair) to be scaled; it is not scaled.'
             )
     return offset, error, scaled, nused, reference
@@ -505,9 +434,9 @@ def _reference(images, reference):
     """
     if reference is not None:
         for i, image in enumerate(images):
-            if reference in [image['path'].name, image['path'].stem]:
+            if reference in [image.name, image.path.stem]:
                 return i
-    airmass = [np.inf if image['airmass'] is None else image['airmass'] for image in images]
+    airmass = [np.inf if image.airmass is None else image.airmass for image in images]
     return int(np.argmin(airmass))
 
 
@@ -543,10 +472,10 @@ def build_mosaic(images, wcs_out, shape_out, target, settings):
     for image in images:
         data, var, good = prepare_image(image, background=settings['background'])
         if target is not None:
-            par, fittype, _, _ = _psf(image)
-            target_pix = target[0] / image['scale_arcsec']
+            psf, _, _ = _psf(image)
+            target_pix = target[0] / image.pixel_scale
             kernel, used, ee_ratio = image_kernel(
-                par, fittype, target_pix, target[1], method=settings['kernel']
+                psf, target_pix, target[1], method=settings['kernel']
             )
             data, var, good = normalized_convolve(data, var, good, kernel)
             kernels.append(used)
@@ -572,13 +501,13 @@ def build_mosaic(images, wcs_out, shape_out, target, settings):
             -1. if target is None else _achieved_fwhm(image, data, good, t, target[1])
         )
         weights.append(1. / float(np.median(var[good])))
-        bbox = footprint_bbox(image['wcs'], image['shape'], wcs_out, shape_out)
+        bbox = footprint_bbox(image.wcs, image.shape, wcs_out, shape_out)
         if bbox is None:
-            raise PipnickDataModelError(f'{image["path"].name} does not overlap the mosaic.')
+            raise PipnickDataModelError(f'{image.name} does not overlap the mosaic.')
         sub = wcs_out[bbox]
         shape = (bbox[0].stop - bbox[0].start, bbox[1].stop - bbox[1].start)
         d, v, g = reproject_image(
-            data, var, good, image['wcs'], sub, shape, method=settings['reproject']
+            data, var, good, image.wcs, sub, shape, method=settings['reproject']
         )
         reprojected.append((bbox, d, v, g))
     _check_overlap(images, reprojected)
@@ -603,24 +532,25 @@ def build_mosaic(images, wcs_out, shape_out, target, settings):
     expmap = np.zeros(shape_out, dtype=float)
     nreject = np.zeros(shape_out, dtype=int)
     for (bbox, _, _, g), u, image in zip(reprojected, used, images):
-        expmap[bbox] += u * image['exptime']
+        expmap[bbox] += u * image.exptime
         nreject[bbox] += g & np.logical_not(u)
     if nrej > 0:
         log.info(f'Rejected {nrej} outlying pixels.')
 
     inputs = Table()
-    inputs['image'] = [image['path'].name for image in images]
-    inputs['table'] = [image['table'].name for image in images]
-    inputs['setup'] = [image['setup'] for image in images]
-    inputs['night'] = [image['night'] for image in images]
-    inputs['image_hash'] = [image_hash(image['hdr']) for image in images]
-    inputs['wcs_hash'] = [solution_hash(image['hdr']) for image in images]
-    inputs['exptime'] = [image['exptime'] for image in images]
-    inputs['airmass'] = [-1. if image['airmass'] is None else image['airmass'] for image in images]
-    inputs['fwhm_in'] = [
-        _psf(image)[2] if image['phot'] is not None and 'psf' in image['phot'].meta else -1.
-        for image in images
-    ]
+    inputs['image'] = [image.name for image in images]
+    inputs['table'] = [image.dataset.metafile.name for image in images]
+    inputs['setup'] = [image.dataset.tag for image in images]
+    inputs['night'] = [image.night for image in images]
+    inputs['image_hash'] = [image_hash(image.header) for image in images]
+    inputs['wcs_hash'] = [solution_hash(image.header) for image in images]
+    inputs['exptime'] = [image.exptime for image in images]
+    inputs['airmass'] = [-1. if image.airmass is None else image.airmass for image in images]
+    fwhm_in = []
+    for image in images:
+        phot = image.photometry(require=False)
+        fwhm_in.append(_psf(image)[1] if phot is not None and 'psf' in phot.meta else -1.)
+    inputs['fwhm_in'] = fwhm_in
     inputs['fwhm_out'] = achieved
     inputs['kernel'] = kernels
     inputs['match_ee'] = ee_ratios
@@ -668,9 +598,9 @@ def _achieved_fwhm(image, data, good, target_pix, target_beta):
         par = np.clip(par, lb + margin, ub - margin)
         fit.fit(p0=par, fix=np.array([False, False, False, False, True, False]))
     except (ValueError, RuntimeError) as e:
-        log.warning(f'Could not measure the matched PSF of {image["path"].name}: {e}')
+        log.warning(f'Could not measure the matched PSF of {image.name}: {e}')
         return -1.
-    return moffat_fwhm(fit.par, 'circ') * image['scale_arcsec']
+    return PSFModel.from_fit(fit).fwhm * image.pixel_scale
 
 
 def _check_overlap(images, reprojected):
@@ -700,7 +630,7 @@ def _check_overlap(images, reprojected):
                 overlaps = True
                 break
         if not overlaps:
-            log.warning(f'{image["path"].name} does not overlap any other image of its mosaic.')
+            log.warning(f'{image.name} does not overlap any other image of its mosaic.')
 
 
 def _product(
@@ -710,13 +640,13 @@ def _product(
     Construct the FITS file of a mosaic; see :func:`mosaic_all`.
     """
     hdr = wcs_out.to_header()
-    filters = sorted({str(image['filter']) for image in images})
+    filters = sorted({str(image.filter) for image in images})
     hdr['BUNIT'] = 'electron/s'
     hdr['FILTER'] = (filters[0] if len(filters) == 1 else 'mixed', 'Filter of the images')
     hdr['NCOMBINE'] = (len(images), 'Number of images combined')
-    hdr['PNMOSAIC'] = (images[0]['mosaic'], 'Mosaic label')
-    hdr['PNWCSGRP'] = (images[0]['wcs_group'], 'WCS group label')
-    hdr['PNNIGHT'] = (images[0]['night'], 'UT date of the observations')
+    hdr['PNMOSAIC'] = (mosaic_label(images[0]), 'Mosaic label')
+    hdr['PNWCSGRP'] = (wcs_group(images[0]), 'WCS group label')
+    hdr['PNNIGHT'] = (images[0].night, 'UT date of the observations')
     hdr['PNPSFMAT'] = (
         settings['psf_match'] if target is not None else 'none', 'PSF matching: mosaic/group/none'
     )
@@ -725,7 +655,7 @@ def _product(
         hdr['PNTGBETA'] = (target[1], 'Target PSF Moffat power index')
         hdr['PNKERNEL'] = (settings['kernel'], 'PSF matching kernel')
     hdr['PNSCALE'] = (settings['scale'], 'Flux scaling: sources, calib, or none')
-    hdr['PNREFIMG'] = (images[ref]['path'].name, 'Reference image of the flux scale')
+    hdr['PNREFIMG'] = (images[ref].name, 'Reference image of the flux scale')
     hdr['PNNSCALE'] = (int(np.sum(inputs['scaled'])), 'Number of images on the flux scale')
     hdr['PNBKG'] = (settings['background'], 'Background subtraction')
     hdr['PNBKGMAT'] = (settings['match_background'], 'Background levels matched in overlaps')
@@ -734,7 +664,7 @@ def _product(
     hdr['PNREJFRC'] = (settings['rej_frac'], 'Fractional error in the rejection')
     hdr['PNNREJ'] = (nrej, 'Number of rejected pixels')
     hdr['PNUNCTYP'] = ('density', 'UNCERT is a noise density; see pipnick docs')
-    zp = images[ref]['hdr'].get('PNCALZP')
+    zp = images[ref].header.get('PNCALZP')
     if zp is not None:
         hdr['PHOTZP'] = (zp, 'Zero point of the reference image (e-/s), color 0')
     if len(filters) > 1:
@@ -902,14 +832,14 @@ def mosaic_all(
         log.warning('No mosaics are defined; see pipnick_metadata --assign_mosaics.')
         return []
     if outdir is None:
-        _outdir = step_dir(images[0]['rdxdir'], 'mosaic')
+        _outdir = step_dir(images[0].dataset.rdxdir, 'mosaic')
     else:
         _outdir = Path(outdir).absolute()
     if not _outdir.parent.is_dir():
         raise PipnickPathError(f'{_outdir.parent} does not exist.')
     mosaic_images = _validate(images)
     if reference is not None and not any(
-        reference in [image['path'].name, image['path'].stem] for image in images
+        reference in [image.name, image.path.stem] for image in images
     ):
         raise PipnickParameterError(f'The reference image {reference} is not in any mosaic.')
     if mosaics is not None:
@@ -919,10 +849,10 @@ def mosaic_all(
 
     outputs = []
     summary = []
-    groups = sorted({image['wcs_group'] for image in images})
+    groups = sorted({wcs_group(image) for image in images})
     for group in groups:
-        members = [image for image in images if image['wcs_group'] == group]
-        labels = sorted({image['mosaic'] for image in members})
+        members = [image for image in images if wcs_group(image) == group]
+        labels = sorted({mosaic_label(image) for image in members})
         if mosaics is not None:
             labels = [label for label in labels if label in mosaics]
         if len(labels) == 0:
@@ -935,7 +865,7 @@ def mosaic_all(
         )
         for label in labels:
             ofile = _outdir / f'{label}.fits'
-            these = [image for image in members if image['mosaic'] == label]
+            these = [image for image in members if mosaic_label(image) == label]
             if psf_match == 'group':
                 target = group_target
             elif psf_match == 'mosaic' and len(these) > 1:
@@ -951,7 +881,7 @@ def mosaic_all(
                 }
             )
             row = {
-                'mosaic': label, 'wcs_group': group, 'filter': str(these[0]['filter']),
+                'mosaic': label, 'wcs_group': group, 'filter': str(these[0].filter),
                 'nimages': len(these), 'nscaled': -1, 'target_fwhm': -1., 'status': 'failed',
                 'file': ofile.name
             }
@@ -985,9 +915,9 @@ def _image_key(image):
     path, the hashes of its content and astrometric solution, and the hash of
     its photometry settings.
     """
-    phot = image['phot']
+    phot = image.photometry(require=False)
     return [
-        str(image['path']), image_hash(image['hdr']), solution_hash(image['hdr']),
+        str(image.path), image_hash(image.header), solution_hash(image.header),
         None if phot is None else phot.meta.get('settings_hash')
     ]
 

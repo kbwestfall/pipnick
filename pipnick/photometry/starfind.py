@@ -15,6 +15,7 @@ from photutils.detection import DAOStarFinder
 from skimage import transform
 
 from pipnick import log
+from pipnick.image.io import read_reduced
 
 
 def as_masked_array(image):
@@ -34,9 +35,11 @@ def as_masked_array(image):
     """
     if isinstance(image, np.ndarray):
         return np.ma.MaskedArray(image, mask=np.ma.getmaskarray(image))
-    ccd = image if isinstance(image, CCDData) else CCDData.read(image)
-    mask = np.zeros(ccd.data.shape, dtype=bool) if ccd.mask is None else ccd.mask
-    return np.ma.MaskedArray(np.asarray(ccd.data, dtype=float), mask=mask)
+    if isinstance(image, CCDData):
+        mask = np.zeros(image.data.shape, dtype=bool) if image.mask is None else image.mask
+        return np.ma.MaskedArray(np.asarray(image.data, dtype=float), mask=mask)
+    data, mask, _, _ = read_reduced(image)
+    return np.ma.MaskedArray(data, mask=mask)
 
 
 def plot_stamps(stamps, pdf_file, vmin=None, vmax=None):
