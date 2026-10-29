@@ -499,7 +499,7 @@ def _product(
     hdr['PNUNCTYP'] = ('density', 'UNCERT is a noise density; see pipnick docs')
     zp = images[ref].header.get('PNCALZP')
     if zp is not None:
-        hdr['PHOTZP'] = (zp, 'Zero point of the reference image (e-/s), color 0')
+        hdr['PHOTZP'] = (zp, 'Reference image zero point (e-/s), color 0')
     if len(filters) > 1:
         hdr['PNWARN'] = 'Images with different filters were combined'
     nunscaled = len(images) - int(np.sum(inputs['scaled']))

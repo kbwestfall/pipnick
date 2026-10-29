@@ -7,8 +7,10 @@ astrometry.net or the Gaia archive (see ``conftest.py``).
 import gzip
 import io
 import logging
+import types
 from pathlib import Path
 
+import astroquery.exceptions
 import matplotlib.image
 import numpy as np
 import pytest
@@ -937,3 +939,157 @@ def test_qa_and_detection(tmp_path, caplog):
     missing.unlink()
     astrometry_all(table, rdxdir=rdxdir, solver=solver, catalog=catalog, qa=False)
     assert not missing.is_file(), 'No QA figure should be drawn if qa is False'
+
+
+class FakeClient:
+    """
+    Stand-in for the ``astroquery`` astrometry.net client of
+    :class:`~pipnick.astrometry.services.AstrometryNetSolver`, which records
+    its calls and returns a preset result: a header (a dictionary; empty for a
+    failed job), or an exception to raise.
+    """
+    def __init__(self, result):
+        self.result = result
+        self.calls = []
+
+    def _respond(self, name, args, kwargs):
+        self.calls.append((name, args, kwargs))
+        if isinstance(self.result, Exception):
+            raise self.result
+        return self.result, 'sub42'
+
+    def solve_from_source_list(self, *args, **kwargs):
+        return self._respond('sources', args, kwargs)
+
+    def solve_from_image(self, *args, **kwargs):
+        return self._respond('image', args, kwargs)
+
+    def monitor_submission(self, *args, **kwargs):
+        return self._respond('monitor', args, kwargs)
+
+
+def test_astrometry_net_adapter(tmp_path):
+    solver = AstrometryNetSolver(api_key='not-a-real-key', solve_timeout=30)
+    hints = {'scale_units': 'arcsecperpix', 'scale_lower': 0.3, 'scale_upper': 0.4}
+    x = np.array([10., 20.5])
+    y = np.array([5., 0.])
+
+    solver._client = FakeClient({'CTYPE1': 'RA---TAN', 'CRVAL1': 282.77})
+    status, header, sid = solver.solve_sources(x, y, 400, 300, hints)
+    assert status == 'solved' and sid == 'sub42' and header['CRVAL1'] == 282.77, (
+        'A returned solution should be solved, with its header and submission ID'
+    )
+    assert isinstance(header, fits.Header), 'The solution should be a FITS header'
+    name, args, kwargs = solver._client.calls[0]
+    assert np.array_equal(args[0], x + 1) and np.array_equal(args[1], y + 1), (
+        'The 0-based positions should be submitted in the 1-based convention of astrometry.net'
+    )
+    assert args[2:] == (400, 300), 'The size of the image should be submitted'
+    assert kwargs['solve_timeout'] == 30 and kwargs['return_submission_id'], (
+        'The timeout should be passed, and the submission ID requested'
+    )
+    assert all(kwargs[k] == v for k, v in hints.items()), 'The hints should be passed'
+
+    path = tmp_path / 'image.fits'
+    status, _, sid = solver.solve_image(path, hints)
+    name, args, kwargs = solver._client.calls[-1]
+    assert status == 'solved' and args[0] == str(path) and kwargs['force_image_upload'], (
+        'An uploaded image should be submitted by its path'
+    )
+
+    solver._client = FakeClient({})
+    assert solver.solve_sources(x, y, 400, 300, hints) == ('failed', None, 'sub42'), (
+        'An empty result should be a failed job'
+    )
+    assert solver.monitor('sub9') == ('failed', None, 'sub9'), (
+        'A monitored job that failed should keep its submission ID'
+    )
+
+    # The exception raised by astroquery when a job does not finish
+    solver._client = FakeClient(astroquery.exceptions.TimeoutError('not finished', 'sub7'))
+    assert solver.solve_sources(x, y, 400, 300, hints) == ('pending', None, 'sub7'), (
+        'A job that did not finish should be pending, with its submission ID'
+    )
+    assert solver.solve_image(path, hints) == ('pending', None, 'sub7'), (
+        'An upload that did not finish should be pending'
+    )
+    assert solver.monitor('sub9') == ('pending', None, 'sub9'), (
+        'A monitored job that did not finish should stay pending'
+    )
+
+
+class DistortingSolver(FakeSolver):
+    """
+    A :class:`FakeSolver` whose solutions have the wrong pixel scale
+    (``error='scale'``), or are centered far from the pointing
+    (``error='offset'``).
+    """
+    def __init__(self, truth, coords, error):
+        super().__init__(truth, coords)
+        self.error = error
+
+    def header(self, name):
+        hdr = super().header(name)
+        if self.error == 'scale':
+            for key in ['CD1_1', 'CD1_2', 'CD2_1', 'CD2_2', 'PC1_1', 'PC1_2', 'PC2_1', 'PC2_2']:
+                if key in hdr:
+                    hdr[key] *= 2.
+            if 'CDELT1' in hdr:
+                hdr['CDELT1'] *= 2.
+                hdr['CDELT2'] *= 2.
+        else:
+            hdr['CRVAL2'] += 0.5
+        return hdr
+
+
+def test_check_submission(tmp_path, caplog):
+    images = {'n7001': ((0., 0.), 0.)}
+    cases = [('scale', 'wrong pixel scale'), ('offset', 'too far from the pointing')]
+    for error, message in cases:
+        workdir = tmp_path / error
+        workdir.mkdir()
+        table, rdxdir, truth, coords, flux = write_field(workdir, images=images)
+        solver = DistortingSolver(truth, coords, error)
+        caplog.clear()
+        with caplog.at_level(logging.WARNING):
+            astrometry_all(
+                table, rdxdir=rdxdir, solver=solver, catalog=FakeCatalog(coords, flux),
+                wide_search=0., qa=False
+            )
+        assert len(solver.calls) == 1, 'The image should have been submitted'
+        assert message in caplog.text, (
+            f'An astrometry.net solution with an error ({error}) should be rejected'
+        )
+        path = DataSet.from_file(table, rdxdir=rdxdir).science_images()[0].path
+        assert fits.getheader(path).get('PNASTMTH') != 'astrometry.net', (
+            'A rejected astrometry.net solution should not be applied'
+        )
+
+
+def test_fit_from_few_matches():
+    ref = true_wcs(FIELD_CENTER)
+    rotation = 0.01
+    shift = np.array([12.3, -7.6])
+    c = np.cos(rotation)
+    s = np.sin(rotation)
+
+    def to_reference(x, y):
+        # A pixel of the image in the pixel coordinates of the reference
+        return c * x - s * y + shift[0], s * x + c * y + shift[1]
+
+    rng = np.random.default_rng(4)
+    x = rng.uniform(30., SHAPE[1] - 30., 5)
+    y = rng.uniform(30., SHAPE[0] - 30., 5)
+    coords = ref.pixel_to_world(*to_reference(x, y))
+    image = types.SimpleNamespace(sources=Table({'x': x, 'y': y}), shape=SHAPE)
+    match = {'indx': np.arange(5), 'rotation': rotation, 'shift': shift}
+    wcs, stats = solve._fit_matched(image, match, ref, coords)
+    assert stats['npts'] == 5 and stats['rms'] < 0.01, (
+        'With fewer than 6 matches, the solution should be the transformed reference solution'
+    )
+    corners = (np.array([0., SHAPE[1] - 1., 0., SHAPE[1] - 1.]),
+               np.array([0., 0., SHAPE[0] - 1., SHAPE[0] - 1.]))
+    sep = wcs.pixel_to_world(*corners).separation(ref.pixel_to_world(*to_reference(*corners)))
+    assert np.max(sep.arcsec) < 0.01, (
+        'The transformed solution should hold across the image, not only at the sources'
+    )

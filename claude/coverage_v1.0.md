@@ -317,3 +317,35 @@ At the author's request, the dead code was dealt with before any tests were adde
   so the image moments are always used (as every caller already did).
 - The tests pass (223 passed, 1 skipped), with the line-length check, and the
   docs build without warnings.
+
+## Follow-up: tests of the core gaps (2026-10-29, branch `coverage`)
+
+Tests were added for items 1–11, each run on its own, then the full suite.
+
+| Item | Tests |
+|---|---|
+| 1 | `test_mosaic.py::test_mosaic_calib_scale` |
+| 2 | `test_calibrate.py::test_fixed_terms` |
+| 3 | `test_calibrate.py::test_outlier_rejection` |
+| 4 | `test_astrometry.py::test_astrometry_net_adapter` (with `FakeClient`) |
+| 5 | `test_astrometry.py::test_check_submission` (with `DistortingSolver`), `test_fit_from_few_matches` |
+| 6 | `test_scripts.py` (every script's `main`, on synthetic data) |
+| 7 | `test_reduction.py::test_default_reduction_dir` |
+| 8 | `test_calibrate.py::test_remove_header_calibration` |
+| 9 | `test_mosaic.py::test_mosaic_reference_and_psf_fluxes`, `test_mosaic_mixed_filters`, `test_kernel_fallback`, `test_solve_offsets_rejection`, `test_reproject_methods` (and `PHOTZP` in `test_mosaic_calib_scale`) |
+| 10 | `test_reduction.py::test_reduce_without_calibrations`, `test_reduce_stale_outputs`; `test_photometry.py::test_stale_photometry_guard`; `test_calibrate.py::test_stale_photometry` |
+| 11 | `test_mosaic.py::test_default_mosaic_radius` |
+
+- **Result:** the full suite passes (247 passed, 1 skipped), and the docs build
+  without warnings.  Every line named for items 1–11 above is now covered;
+  the total coverage is 92% (from 85%, partly from the removal of the dead
+  code), and the scripts' statements are 97% covered (from 23%).
+- **Defect found:** the comment of the mosaic `PHOTZP` keyword was truncated in
+  every mosaic with a calibrated reference image (49 characters do not fit
+  after the 20-character value field).  It is now `Reference image zero point
+  (e-/s), color 0`, and `test_mosaic_calib_scale` checks it.
+- **No other defects** were found.  Two test failures during the work were in
+  the tests: astroquery raises its own `TimeoutError`
+  (`astroquery.exceptions.TimeoutError`), which the adapter correctly catches;
+  and the default mosaic radius scales with the frame size, so its test uses
+  full-size frames.
