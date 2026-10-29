@@ -2,7 +2,8 @@ Version 0.1.0dev
 ================
 
 The first versioned development release of ``pipnick``, following the original
-pipeline developed for an Akamai 2024 internship project.
+pipeline developed by Allison Eto as part of her Akamai internship in 2024.  The
+log below indicates changes made since that initial development.
 
 Breaking Changes
 ----------------

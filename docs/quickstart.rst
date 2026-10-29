@@ -3,32 +3,47 @@
 Quick start
 ===========
 
-This tutorial takes one night of Nickel data from the raw frames to
-calibrated source catalogs and image mosaics.  The excerpts and figures are
-from a real night: the Andor camera on 2026-08-17 (UT 2026-08-20), with
-images of the open cluster M11 and of the standard-star field SA 111 1965 in
-B, V, R, and I.  The logs are abridged.
+This tutorial walks through all of the functionality available through pipnick
+as applied to one night of Nickel data.
 
-Each step is one command, run on the table of the frames of one instrument
-setup.  Every step ends with a verdict (``OK``, ``NEEDS ATTENTION``, or
-``FAILED``) and the next command to run, and can be rerun at any time: it
-only redoes what changed.  See :doc:`common`.
+The excerpts and figures are from commissioning data obtained for the new Andor
+camera on UT 2026-08-20, night 3 of a 4-night run.  The data set includes bias
+and dome-flat frames, but no sky-flat frames.  Science images include BVRI
+images of the open cluster M11 and of the standard-star field SA 111 1965.
 
-Before you start, install pipnick and set up your astrometry.net API key;
-see :doc:`install`.
+Each step discussed below is one command, typically run on the table of the
+frames collected into a metadata table by the first step.  Every step ends with
+an assessment of the success of the processing (``OK``, ``NEEDS ATTENTION``, or
+``FAILED``) and suggests the next command to run.  Although there is an optimal
+order, each step can be run at anytime.  The code will raise an error if it does
+not have all the required data to complete the step.  And when re-run on a given
+dataset, it will only redo processing if something has changed in the results
+from one of the previous steps (unless you force it to redo the step).  For more
+information along these lines, see :doc:`common`.
+
+Before you start, make sure you have installed pipnick and set up your
+astrometry.net API key; see :doc:`install`.
 
 1. Build the tables of raw frames
 ---------------------------------
+
+First, you must parse relevant metadata from all the raw data.  This data is the
+primary information that pipnick needs to plan out how to process your data.  To
+build the data table, run:
 
 .. code-block:: console
 
     pipnick_metadata -d raw -t n3.ecsv --split --assign_mosaics
 
-``-d`` is the directory with the raw frames of the night.  ``pipnick_metadata``
-reads their headers, classifies them, and, with ``--split``, writes one table
-per instrument setup (binning, readout mode, and readout window).  With
-``--assign_mosaics``, the science frames are grouped into mosaics by pointing
-and filter.
+``-d`` is the directory that contains the raw frames.  ``pipnick_metadata``
+reads the header of each file, classifies it, and, with ``--split``, writes one
+table per instrument setup.  The instrument setup is determined by unique
+combinations of the binning, readout mode, and readout window used to obtain the
+observations.  With ``--assign_mosaics``, the science frames are grouped into
+mosaics by pointing and filter.
+
+The script will print many messages to the screen as it works, which will look
+like this:
 
 .. code-block:: text
 
@@ -52,14 +67,28 @@ and filter.
         ...
     [INFO] - METADATA OK: 268 frames in 6 table(s).
 
-The rest of this tutorial reduces setup D, ``n3_2x2_fast_full.ecsv``.  Setup C
-would be reduced the same way, in its own reduction directory.
+Because this was a commissioning run, we were testing many modes of the camera,
+such that the code identified 6 different camera configurations.  A more typical
+observing night should only find one.
 
-**Look at the table before going on.**  It is a text file, and the reduction
-does exactly what it says: comment out bad frames (with ``#``), correct object
-names or filters, and change which frames are combined (``comb_id``) or
-mosaicked (``mosaic``, ``wcs_group``).  Here, the focus and pointing frames
-were commented out automatically.  See :doc:`metadata`.
+For the rest of this tutorial, we will focus on reducing the data identified as
+setup D, ``n3_2x2_fast_full.ecsv``.  Setup C would be reduced the same way, in
+its own reduction directory.
+
+.. important::
+
+    **It is critical that you inspect the output table!**
+
+The output file is in `ECSV
+<https://docs.astropy.org/en/stable/io/ascii/ecsv.html>`__ format, a plain text
+file that you will likely need to directly edit.  The most important edits to
+make are: comment out bad frames (place a ``#`` character at the beginning of
+the line), correct object names, filters, and frame types (``bias``,
+``domeflat``, etc), and change which frames are combined (``comb_id``) or
+mosaicked (``mosaic``, ``wcs_group``).  Frames identified as either focus or
+pointing observations should automatically be commented out.  For additional
+information, including the meaning for the different combination columns
+(``comb_id``, ``mosaic``, ``wcs_group``), see :doc:`metadata`.
 
 2. Reduce the images
 --------------------

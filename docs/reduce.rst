@@ -1,7 +1,7 @@
 .. _reduce:
 
-pipnick_reduce: basic image processing
-======================================
+Basic Image Processing
+======================
 
 ``pipnick_reduce`` turns the raw frames of one setup into reduced images: it
 subtracts the overscan and the bias, divides the science frames by the flat

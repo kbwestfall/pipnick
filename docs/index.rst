@@ -1,41 +1,37 @@
-pipnick: the data-reduction pipeline of the Nickel 1-m telescope
-================================================================
-
 .. image:: figures/pipnick-logo-with-text.png
-   :width: 240px
+   :width: 320px
    :align: center
-   :alt: The pipnick logo: the Nickel dome on a pixel grid
+   :alt: pipnick logo
 
-pipnick reduces images taken with the science cameras of the 1-meter Nickel
-telescope at Lick Observatory on Mt. Hamilton, CA.  It takes the raw frames
-of a night to reduced images with astrometric solutions, calibrated source
-catalogs, and image mosaics.
+The Photometric Imaging Pipeline for the Nickel Telescope
+=========================================================
 
-The processing is done by a sequence of scripts, each run on the table of raw
-frames of one instrument setup:
+Welcome!  pipnick is open-source Python software that processes images taken by
+the science cameras mounted on the 1-meter Nickel telescope at Lick Observatory
+on Mt. Hamilton, CA.  The code should successfully reduce and analyze taken with
+the previous C2 camera and the new Andor camera.
 
-.. code-block:: text
+Starting with the raw data obtained at the telescope, pipnick enables you to
+perform:
 
-    pipnick_metadata     the table of raw frames: frame types, setups, groups
-          |
-    pipnick_reduce       bias, flat field, cosmic rays: the reduced images
-          |
-    pipnick_astrometry   the astrometric solution of each image
-          |
-    pipnick_photometry   PSF and aperture photometry: the source tables
-          |
-    pipnick_calibrate    the photometric calibration, from standard stars
-          |
-    pipnick_mosaic       mosaics of the images of each field and filter
-          |
-    pipnick_rgb          colour images from three mosaics
+- :ref:`reduce`
+- :ref:`astrometry`
+- :ref:`photometry`
+- :ref:`calibrate`
+- :ref:`mosaic`
+- :ref:`rgb`
 
-At any point, ``pipnick_status``, ``pipnick_report``, and ``pipnick_inspect``
-show what has been done and what needs attention.  Start with
-:doc:`install` and the :doc:`quickstart`.
+The processing is done by a sequence of command-line scripts.  Each script is a
+simple wrapper of an underlying python function that can also be executed
+directly from, say, a Jupyter notebook.  We also provide status and inspection
+functions that can be executed at any time to determine the state and success of
+each processing step.
+
+To use pipnick with your data, start with :doc:`install` and the
+:doc:`quickstart`.
 
 Please `submit an issue <https://github.com/UCObservatories/pipnick/issues>`__
-if you have any problems.
+if you run into bugs or have specific feature requests.
 
 .. toctree::
    :maxdepth: 2
@@ -43,4 +39,4 @@ if you have any problems.
    getting_started
    scripts
    using
-   reference
+   API <api/pipnick>

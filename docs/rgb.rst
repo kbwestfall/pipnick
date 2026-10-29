@@ -1,7 +1,7 @@
 .. _rgb:
 
-pipnick_rgb: colour images
-==========================
+Three-color Image Construction
+==============================
 
 ``pipnick_rgb`` makes a three-colour image from three images of the same
 area of sky, e.g., the mosaics of one object in three filters.

@@ -1,55 +1,78 @@
 .. _metadata:
 
-pipnick_metadata: the table of raw frames
-=========================================
+The Metadata Table
+==================
 
-``pipnick_metadata`` builds the table that defines how a night is processed:
-one row per raw frame, with its frame type, instrument setup, and the header
-quantities the reduction needs.  The table is the first product of pipnick,
-and every later step reads it.  It is meant to be edited: comment out bad
-frames, correct object names, and regroup frames before reducing them.
+Most of the pipnick scripts require a table that provides the metadata for each
+raw frame collected at the telescope that effectively defines how a night is
+processed.  The table is intended to be directly edited by the user, which is
+primary reason for it being in the human-readable, `ECSV
+<https://docs.astropy.org/en/stable/io/ascii/ecsv.html>`__ format.  The table
+includes one row per raw frame and the ``ecsv`` file also contains metadata
+about the reductions, such as the name of the directories with the raw data and
+for the processed output.
+
+This page provides additional detail on the content of the file and the script
+used to construct it, ``pipnick_metadata``.
 
 The algorithm
 -------------
 
-1. **Find the frames.**  Every file with the extension ``--ext`` (``.fits``)
-   in the raw directory is read, and its camera is identified from its header
-   (or set with ``--camera``; frames from other cameras are then skipped).
-   The supported cameras are the Nickel C2 and Andor cameras; see
+The algorithm used by ``pipnick_metadata`` is summarized as follows:
+
+#. **Find the frames.**  Every file with the extension ``--ext`` (``.fits`` by
+   default) in the raw directory is read, and its camera is identified from its
+   header (or set with ``--camera``; frames from other cameras are then
+   skipped).  The supported cameras are the Nickel C2 and Andor cameras; see
    :mod:`pipnick.cameras`.
-2. **Read the header quantities**, normalized across the cameras: object,
-   filter, exposure time, airmass, coordinates, observation time, binning,
-   readout mode, image size, and readout window.
-3. **Classify each frame** as ``bias``, ``dark``, ``domeflat``, ``skyflat``,
-   ``science``, ``focus``, ``pointing``, or ``unknown``, using the rules in the
-   camera's configuration (e.g., closed-shutter frames shorter than 1 s are
-   biases; an object name of "dome flat" marks a dome flat).
-4. **Check each frame** against the camera's ``[quality]`` limits.  From the
-   header, frames taken with the detector too warm or with an undefined
-   readout setting are rejected.  With ``--classify stats``, the image data
-   are also read, and empty images, frames with too many saturated pixels,
-   closed-shutter frames above the bias level, and flats with too little
-   light are rejected; exposed frames labeled as calibrations are
-   reclassified as biases if their level is that of a bias.  **Rejected frames
-   are commented out of the table, with the reason in the** ``note``
-   **column.**
-5. **Assign the setups.**  Frames with the same camera, binning, readout mode,
+
+#. **Read the header quantities.**  The extracted data are (normalized across
+   the two cameras): object, filter, exposure time, airmass, coordinates,
+   observation time, binning, readout mode, image size, and readout window.
+
+#. **Classify each frame.**  Based on the header data, each frame is classified
+   as a ``bias``, ``dark``, ``domeflat``, ``skyflat``, ``science``, ``focus``,
+   ``pointing``, or ``unknown``.  This classification is performed using a
+   deterministic set of rules in the camera's configuration file (e.g.,
+   closed-shutter frames shorter than 1 s are biases; an object name of "dome
+   flat" marks a dome flat).  **This classification can be wrong and must be
+   checked.**
+
+#. **Check each frame.** Each frame is compared with the camera's ``[quality]``
+   limits set in its configuration file.  From the header, frames taken when the
+   detector is too warm or with an undefined readout setting are rejected.  If
+   the ``--classify stats`` option is set, the image data are also read and an
+   image is rejected if it is empty, has too many saturated pixels, indicates
+   that the closed-shutter frames but the counts are significantly above the
+   bias level, or was identified as a flats but has too few counts.  Frames
+   labeled as calibrations are reclassified as biases if their level is that
+   expected for a bias.  **Rejected frames are commented out of the table, with
+   the reason in the** ``note`` **column.**
+
+#. **Assign the setups.**  Frames with the same camera, binning, readout mode,
    and readout window share a *setup*, labeled ``A``, ``B``, etc. in order of
    first appearance.  Calibrations can only be applied to frames of the same
    setup.
-6. With ``--split``, **write one table per setup**, add a ``comb_id`` column
-   that groups the frames to combine, and comment out the pointing and focus
-   frames.  With ``--assign_mosaics``, also label the mosaics (see
-   :doc:`mosaic`).
+
+#. **Write the file(s).** When the ``--split`` option is used, the script will
+   write one table per setup, add a ``comb_id`` column that groups the frames to
+   combine, and comment out the pointing and focus frames.  When the
+   ``--assign_mosaics`` option is used, the table also assigns frames to a set
+   of expected mosaics (see :doc:`mosaic`).
 
 Inputs
 ------
 
-- A directory of raw frames from **one night** (``-d``).  The frames are
-  only read; nothing is written to the raw directory.
+The only inputs required for this step is a directory with a set of raw frames.
 
-Running it
-----------
+.. important::
+
+    **Nothing should ever be written to the raw directory.**
+
+Execution
+---------
+
+An example call looks like this:
 
 .. code-block:: console
 

@@ -1,7 +1,7 @@
 .. _photometry:
 
-pipnick_photometry: PSF and aperture photometry
-===============================================
+Point-spread Function (PSF) and Aperture Photometry
+===================================================
 
 ``pipnick_photometry`` measures the sources in each reduced science image with
 point-spread-function (PSF) and aperture photometry, and writes a source table

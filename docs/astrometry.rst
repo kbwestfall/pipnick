@@ -1,7 +1,7 @@
 .. _astrometry:
 
-pipnick_astrometry: astrometric solutions
-=========================================
+Astrometric Calibration
+=======================
 
 ``pipnick_astrometry`` finds the astrometric solution (WCS) of each reduced
 science image and writes it to the image header.  It uses the

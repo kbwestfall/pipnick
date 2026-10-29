@@ -1,7 +1,7 @@
 .. _mosaic:
 
-pipnick_mosaic: image mosaics
-=============================
+Image Mosaicking
+================
 
 ``pipnick_mosaic`` combines reduced science images of the same area of sky
 into mosaics: dithered pointings of an extended object, or repeated exposures

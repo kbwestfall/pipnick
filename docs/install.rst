@@ -3,57 +3,111 @@
 Installation
 ============
 
-Requirements
-------------
+``pipnick`` requires Python 3.12 or later.  When installed following the steps
+below, all of its dependencies should be installed with it.  Its dependencies
+currently include ``numpy``, ``scipy``, ``astropy``, ``astroquery``,
+``ccdproc``, ``photutils``, ``reproject``, ``scikit-image``, ``matplotlib``, and
+``speclite``.  pipnick therefore leverages much of the scientific python stack
+and, in particular, Astropy packages.
 
-``pipnick`` requires Python 3.12, 3.13, or 3.14.  Its dependencies are
-installed with it: ``numpy``, ``scipy``, ``astropy``, ``astroquery``,
-``ccdproc``, ``photutils`` (3.1 or later), ``reproject``, ``scikit-image``,
-``matplotlib``, and ``speclite``.
+Build a new environment
+-----------------------
 
-``pipnick`` is not yet released on PyPI; install it from GitHub.
-
-Installing
-----------
-
-We recommend installing ``pipnick`` in its own virtual environment, kept
-outside the directory of the source code:
+We *strongly* recommend installing ``pipnick`` in its own virtual environment.
+This can be done using ``venv`` (preferred; see the `venv documentation
+<https://docs.python.org/3/library/venv.html>`__), e.g.:
 
 .. code-block:: console
 
-    python3 -m venv ~/.virtualenvs/pipnick
+    python3.13 -m venv ~/.virtualenvs/pipnick
     source ~/.virtualenvs/pipnick/bin/activate
 
-To install the latest version:
+or using `conda <https://docs.conda.io/projects/conda/en/latest/index.html>`__
+(see `Managing Environments with Conda
+<https://docs.conda.io/projects/conda/en/latest/user-guide/tasks/manage-environments.html>`__),
+e.g.:
+
+.. code-block:: console
+
+    conda create -n pypeit python=3.13
+    conda activate pypeit
+
+Install using pip
+-----------------
+
+pipnick is not yet released on PyPI, so install the latest version directly from
+GitHub:
 
 .. code-block:: console
 
     pip install "git+https://github.com/UCObservatories/pipnick.git"
 
-To install from a clone of the repository, e.g., to follow its development or
-to contribute:
-
-.. code-block:: console
-
-    git clone https://github.com/UCObservatories/pipnick.git
-    cd pipnick
-    pip install -e .
-
-The optional dependencies are installed with ``pip install -e ".[test]"``
-(running the tests), ``".[docs]"`` (building this documentation), or
-``".[dev]"`` (both).
-
 Checking the installation
 -------------------------
 
-The scripts are installed with the package.  Check that they run, and which
-versions are installed:
+The scripts are installed when the package is installed.  To perform a simple
+check that the installation was successful, you can run
 
 .. code-block:: console
 
     pipnick_version --dependencies
 
-Run the tests (with the ``test`` dependencies installed) with:
+This will print the versions of pipnick and all its dependencies.
+
+
+.. _install-api-key:
+
+The astrometry.net API key
+--------------------------
+
+The astrometric calibration (:doc:`astrometry`) submits some images to the
+astrometry.net web service.  To use this service, you must register for a free
+account at https://nova.astrometry.net.  Then copy your API key from your
+profile.
+
+You should treat these API keys as secret, meaning that you should avoid having
+them anywhere that is publicly visible.  We recommend adding the key as an
+environmental variable in your shell start-up file (e.g., your ``~/.zshrc`` file
+on a modern Mac).  ``pipnick`` assumes the key is assigned to the
+``ASTROMETRY_NET_API_KEY`` environment variable.  E.g., add the following line
+to your shell start-up file:
+
+.. code-block:: console
+
+    export ASTROMETRY_NET_API_KEY=<your key>
+
+You can also use the ``api_key`` entry in the ``[astrometry_net]`` section of
+your ``astroquery`` configuration file (``~/.astropy/config/astroquery.cfg``):
+
+.. code-block:: ini
+
+    [astrometry_net]
+    api_key = <your key>
+
+The key is never a command-line argument, and it is never logged.  Only the
+astrometric calibration script needs the key, and the code tries to minimize the
+number of astrometry.net submissions.
+
+
+Developer Installation
+----------------------
+
+If you're interested in contributing to the code, you should fork the repository
+and then clone and install it as follows:
+
+.. code-block:: console
+
+    git clone https://github.com/{your_github_handle}/pipnick.git
+    cd pipnick
+    pip install -e ".[dev]"
+
+New contributions require that you check that all tests pass and that the
+documentation compiles without any warnings; see below.
+
+Running Tests
+~~~~~~~~~~~~~
+
+To test the code, run:
 
 .. code-block:: console
 
@@ -62,42 +116,14 @@ Run the tests (with the ``test`` dependencies installed) with:
 The tests use synthetic data and never contact astrometry.net or the Gaia
 archive.
 
-.. _install-api-key:
-
-The astrometry.net API key
---------------------------
-
-The astrometric calibration (:doc:`astrometry`) submits some images to the
-astrometry.net web service, which requires a free account.  Register at
-https://nova.astrometry.net and copy your API key from your profile.
-``pipnick`` reads the key from the ``ASTROMETRY_NET_API_KEY`` environment
-variable, e.g., set in your shell startup file:
-
-.. code-block:: console
-
-    export ASTROMETRY_NET_API_KEY=<your key>
-
-or, if that is not set, from the ``api_key`` entry in the ``[astrometry_net]``
-section of your ``astroquery`` configuration file
-(``~/.astropy/config/astroquery.cfg``):
-
-.. code-block:: ini
-
-    [astrometry_net]
-    api_key = <your key>
-
-The key is never a command-line argument, and is never logged.  The other
-steps do not need it, and the astrometry only submits images that cannot be
-solved otherwise.
-
 Building the documentation
---------------------------
+~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-With the ``docs`` dependencies installed:
+To build the docs,
 
 .. code-block:: console
 
     cd docs
-    make html
+    make clean ; make html
 
 The pages are written to ``docs/_build/html``.

@@ -1,7 +1,7 @@
 .. _calibrate:
 
-pipnick_calibrate: photometric calibration
-==========================================
+Photometric Calibration
+=======================
 
 ``pipnick_calibrate`` finds the Landolt standard stars in the photometry
 source tables and fits the photometric calibration of each band of each
