@@ -479,6 +479,17 @@ Under-the-hood Improvements
 Documentation Updates
 ---------------------
 
+- Reorganized the documentation around the scripts: a page for each
+  processing script (purpose, algorithm, inputs, outputs, and
+  troubleshooting), a quick-start tutorial, installation instructions, a page
+  on checking the results, a page on the behaviour common to all scripts, and
+  an updated list of known issues.  Removed the outdated usage and example
+  pages.
+
+- The repository is now ``https://github.com/UCObservatories/pipnick``.
+
+- Added the pipnick logo to the README and the documentation.
+
 - Rewrote the astrometry documentation for the new ``pipnick_astrometry``,
   including the handling of coordinate frames.
 
@@ -499,6 +510,8 @@ Documentation Updates
 
 Bug Fixes
 ---------
+
+- The help of the ``--no_qa`` options no longer reports ``(default: True)``.
 
 - The comment of the ``PHOTZP`` keyword of a mosaic was truncated (it did not
   fit in its header card); it is now ``Reference image zero point (e-/s),

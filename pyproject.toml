@@ -69,7 +69,7 @@ dev = [
 ]
 
 [project.urls]
-Repository = "https://github.com/allisoneto/pipnick"
+Repository = "https://github.com/UCObservatories/pipnick"
 
 [project.scripts]
 pipnick_version = "pipnick.scripts.version:Version.entry_point"

@@ -90,4 +90,9 @@ intersphinx_mapping = {
 # -- HTML output ---------------------------------------------------------------
 
 html_theme = 'pydata_sphinx_theme'
+html_logo = 'figures/pipnick-logo-mark.png'
+html_theme_options = {
+    'logo': {'text': 'pipnick', 'alt_text': 'pipnick - Home'},
+    'github_url': 'https://github.com/UCObservatories/pipnick'
+}
 htmlhelp_basename = 'pipnickdoc'

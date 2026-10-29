@@ -1,11 +1,13 @@
-Mosaics
-=======
+.. _mosaic:
+
+pipnick_mosaic: image mosaics
+=============================
 
 ``pipnick_mosaic`` combines reduced science images of the same area of sky
 into mosaics: dithered pointings of an extended object, or repeated exposures
 of one field (which registers them).  The mosaics of one object in different
 filters can share an identical output WCS and shape, so that they can be
-combined into colour images.
+combined into colour images (see :doc:`rgb`).
 
 The images are combined using their astrometric solutions, and the PSF models
 and source tables of the photometry, so run ``pipnick_astrometry`` (see
@@ -19,6 +21,20 @@ The workflow is:
    pipnick_astrometry -t n3_2x2_fast_full.ecsv
    pipnick_photometry -t n3_2x2_fast_full.ecsv
    pipnick_mosaic -t n3_2x2_fast_full.ecsv
+
+Inputs
+------
+
+- **One or more per-setup metadata tables** (``-t``), with the mosaics
+  defined in their ``mosaic`` and ``wcs_group`` columns (see below).
+- **The reduced science images** (see :doc:`reduce`), with their
+  **astrometric solutions** from ``pipnick_astrometry`` (see
+  :doc:`astrometry`); an image without one is an error.
+- **Their source tables** (see :doc:`photometry`), up to date, for the PSF
+  models (unless ``--psf_match none``) and the scaling by common sources (the
+  default ``--scale sources``).
+- For ``--scale calib``, **their photometric calibrations** in the headers
+  (``pipnick_calibrate --apply image``; see :doc:`calibrate`).
 
 Defining the mosaics
 --------------------
@@ -73,8 +89,8 @@ pointing and filter the same labels in all of them.
     to be enabled explicitly, so that common labels like ``M11_V`` do not
     combine different nights by accident.
 
-How the mosaics are constructed
--------------------------------
+The algorithm
+-------------
 
 The output WCS of each WCS group is a north-up gnomonic projection in the ICRS
 that covers all of the images of the group (in all filters), with the finest
@@ -97,8 +113,9 @@ Each mosaic is then constructed as follows.
    ``--psf_margin`` (1.05) times the largest FWHM of the images, and the
    median of their Moffat power indices.  For an elliptical PSF model
    (``pipnick_photometry --fittype ellip``), the FWHM along its major axis is
-   used, so that the PSF is broadened to the target in every direction.  Each image is convolved with the
-   kernel that matches its PSF model (from the photometry) to the target,
+   used, so that the PSF is broadened to the target in every direction.
+   Each image is convolved with the kernel that matches its PSF model (from
+   the photometry) to the target,
    computed with :func:`photutils.psf_matching.make_kernel` and tapered to a
    circle; if that fails, a Gaussian kernel is used.  For colour images, use
    ``--psf_match group`` to match all of the mosaics of a WCS group to the
@@ -145,14 +162,15 @@ much larger than the matching kernel gives the error of the summed flux
 (and an upper bound for smaller apertures).  The errors do not include the
 errors of the flux scales, which are given in the ``INPUTS`` table.
 
-Using the command-line script
------------------------------
+Running it
+----------
 
 .. code-block:: console
 
    pipnick_mosaic -t n3_2x2_fast_full.ecsv n3_2x2_slow_full.ecsv --outdir mosaics
 
-The options are:
+The options are (the logging options are common to every script; see
+:doc:`common`):
 
 - ``-t``, ``--raw_table``: One or more per-setup metadata files (required).
 - ``--outdir``: The output directory.  If not provided, the ``mosaic``
@@ -189,7 +207,9 @@ group changes its WCS, so all of its mosaics are rebuilt.
 Outputs
 -------
 
-Each mosaic is written to ``<mosaic>.fits``, with the extensions:
+The products are written to the output directory (by default, the ``mosaic``
+subdirectory of the reduction directory).  Each mosaic is written to
+``<mosaic>.fits``, with the extensions:
 
 - the primary: the mosaic in electrons per second, on the flux scale of the
   reference image (0 where there are no data);
@@ -211,39 +231,57 @@ Each mosaic is written to ``<mosaic>.fits``, with the extensions:
   value for floating-point columns, and :meth:`astropy.table.Table.read`
   masks them again.
 
-The header records the labels, the filter, the night, the target PSF, the
-settings, the reference image, and the number of rejected pixels.  If the
-reference image has a photometric calibration, its zero point is given as
-``PHOTZP``.  A summary of the mosaics is written to ``summary.ecsv``.
+The header records the WCS, the labels (``PNMOSAIC``, ``PNWCSGRP``), the
+filter (``mixed`` if the images have different filters), the night, the
+target PSF, the settings, the reference image, the number of images on the
+flux scale (``PNNSCALE``), and the number of rejected pixels, with the
+pipnick version (``PNVERS``) and the hashes that decide whether the mosaic is
+up to date (``PNMOSHSH``, ``PNGRPHSH``).  If the reference image has a
+photometric calibration, its zero point is given as ``PHOTZP``.  Warnings are
+recorded as ``PNWARN`` (images with different filters were combined) and
+``PNWARN2`` (images that could not be scaled).
 
-Colour images
--------------
+The output directory also has:
 
-``pipnick_rgb`` makes a three-colour image from three images with the same
-WCS and shape, e.g., the mosaics of one WCS group:
+- ``<wcs_group>_wcs.fits``: the output WCS of each WCS group (a header only);
+- ``summary.ecsv``, also logged: one row per mosaic, with its WCS group,
+  filter, number of images and of scaled images, target FWHM, status
+  (``constructed``, ``up to date``, or ``failed``, with the ``reason``), and
+  file;
+- ``qa/<mosaic>.png``: the QA figure of each mosaic (see above).
 
-.. code-block:: console
+The log is written to the ``log`` subdirectory of the reduction directory
+(or of ``--outdir``); see :doc:`common`.
 
-   pipnick_rgb M11_R.fits M11_V.fits M11_B.fits -o M11.png
+Troubleshooting
+---------------
 
-The images are given in the order red, green, blue.  If they do not have the
-same WCS and shape, ``pipnick_rgb`` stops with an error; construct them with
-``pipnick_mosaic``, with all of them in the same WCS group.  For colours that
-are not affected by differences in seeing, use ``--psf_match group``.
-
-Each image has its background (the median) subtracted (unless
-``--no_subtract``) and is divided by its ``--percentile`` (99.5) percentile,
-so that the channels have comparable brightness, or, with ``--common``, all of
-the images are divided by the largest of these percentiles, which keeps their
-relative fluxes.  ``--scales`` multiplies the three normalized images, to
-adjust the colour balance.  The image is then made with the scheme of Lupton
-et al. (2004; ``--method lupton``, the default, with ``--stretch`` and
-``--Q``; see :func:`astropy.visualization.make_lupton_rgb`), or a linear or
-logarithmic stretch (``--method linear`` or ``log``, with ``--log_a``; see
-:func:`astropy.visualization.make_rgb`); see the `astropy documentation
-<https://docs.astropy.org/en/stable/visualization/rgb.html>`__.  Masked
-pixels are black.  The format of the output is set by its extension (e.g.,
-``png`` or ``jpg``), and north is up for the mosaics of ``pipnick_mosaic``.
+- **"No mosaics are defined"**: the ``mosaic`` columns of the tables are
+  empty.  Assign them (``pipnick_metadata --split --append
+  --assign_mosaics``) or edit the tables.
+- **"... has no astrometric solution"** or **"... has no PSF model"**: run
+  ``pipnick_astrometry`` and ``pipnick_photometry`` first.  Every image
+  assigned to a mosaic must have both, so one image that cannot be solved
+  stops all of the mosaics: clear its ``mosaic`` and ``wcs_group`` labels in
+  the table (or comment out its row), and rerun.
+- **"Mosaic ... combines images from several nights"**: mosaics of several
+  nights are not yet supported; give the images of each night their own
+  labels.
+- **"The PSF FWHM of ... is much larger than the median"**: one image with
+  poor seeing sets the resolution of the whole mosaic.  Remove it from the
+  mosaic (clear its ``mosaic`` label), or accept the lower resolution.
+- **"The Moffat matching kernel ... failed; using a Gaussian kernel
+  instead"**: the PSF of the image is not matched as well; check
+  ``match_ee`` in the ``INPUTS`` table (close to 1 for a good match).
+- **Images that are not scaled** (``scaled`` is false in ``INPUTS``, and
+  ``PNWARN2``): they share fewer than ``--min_common`` sources with the other
+  images.  Lower ``--min_snr`` or ``--min_common``, or use ``--scale calib``.
+- **Steps at the edges of the images** in the mosaic: their backgrounds
+  differ, e.g., because an extended object biases them.  Use
+  ``--match_background``, and avoid ``--background 2d`` for objects that fill
+  much of the field.
+- **A failed WCS group** fails all of its mosaics, with the reason in the
+  summary; the other groups are still constructed.
 
 Using the pipeline in Python
 ----------------------------
@@ -252,7 +290,9 @@ Using the pipeline in Python
 
    from pipnick.pipelines.mosaic import mosaic_all
 
-   files = mosaic_all(['n3_2x2_fast_full.ecsv', 'n3_2x2_slow_full.ecsv'], outdir='mosaics')
+   files = mosaic_all(
+       ['n3_2x2_fast_full.ecsv', 'n3_2x2_slow_full.ecsv'], outdir='mosaics'
+   )
 
 See :func:`~pipnick.pipelines.mosaic.mosaic_all` for the full set of
 parameters, and :mod:`pipnick.mosaic` for the functions used to match the PSFs,

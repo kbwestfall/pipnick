@@ -1,5 +1,7 @@
-Point-Source and Aperture Photometry
-====================================
+.. _photometry:
+
+pipnick_photometry: PSF and aperture photometry
+===============================================
 
 ``pipnick_photometry`` measures the sources in each reduced science image with
 point-spread-function (PSF) and aperture photometry, and writes a source table
@@ -8,8 +10,8 @@ coordinates of the sources are always provided, and their celestial
 coordinates are provided for images with a solution from
 ``pipnick_astrometry`` (see :doc:`astrometry`).
 
-Overview
---------
+The algorithm
+-------------
 
 For each image:
 
@@ -46,14 +48,27 @@ overscan level), the Poisson noise of the counts, and the uncertainties of the
 bias and the flat, propagated through the combination of frames.  The object,
 filter, exposure time, and airmass are taken from the metadata table.
 
-Using the command-line script
------------------------------
+Inputs
+------
+
+- **A per-setup metadata table** (``-t``), used to reduce the images (see
+  :doc:`metadata` and :doc:`reduce`).
+- **The reduced science images**, with their uncertainties (``UNCERT``) and
+  masks (``MASK``).
+- Optionally, **their astrometric solutions** (see :doc:`astrometry`), for the
+  celestial coordinates of the sources.  The photometry can be run before or
+  after the astrometry: when a solution is found later, rerunning the
+  photometry only adds the coordinates.
+
+Running it
+----------
 
 .. code-block:: console
 
    pipnick_photometry -t n1_2x2_slow_full.ecsv
 
-The options are:
+The options are (the logging options are common to every script; see
+:doc:`common`):
 
 - ``-t``, ``--raw_table``: The per-setup metadata file used to reduce the
   images (required).
@@ -131,11 +146,40 @@ measured.
 
 ``photometry/summary.ecsv``, also logged, summarizes each image: its status
 (``measured``, ``up to date``, ``coordinates updated``, ``missing``, or
-``failed``), the number of sources, the FWHM, the number of PSF stars, and the
-astrometric solution method (``none`` if the coordinates are masked).
+``failed``, with the ``reason``), the number of sources, the FWHM in pixels
+and arcsec, the number of PSF stars, and the astrometric solution method
+(``none`` if the coordinates are masked).  The FWHM of each image is checked
+against the camera's expected range; see :doc:`common`.
+
+The QA figures of each image are ``photometry/qa/<image>_psf.png`` (the
+stacked PSF stars, the model, the residuals, and the radial profile) and
+``photometry/qa/<image>_sources.png`` (the image, with the measured sources
+numbered by decreasing PSF flux).  The log is
+``log/pipnick_photometry_<time>.log``; see :doc:`common`.
 
 The instrumental magnitudes are not calibrated; ``pipnick_calibrate`` fits the
 photometric calibration from the Landolt standard stars (see :doc:`calibrate`).
+
+Troubleshooting
+---------------
+
+- **"No sources are good enough to model the PSF"** (the image fails): too
+  few bright, isolated, unsaturated stars.  Lower ``--psf_thresh``, or give
+  ``--fwhm`` closer to the seeing of the night.
+- **The FWHM is outside its expected range**: check the focus and tracking,
+  e.g., in the image's ``_psf.png`` figure.  For an elongated PSF, use
+  ``--fittype ellip``.
+- **No celestial coordinates** (``wcs`` is ``none`` in the summary): the image
+  has no astrometric solution.  Run ``pipnick_astrometry``, then rerun the
+  photometry, which only adds the coordinates.
+- **Many removed sources around bright stars**: the PSF fits leave residuals
+  around bright stars, which are detected as sources and then removed by the
+  vetting.  The PSF fluxes of bright stars may be biased by them; see
+  :doc:`issues`.
+- **The source tables differ slightly between runs** on the same images; see
+  :doc:`issues`.
+- **A later step reports that a source table "is out of date"**: the image
+  was reduced (or solved) again after it was measured.  Rerun the photometry.
 
 Using the pipeline in Python
 ----------------------------

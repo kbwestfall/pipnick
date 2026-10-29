@@ -135,3 +135,13 @@ def test_version(capsys):
     assert out.startswith('pipnick ') and 'photutils' in out, (
         'pipnick_version should report the versions of pipnick and its dependencies'
     )
+
+
+def test_help_defaults():
+    text = Reduce.get_parser().format_help()
+    assert '(default: True)' not in text, (
+        'The help of --no_qa should not report the default of the setting it turns off'
+    )
+    assert '(default: False)' in text, (
+        'The help of other options should report their defaults'
+    )

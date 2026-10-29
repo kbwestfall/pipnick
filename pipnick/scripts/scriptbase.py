@@ -19,6 +19,21 @@ from ..pkg.exceptions import PipnickPathError
 from ..pkg.version import version
 
 
+class HelpFormatter(argparse.ArgumentDefaultsHelpFormatter):
+    """
+    Format the help of a script, adding the default of each option.
+
+    The default is not added for flags that turn something off (e.g.,
+    ``--no_qa``, which stores False in ``qa``): their default is the value of
+    the setting they turn off (True), which would read as if the flag were set
+    by default, so their help describes the default instead.
+    """
+    def _get_help_string(self, action):
+        if action.nargs == 0 and action.const is False:
+            return action.help
+        return super()._get_help_string(action)
+
+
 class ScriptBase:
     """
     Provides a base class for all scripts.
@@ -73,8 +88,7 @@ class ScriptBase:
     # the relevant parser arguments
     @classmethod
     def get_parser(
-        cls, description=None, width=None, formatter=argparse.ArgumentDefaultsHelpFormatter,
-        include_log_options=True
+        cls, description=None, width=None, formatter=HelpFormatter, include_log_options=True
     ):
         """
         Construct the command-line argument parser.

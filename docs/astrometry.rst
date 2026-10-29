@@ -1,5 +1,7 @@
-Astrometric Solution
-====================
+.. _astrometry:
+
+pipnick_astrometry: astrometric solutions
+=========================================
 
 ``pipnick_astrometry`` finds the astrometric solution (WCS) of each reduced
 science image and writes it to the image header.  It uses the
@@ -7,11 +9,10 @@ science image and writes it to the image header.  It uses the
 few images as possible: most images are solved locally, by matching their
 sources to an image that is already solved or to the Gaia catalog.
 
-Overview
---------
+The algorithm
+-------------
 
-The images are those produced by ``pipnick_reduce`` from a per-setup metadata
-file (see ``pipnick_metadata --split``).  For each run:
+For each run:
 
 1. **Existing solutions are kept.**  Solutions that were lost because an image
    was rewritten (e.g., by rerunning ``pipnick_reduce``) are restored from the
@@ -54,24 +55,30 @@ is no longer found and the image could be submitted again; e.g.,
 ``photutils`` that measures the sources differently.  (photutils 3.1 changed
 the flux used to rank the sources, which is why pipnick requires it.)
 
-The astrometry.net API key
---------------------------
+Inputs
+------
 
-Register at https://nova.astrometry.net and copy your API key from your
-profile.  ``pipnick`` reads it from the ``ASTROMETRY_NET_API_KEY`` environment
-variable (e.g., set in your shell startup file) or, if that is not set, from
-the ``api_key`` entry in the ``[astrometry_net]`` section of your
-``astroquery`` configuration file.  The key is never a command-line argument
-and is never logged.
+- **A per-setup metadata table** (``-t``), used to reduce the images (see
+  :doc:`metadata` and :doc:`reduce`).  The pointing of each image (``ra``,
+  ``dec``) is taken from it.
+- **The reduced science images**, in the reduction directory.
+- **An astrometry.net API key**, needed only if an image is submitted; see
+  :ref:`install-api-key`.
+- **Network access** to astrometry.net (for submissions) and to the Gaia
+  archive (for queries).  Saved results are reused, so a rerun usually needs
+  neither.
+- Optionally, **solutions you provide** for some images; see
+  `Providing a solution`_.
 
-Using the command-line script
------------------------------
+Running it
+----------
 
 .. code-block:: console
 
    pipnick_astrometry -t n1_2x2_slow_full.ecsv
 
-The options are:
+The options are (the logging options are common to every script; see
+:doc:`common`):
 
 - ``-t``, ``--raw_table``: The per-setup metadata file used to reduce the
   images (required).
@@ -102,7 +109,7 @@ The options are:
   results for an image are not reused.
 - ``--upload_image``: Upload the images (with masked pixels set to 0) instead
   of source lists, so that astrometry.net detects the sources.
-- ``--group_radius``, ``--min_matches``, ``--max_rms``: See `Overview`_.
+- ``--group_radius``, ``--min_matches``, ``--max_rms``: See `The algorithm`_.
 - ``--search``: The maximum error in arcsec in the expected position of an
   image when matching it to another image or to Gaia, e.g., from the error in
   the telescope pointing (default 60).
@@ -159,8 +166,7 @@ The ``astrometry`` subdirectory of the reduction directory holds:
   of each.  A saved query that covers an image is reused.
 - ``<image>_points.fits``: The solutions you provided (see
   `Providing a solution`_).
-- ``summary.ecsv``: The summary of the last run; see
-  `Using the command-line script`_.
+- ``summary.ecsv``: The summary of the last run (see below).
 - ``qa/<image>.png``: The check figures (unless ``--no_qa``).
 - ``dry_run/<image>_sources.ecsv``: The detected sources, written with
   ``--dry_run``.
@@ -179,8 +185,14 @@ reason it could not be solved and a suggestion.  With ``-v 2``, the log also
 gives the details of every attempt to match an image (the shift, rotation,
 number of votes and matches, and RMS residual).
 
+The log of each run is written to ``log/pipnick_astrometry_<time>.log`` in the
+reduction directory; see :doc:`common`.
+
+Troubleshooting
+---------------
+
 Incorrect telescope pointings
------------------------------
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 The pointing (RA and Dec) of each image is taken from the metadata table,
 which takes it from the raw header.  Occasionally, the raw header is wrong;
@@ -219,13 +231,13 @@ submission to astrometry.net:
      pipnick_astrometry -t n1_2x2_slow_full.ecsv
 
   ``pipnick_reduce`` reprocesses only the images whose table values changed
-  (see the reduction documentation), writing the corrected coordinates to
+  (see :doc:`reduce`), writing the corrected coordinates to
   their headers, and ``pipnick_astrometry`` then solves them with the usual
   matching.  This is the better choice if the reduced images will be used
   elsewhere, because it also corrects the coordinates in their headers.
 
-Troubleshooting
----------------
+Images that are not solved
+~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Finding astrometric solutions can be difficult, e.g., for sparse fields,
 short exposures, or images with incorrect pointings.  If images are not
@@ -234,8 +246,9 @@ solved, or their solutions are poor:
 - **Start with a dry run.**  ``--dry_run`` shows the pointing groups, the
   number of sources detected in each image, and which images would be
   submitted.  It also writes a figure of each image with its detected
-  sources (unless the image already has one, or ``--no_qa`` is set), so you can check that they are stars and not, e.g.,
-  knots in a galaxy, cosmic rays, or artifacts along the image edges.  Images
+  sources (unless the image already has one, or ``--no_qa`` is set), so you
+  can check that they are stars and not, e.g., knots in a galaxy, cosmic rays,
+  or artifacts along the image edges.  Images
   with fewer than about 10 sources (e.g., short exposures in the B band, or
   sparse fields at high Galactic latitude) are the hardest to solve.
 

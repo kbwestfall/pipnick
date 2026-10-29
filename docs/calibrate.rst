@@ -1,5 +1,7 @@
-Photometric Calibration
-=======================
+.. _calibrate:
+
+pipnick_calibrate: photometric calibration
+==========================================
 
 ``pipnick_calibrate`` finds the Landolt standard stars in the photometry
 source tables and fits the photometric calibration of each band of each
@@ -11,8 +13,8 @@ The standards are identified by their celestial coordinates, so
 ``pipnick_astrometry`` (see :doc:`astrometry`) and ``pipnick_photometry`` (see
 :doc:`photometry`) must be run first.
 
-Overview
---------
+The algorithm
+-------------
 
 1. **Find the standards.**  The source tables of all of the science images
    are matched to the Landolt catalog (within ``--match_radius``), so any
@@ -162,14 +164,28 @@ the QA figures, and a warning is issued if it is significant and larger than
 ``--drift_warn`` (mag/hour).  The drift is *not* fit; adding a time term to the
 model is an area for improvement.
 
-Using the command-line script
------------------------------
+Inputs
+------
+
+- **A per-setup metadata table** (``-t``), used to reduce the images (see
+  :doc:`metadata` and :doc:`reduce`); it sets the airmass and observation
+  time of each image.
+- **The source tables** of the science images, with celestial coordinates
+  (see :doc:`photometry` and :doc:`astrometry`).  They must be up to date.
+- **Images of Landolt standard fields** taken during the night, in U, B, V, R,
+  or I.  The more standards, and the wider their range of airmass and color,
+  the better the calibration.
+- **The Landolt catalog**, distributed with pipnick (see below).
+
+Running it
+----------
 
 .. code-block:: console
 
    pipnick_calibrate -t n1_2x2_slow_full.ecsv --apply both
 
-The options are:
+The options are (the logging options are common to every script; see
+:doc:`common`):
 
 - ``-t``, ``--raw_table``: The per-setup metadata file used to reduce the
   images (required).
@@ -242,8 +258,14 @@ The products are in the ``calibrate`` subdirectory of the reduction directory:
   color 0) and its error (``zp``, ``zp_err``), the drift, and what was done
   with the calibration file (``action``: ``fit``, ``up to date``, or
   ``edited (kept)``);
-- ``qa/<setup>_<night>_residuals.png`` (unless ``--no_qa``): the residuals of each
-  band against airmass, color, catalog magnitude, and time.
+- ``qa/<setup>_<night>_residuals.png`` (unless ``--no_qa``): the residuals of
+  each band against airmass, color, catalog magnitude, and time;
+- with ``--apply catalog``, ``<image>_cal.ecsv``: the calibrated source table
+  of each science image; and with ``--apply image``, the calibration keywords
+  in the headers of the reduced images (see `Applying the calibration`_).
+
+The log is ``log/pipnick_calibrate_<time>.log`` in the reduction directory;
+see :doc:`common`.
 
 The calibration file
 --------------------
@@ -332,6 +354,33 @@ once by Landolt, and have no published errors.  They are used by default; use
 
 This research has made use of the VizieR catalogue access tool, CDS,
 Strasbourg, France (Ochsenbein et al. 2000, A&AS, 143, 23).
+
+Troubleshooting
+---------------
+
+- **"No source table has celestial coordinates"**: the standards are found by
+  their coordinates.  Run ``pipnick_astrometry``, then ``pipnick_photometry``
+  (which adds the coordinates).
+- **A source table "is out of date"**: rerun ``pipnick_photometry``.
+- **A band fails with too few stars** (``--min_stars``, 3 by default): a
+  night with few standards cannot constrain every term.  Fit fewer terms
+  (e.g., ``--terms zp``, with the extinction fixed at its nominal value by
+  ``--fix airmass=nominal`` if it is in the model), or lower ``--min_stars``
+  and accept a less certain calibration (check its leave-one-out rms).
+- **A band fails on its color span**: the standards have similar colors, so a
+  color term cannot be fit.  Fix it (``--fix color=<value>``) or remove it
+  (``--terms``).
+- **The extinction was not measured** (the banner at the end of the log):
+  see the warning above.
+- **"No band could be calibrated"**: the run stops with an error; the reasons
+  are in the summary and the calibration file.
+- **A band that cannot be calibrated** (e.g., no standards observed in it):
+  its images are not calibrated, and ``pipnick_status`` keeps suggesting
+  ``pipnick_calibrate`` for them; see :doc:`issues`.
+- **Filters other than UBVRI** (e.g., the primed filters of the Andor camera)
+  cannot be calibrated with the Landolt standards.
+- **The PSF magnitudes of bright standards** are less precise than their
+  aperture magnitudes; consider ``--mag aper`` (see the note above).
 
 Using the pipeline in Python
 ----------------------------

@@ -14,7 +14,7 @@ authors:
     given-names: Kyle B.
     email: westfall@ucolick.org
     affiliation: "University of California Observatories"
-repository-code: "https://github.com/allisoneto/pipnick"
+repository-code: "https://github.com/UCObservatories/pipnick"
 license: BSD-3-Clause
 keywords:
   - astronomy
