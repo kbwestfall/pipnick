@@ -46,6 +46,14 @@ By default, a submission sends only a list of sources detected locally (the
 positions of up to 100 of the brightest sources), not the image.  The
 solutions are not publicly visible on astrometry.net.
 
+The results of the submissions are cached, keyed by what was submitted: the
+positions of the sources, in order of brightness.  Anything that changes the
+detected sources, or their ranking, changes the key, so that a cached result
+is no longer found and the image could be submitted again; e.g.,
+``--max_sources``, ``--detect_thresh``, or ``--fwhm``, but also a version of
+``photutils`` that measures the sources differently.  (photutils 3.1 changed
+the flux used to rank the sources, which is why pipnick requires it.)
+
 The astrometry.net API key
 --------------------------
 

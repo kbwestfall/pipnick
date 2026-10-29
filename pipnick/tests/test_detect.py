@@ -111,7 +111,9 @@ def test_astrometry_detection():
     )
     # The astrometry.net cache key of the sources of this image, as computed by
     # the detection of the astrometry before it used find_sources.  A change
-    # would mean that the astrometry's detections changed, so that cached
+    # would mean that the astrometry's detections, or their ranking by the
+    # flux of DAOStarFinder, changed (as they did in photutils 3.1, which
+    # changed the flux to the sum within the kernel footprint), so that cached
     # astrometry.net results would no longer be found and images could be
     # submitted again.
     hints = {'scale_units': 'arcsecperpix', 'scale_lower': 0.3, 'scale_upper': 0.4}

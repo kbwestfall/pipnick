@@ -82,8 +82,11 @@ Dependency Changes
 
 - Supports python 3.12, 3.13, and 3.14.
 
-- Requires ``photutils>=3.0``, for ``photutils.psf.MoffatPSF`` and the
-  photutils 3.x PSF-photometry interface.
+- Requires ``photutils>=3.1``, for ``photutils.psf.MoffatPSF``, the
+  photutils 3.x PSF-photometry interface, and the definition of the
+  ``DAOStarFinder`` flux used to rank the sources submitted to astrometry.net
+  (the sum within the kernel footprint, since photutils 3.1), on which the
+  keys of the cached astrometry.net results depend.
 
 - Requires ``numpy>=2.0`` and ``astropy>=7.0``.
 

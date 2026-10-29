@@ -2105,3 +2105,27 @@ states, `header_calibration_state`, and a calibration with a failed night.
 
 **Docs:** the calibration page (failed nights), the release notes, and the
 API pages.
+
+#### Step 6, follow-up: photutils 3.1 and the astrometry.net cache keys (2026-10-29, branch `detection`)
+
+The CI environment with the minimum photutils (`3.12-test-photutilsmin`,
+photutils 3.0.0) failed the pinned astrometry.net cache key of
+`test_detect.py::test_astrometry_detection`.
+
+- **Cause:** photutils 3.1.0 changed the `flux` of `DAOStarFinder` from the
+  sum of the whole cutout around a source (3.0.0) to the sum within the
+  kernel footprint.  The detections themselves (positions, peaks, shapes)
+  are identical, but the ranking by flux differs, so the brightest
+  `max_sources` and their order differ, and so does the cache key.  The
+  astrometry before Step 6 ranked by the same flux, so its keys depended on
+  the photutils version in the same way; the pinned key exposed it.
+  photutils 3.1.0 and 3.1.1 give identical results.
+- **Fix (author's decision):** pipnick requires `photutils>=3.1`, and the
+  minimum-version CI environment uses photutils 3.1.0, so every supported
+  environment ranks the sources the same way.  Caches made with photutils
+  3.0 would miss once.
+- **Docs:** the astrometry page explains what the cache key depends on,
+  including the photutils version; the release notes, the tox note and the
+  test comment record the change.
+- **Check:** `tox -r -e 3.12-test-photutilsmin,codestyle` passes (223
+  passed, 1 skipped), and the docs build without warnings.
