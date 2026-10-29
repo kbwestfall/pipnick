@@ -14,7 +14,8 @@ from astropy.io import fits
 from astropy.table import Table
 from astropy.wcs import WCS
 
-from pipnick.pipelines import astrometry, calibrate
+from pipnick.astrometry import cache
+from pipnick.datamodel.calibration import calibration_hash
 from pipnick.pkg import provenance
 
 
@@ -41,7 +42,7 @@ def test_reference_values():
         'The hash of the settings should not change'
     )
     cal = {'calibration': {'fit_hash': 'abc', 'night': '2026-08-19'}, 'bands': {'V': {'zp': 24.3}}}
-    assert calibrate.calibration_hash(cal) == 'c5d053bb3715f943', (
+    assert calibration_hash(cal) == 'c5d053bb3715f943', (
         'The hash of a calibration file (fit_hash) should not change'
     )
 
@@ -58,11 +59,11 @@ def test_input_hash():
     data = np.arange(12, dtype=float).reshape(3, 4)
     sources = Table({'x': [1.23456, 5.6789], 'y': [9.87654, 3.21]})
     hints = {'scale_est': 0.333, 'center_ra': 10.5, 'radius': 0.2}
-    assert astrometry._input_hash(data, sources, hints, False) == 'c5bbe84e3aa6f836', (
+    assert cache.anet_input_hash(data, sources, hints, False) == 'c5bbe84e3aa6f836', (
         'The hash of the astrometry.net input (sources) should not change; the cache depends '
         'on it'
     )
-    assert astrometry._input_hash(data, sources, hints, True) == 'e60e6ae9ff4bb8b8', (
+    assert cache.anet_input_hash(data, sources, hints, True) == 'e60e6ae9ff4bb8b8', (
         'The hash of the astrometry.net input (image) should not change; the cache depends '
         'on it'
     )

@@ -12,6 +12,7 @@ Submodules
    pipnick.pkg.paths
    pipnick.pkg.provenance
    pipnick.pkg.report
+   pipnick.pkg.summary
 
 Module contents
 ---------------

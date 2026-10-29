@@ -1,5 +1,5 @@
 """
-Tests for :mod:`pipnick.utils.combiner`.
+Tests for :mod:`pipnick.reduction.combiner`.
 
 These tests use only the module, ``numpy``, and ``astropy``, so that they can
 be contributed to ``ccdproc`` with the module.
@@ -10,7 +10,7 @@ import pytest
 from astropy import units
 from astropy.nddata import CCDData, StdDevUncertainty, VarianceUncertainty
 
-from pipnick.utils.combiner import Combiner
+from pipnick.reduction.combiner import Combiner
 
 
 def images(sigma, n=4, shape=(5, 6), seed=1):

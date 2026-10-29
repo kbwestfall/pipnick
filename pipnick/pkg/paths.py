@@ -24,8 +24,10 @@ def step_dir(rdxdir, step):
         The reduction directory.
     step : str
         The step: ``'reduce'`` (for the reduction summary), ``'astrometry'``,
-        ``'photometry'``, ``'calibrate'`` or ``'mosaic'``; or ``'log'`` for
-        the log files.  The directory has the same name.
+        ``'photometry'``, ``'calibrate'`` or ``'mosaic'``; ``'log'`` for the
+        log files; or ``'report'`` for the report (see
+        :func:`~pipnick.pipelines.report.write_report`).  The directory has
+        the same name.
 
     Returns
     -------
@@ -37,7 +39,7 @@ def step_dir(rdxdir, step):
     :exc:`~pipnick.pkg.exceptions.PipnickParameterError`
         Raised if the step is not one of the above.
     """
-    if step not in ('reduce', 'astrometry', 'photometry', 'calibrate', 'mosaic', 'log'):
+    if step not in ('reduce', 'astrometry', 'photometry', 'calibrate', 'mosaic', 'log', 'report'):
         raise PipnickParameterError(f'Unknown pipnick step: {step}.')
     return Path(rdxdir) / step
 
@@ -59,6 +61,52 @@ def photometry_table(image):
     """
     _image = Path(image)
     return step_dir(_image.parent, 'photometry') / f'{_image.stem}_phot.ecsv'
+
+
+def removed_table(image):
+    """
+    Return the table of the sources removed from the photometry of a reduced
+    image; see :func:`~pipnick.pipelines.photometry.vet_sources`.
+
+    Parameters
+    ----------
+    image : str, :class:`pathlib.Path`
+        The reduced image, in the reduction directory.
+
+    Returns
+    -------
+    :class:`pathlib.Path`
+        The table, ``photometry/<image>_removed.ecsv`` in the reduction
+        directory.
+    """
+    _image = Path(image)
+    return step_dir(_image.parent, 'photometry') / f'{_image.stem}_removed.ecsv'
+
+
+def qa_figure(outdir, name):
+    """
+    Return a QA figure of a step.
+
+    The figures of each step are written to the ``qa`` subdirectory of its
+    output directory, named for the product they show: e.g.,
+    ``reduce/qa/Bias.png``, ``astrometry/qa/<image>.png``,
+    ``photometry/qa/<image>_psf.png`` and ``<image>_sources.png``,
+    ``calibrate/qa/<setup>_<night>_residuals.png``, and
+    ``mosaic/qa/<mosaic>.png``.
+
+    Parameters
+    ----------
+    outdir : str, :class:`pathlib.Path`
+        The output directory of the step; see :func:`step_dir`.
+    name : str
+        The name of the figure, without the extension.
+
+    Returns
+    -------
+    :class:`pathlib.Path`
+        The figure, ``<outdir>/qa/<name>.png``.
+    """
+    return Path(outdir) / 'qa' / f'{name}.png'
 
 
 def points_file(image):
@@ -110,7 +158,7 @@ def calibration_file(rdxdir, tag, night):
     rdxdir : str, :class:`pathlib.Path`
         The reduction directory.
     tag : str
-        The setup tag; see :func:`~pipnick.metadata.setup_tag`.
+        The setup tag; see :func:`~pipnick.metadata.setups.setup_tag`.
     night : str
         The night (UT date, ``YYYY-MM-DD``).
 
@@ -133,7 +181,7 @@ def residuals_file(rdxdir, tag, night):
     rdxdir : str, :class:`pathlib.Path`
         The reduction directory.
     tag : str
-        The setup tag; see :func:`~pipnick.metadata.setup_tag`.
+        The setup tag; see :func:`~pipnick.metadata.setups.setup_tag`.
     night : str
         The night (UT date, ``YYYY-MM-DD``).
 

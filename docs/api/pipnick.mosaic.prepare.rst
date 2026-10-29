@@ -1,7 +1,7 @@
-pipnick.utils.combiner module
+pipnick.mosaic.prepare module
 =============================
 
-.. automodule:: pipnick.utils.combiner
+.. automodule:: pipnick.mosaic.prepare
    :members:
    :private-members:
    :show-inheritance:

@@ -2,16 +2,21 @@
 Tests for the reduction pipeline, using synthetic FITS files.
 """
 
+import matplotlib.image
 import numpy as np
 import pytest
 from astropy.io import fits
 from astropy.nddata import CCDData
 from astropy.table import Table
 
-from pipnick import cameras, metadata
+from pipnick import cameras
+from pipnick.metadata.build import build_metadata
+from pipnick.metadata.names import safe_name
+from pipnick.metadata.table import read_metadata, write_metadata
 from pipnick.datamodel import dataset
 from pipnick.datamodel.dataset import DataSet, check_comb_groups, check_single_setup
 from pipnick.pipelines import reduction
+from pipnick.reduction import processing
 from pipnick.pipelines.reduction import reduce_all
 from pipnick.pkg.exceptions import PipnickDataModelError
 from pipnick.pkg.report import StepReport
@@ -25,7 +30,7 @@ def test_one_setup(tmp_path):
     write_andor(rawdir / 'n1001.fits')
     write_andor(rawdir / 'n1002.fits', AMPCONF='0.05MHz')
     table = tmp_path / 'raw.ecsv'
-    metadata.build_metadata(rawdir=rawdir, filename=table)
+    build_metadata(rawdir=rawdir, filename=table)
 
     # Data from more than one setup cannot be reduced together
     with pytest.raises(PipnickDataModelError, match='more than one setup'):
@@ -37,12 +42,12 @@ def test_per_setup_file(tmp_path):
     rawdir.mkdir()
     write_andor(rawdir / 'n1001.fits')
     write_andor(rawdir / 'n1002.fits', AMPCONF='0.05MHz')
-    files, _ = metadata.build_metadata(rawdir=rawdir, filename=tmp_path / 'n1.ecsv', split=True)
+    files, _ = build_metadata(rawdir=rawdir, filename=tmp_path / 'n1.ecsv', split=True)
     assert len(files) == 2, 'Each setup should be written to its own file'
 
     # Each per-setup file passes the setup check
     for f in files:
-        _, tbl = metadata.build_metadata(filename=f)
+        _, tbl = build_metadata(filename=f)
         check_single_setup(tbl, f)
 
 
@@ -51,7 +56,7 @@ def test_single_file_table(tmp_path):
     rawdir.mkdir()
     write_andor(rawdir / 'n1001.fits')
     table = tmp_path / 'raw.ecsv'
-    metadata.build_metadata(rawdir=rawdir, filename=table)
+    build_metadata(rawdir=rawdir, filename=table)
 
     # A table with all setups has no combination groups
     with pytest.raises(PipnickDataModelError, match='--split'):
@@ -126,9 +131,9 @@ def test_comb_groups(caplog):
 
 
 def test_names():
-    assert metadata.safe_name('NGC 7331 I') == 'NGC_7331_I', 'Spaces should become underscores'
-    assert metadata.safe_name("Barnard's") == 'Barnards', 'Quotes should be removed'
-    assert metadata.safe_name('SN2026abc+1.5-x/y') == 'SN2026abc+1.5-xy', (
+    assert safe_name('NGC 7331 I') == 'NGC_7331_I', 'Spaces should become underscores'
+    assert safe_name("Barnard's") == 'Barnards', 'Quotes should be removed'
+    assert safe_name('SN2026abc+1.5-x/y') == 'SN2026abc+1.5-xy', (
         'Only letters, digits, underscores, periods, plus, and minus should be kept'
     )
     assert dataset._dark_name(120.004) == 'Dark_120s.fits', (
@@ -223,17 +228,17 @@ def set_column(table, files, column, value):
     Set a column value for a set of frames in a per-setup file, as a user
     would by editing the file.
     """
-    tbl, commented = metadata.read_metadata(table, include_commented=True, expand=False)
+    tbl, commented = read_metadata(table, include_commented=True, expand=False)
     # Rebuild the column, so that longer strings are not truncated
     tbl[column] = [value if f in files else v for f, v in zip(tbl['file'], tbl[column])]
-    metadata.write_metadata(tbl, table, commented=commented)
+    write_metadata(tbl, table, commented=commented)
 
 
 def comb_id(table, file):
     """
     Return the combination group of a frame in a per-setup file.
     """
-    tbl = metadata.read_metadata(table)
+    tbl = read_metadata(table)
     return int(tbl['comb_id'][tbl['file'] == file][0])
 
 
@@ -252,7 +257,7 @@ def night(tmp_path):
     """
     rawdir = tmp_path / 'raw'
     write_night(rawdir)
-    files, _ = metadata.build_metadata(rawdir=rawdir, filename=tmp_path / 'n5.ecsv', split=True)
+    files, _ = build_metadata(rawdir=rawdir, filename=tmp_path / 'n5.ecsv', split=True)
     table = files[0]
     set_comb_id(table, ['n5012.fits'], comb_id(table, 'n5011.fits'))
     return table
@@ -260,7 +265,7 @@ def night(tmp_path):
 
 def test_reduce(night, tmp_path):
     rdxdir = tmp_path / 'rdx'
-    science = reduce_all(night, rdxdir=rdxdir)
+    science = reduce_all(night, rdxdir=rdxdir, qa=False)
 
     sci_name = f'M11_V_V_C{comb_id(night, "n5011.fits"):03d}_2026-08-20.fits'
     expected = [
@@ -311,25 +316,25 @@ def test_reduce(night, tmp_path):
 
     # Rerunning does not reprocess anything
     before = mtimes(rdxdir)
-    reduce_all(night, rdxdir=rdxdir)
+    reduce_all(night, rdxdir=rdxdir, qa=False)
     assert mtimes(rdxdir) == before, 'Outputs that are up to date should not be rewritten'
 
     # Unless overwrite is set
-    reduce_all(night, rdxdir=rdxdir, overwrite=True)
+    reduce_all(night, rdxdir=rdxdir, overwrite=True, qa=False)
     after = mtimes(rdxdir)
     assert all(after[f] != before[f] for f in before), 'Overwrite should reprocess all outputs'
 
 
 def test_reduce_new_science(night, tmp_path, caplog):
     rdxdir = tmp_path / 'rdx'
-    reduce_all(night, rdxdir=rdxdir)
+    reduce_all(night, rdxdir=rdxdir, qa=False)
     rawdir = tmp_path / 'raw'
 
     # A new science frame is added in its own group
     write_frame(rawdir / 'n5013.fits', 5000, 'M11 V', 30., 'V', '?', '05:00:00')
-    metadata.build_metadata(rawdir=rawdir, filename=tmp_path / 'n5.ecsv', split=True, append=True)
+    build_metadata(rawdir=rawdir, filename=tmp_path / 'n5.ecsv', split=True, append=True)
     before = mtimes(rdxdir)
-    science = reduce_all(night, rdxdir=rdxdir)
+    science = reduce_all(night, rdxdir=rdxdir, qa=False)
     new_name = f'M11_V_V_C{comb_id(night, "n5013.fits"):03d}_2026-08-20.fits'
     assert new_name in [f.name for f in science], 'The new frame should be reduced'
     after = mtimes(rdxdir)
@@ -339,7 +344,7 @@ def test_reduce_new_science(night, tmp_path, caplog):
     sci_name = f'M11_V_V_C{comb_id(night, "n5011.fits"):03d}_2026-08-20.fits'
     set_comb_id(night, ['n5013.fits'], comb_id(night, 'n5011.fits'))
     caplog.clear()
-    reduce_all(night, rdxdir=rdxdir)
+    reduce_all(night, rdxdir=rdxdir, qa=False)
     final = mtimes(rdxdir)
     changed = sorted(f for f in after if final[f] != after[f])
     assert changed == [sci_name], 'Only the science group with the new frame should be reprocessed'
@@ -350,14 +355,14 @@ def test_reduce_new_science(night, tmp_path, caplog):
 
 def test_reduce_new_bias(night, tmp_path):
     rdxdir = tmp_path / 'rdx'
-    reduce_all(night, rdxdir=rdxdir)
+    reduce_all(night, rdxdir=rdxdir, qa=False)
     rawdir = tmp_path / 'raw'
 
     # A new bias reprocesses everything that depends on it
     write_frame(rawdir / 'n5013.fits', 300, 'bias', 0.2, 'V', 'DARK', '05:00:00')
-    metadata.build_metadata(rawdir=rawdir, filename=tmp_path / 'n5.ecsv', split=True, append=True)
+    build_metadata(rawdir=rawdir, filename=tmp_path / 'n5.ecsv', split=True, append=True)
     before = mtimes(rdxdir)
-    reduce_all(night, rdxdir=rdxdir)
+    reduce_all(night, rdxdir=rdxdir, qa=False)
     after = mtimes(rdxdir)
     assert all(after[f] != before[f] for f in before), (
         'A new bias should reprocess the bias and all outputs that use it'
@@ -380,7 +385,7 @@ def test_frame_stats(tmp_path, caplog):
     with fits.open(path, mode='update') as hdu:
         hdu[0].data[100,100:103] = 65535
         hdu[0].data[200,200] = 30000
-    ccd = reduction.process_frame(path, flag_cosmics=True)
+    ccd = processing.process_frame(path, flag_cosmics=True)
 
     assert ccd.meta['PNNSAT'] == 3, 'Saturated pixels should be counted'
     assert ccd.meta['PNOSCAN'] == 300., 'The overscan level should be saved to the header'
@@ -400,7 +405,7 @@ def test_bias_stats(caplog):
             meta={'PROCGAIN': gain, 'PROCRN': readnoise, 'PNOSCAN': 300.}
         ) for _ in range(3)
     ]
-    level, measured = reduction._report_bias_stats(frames, ['b1.fits', 'b2.fits', 'b3.fits'])
+    level, measured = processing.report_bias_stats(frames, ['b1.fits', 'b2.fits', 'b3.fits'])
     assert np.isclose(level, 305., atol=0.1), (
         'The bias level should include the overscan level and be in ADU'
     )
@@ -437,7 +442,7 @@ def test_apply_table_values():
 
 def test_reduce_table_edits(night, tmp_path, caplog):
     rdxdir = tmp_path / 'rdx'
-    reduce_all(night, rdxdir=rdxdir)
+    reduce_all(night, rdxdir=rdxdir, qa=False)
     cid = comb_id(night, 'n5011.fits')
     old_name = f'M11_V_V_C{cid:03d}_2026-08-20.fits'
     hdr = fits.getheader(rdxdir / old_name)
@@ -452,7 +457,7 @@ def test_reduce_table_edits(night, tmp_path, caplog):
     set_column(night, ['n5011.fits', 'n5012.fits'], 'object', 'M11')
     before = mtimes(rdxdir)
     caplog.clear()
-    science = reduce_all(night, rdxdir=rdxdir)
+    science = reduce_all(night, rdxdir=rdxdir, qa=False)
     new_name = f'M11_V_C{cid:03d}_2026-08-20.fits'
     assert [f.name for f in science] == [new_name], 'The corrected object should set the name'
     hdr = fits.getheader(rdxdir / new_name)
@@ -468,7 +473,7 @@ def test_reduce_table_edits(night, tmp_path, caplog):
     # Correct the coordinates of one frame; the name does not change
     set_column(night, ['n5011.fits'], 'ra', '18:51:06.0')
     caplog.clear()
-    reduce_all(night, rdxdir=rdxdir)
+    reduce_all(night, rdxdir=rdxdir, qa=False)
     assert 'metadata table values changed' in caplog.text, (
         'An edited table value should trigger reprocessing'
     )
@@ -484,10 +489,10 @@ def test_reduce_table_edits(night, tmp_path, caplog):
 
 def test_reduce_airmass(night, tmp_path):
     rdxdir = tmp_path / 'rdx'
-    reduce_all(night, rdxdir=rdxdir)
+    reduce_all(night, rdxdir=rdxdir, qa=False)
     cid = comb_id(night, 'n5011.fits')
     name = f'M11_V_V_C{cid:03d}_2026-08-20.fits'
-    tbl = metadata.read_metadata(night)
+    tbl = read_metadata(night)
     airmass = tbl['airmass'][np.isin(tbl['file'], ['n5011.fits', 'n5012.fits'])]
     assert np.isclose(fits.getheader(rdxdir / name)['AIRMASS'], np.mean(airmass)), (
         'The airmass of a combined image should be the mean of its frames'
@@ -496,7 +501,7 @@ def test_reduce_airmass(night, tmp_path):
     # An edited airmass is propagated
     set_column(night, ['n5011.fits', 'n5012.fits'], 'airmass', 1.5)
     before = mtimes(rdxdir)
-    reduce_all(night, rdxdir=rdxdir)
+    reduce_all(night, rdxdir=rdxdir, qa=False)
     after = mtimes(rdxdir)
     assert [f for f in after if after[f] != before[f]] == [name], (
         'Editing the airmass should reprocess only the science image'
@@ -513,7 +518,7 @@ def test_reduce_airmass(night, tmp_path):
 
 def test_uncertainty(night, tmp_path):
     rdxdir = tmp_path / 'rdx'
-    reduce_all(night, rdxdir=rdxdir)
+    reduce_all(night, rdxdir=rdxdir, qa=False)
     cid = comb_id(night, 'n5011.fits')
 
     # The Andor gain and read noise, and the number of binned overscan columns
@@ -550,7 +555,7 @@ def test_uncertainty(night, tmp_path):
 def test_reduce_summary_and_verdict(night, tmp_path, caplog):
     rdxdir = tmp_path / 'rdx'
     report = StepReport('REDUCTION')
-    reduce_all(night, rdxdir=rdxdir, report=report)
+    reduce_all(night, rdxdir=rdxdir, report=report, qa=False)
 
     summary = Table.read(rdxdir / 'reduce' / 'summary.ecsv')
     assert list(summary['status']) == ['built'] * 6, 'Every product should be built'
@@ -587,7 +592,7 @@ def test_reduce_summary_and_verdict(night, tmp_path, caplog):
     # The measurements of up-to-date products are read from their headers
     caplog.clear()
     report = StepReport('REDUCTION')
-    reduce_all(night, rdxdir=rdxdir, report=report)
+    reduce_all(night, rdxdir=rdxdir, report=report, qa=False)
     summary = Table.read(rdxdir / 'reduce' / 'summary.ecsv')
     assert list(summary['status']) == ['up to date'] * 6, 'Every product should be up to date'
     level = summary['bias_level'][summary['frametype'] == 'bias'][0]
@@ -597,15 +602,49 @@ def test_reduce_summary_and_verdict(night, tmp_path, caplog):
     assert len(report.mismatched) == 0, 'Products made by this version should not be reported'
 
 
+def test_reduce_qa(night, tmp_path):
+    rdxdir = tmp_path / 'rdx'
+    qa_dir = rdxdir / 'reduce' / 'qa'
+    reduce_all(night, rdxdir=rdxdir)
+    built = {f.name: f.stat().st_mtime_ns for f in sorted(qa_dir.glob('*.png'))}
+    products = sorted(f.stem for f in rdxdir.glob('*.fits'))
+    assert sorted(f.removesuffix('.png') for f in built) == products, (
+        'By default, a QA figure should be written for each product'
+    )
+    assert all(matplotlib.image.imread(f).ndim == 3 for f in sorted(qa_dir.glob('*.png'))), (
+        'The QA figures should be readable PNG images'
+    )
+
+    # Up-to-date products only get a figure if they lack one
+    (qa_dir / 'Bias.png').unlink()
+    reduce_all(night, rdxdir=rdxdir)
+    rerun = {f.name: f.stat().st_mtime_ns for f in sorted(qa_dir.glob('*.png'))}
+    assert 'Bias.png' in rerun, 'A missing QA figure should be drawn'
+    assert all(rerun[k] == built[k] for k in rerun if k != 'Bias.png'), (
+        'The QA figures of up-to-date products should not be redrawn'
+    )
+
+    # Rebuilt products get a new figure
+    reduce_all(night, rdxdir=rdxdir, overwrite=True)
+    rebuilt = {f.name: f.stat().st_mtime_ns for f in sorted(qa_dir.glob('*.png'))}
+    assert all(rebuilt[k] != rerun[k] for k in rerun), (
+        'The QA figures of rebuilt products should be redrawn'
+    )
+
+    (qa_dir / 'Bias.png').unlink()
+    reduce_all(night, rdxdir=rdxdir, qa=False)
+    assert not (qa_dir / 'Bias.png').is_file(), 'No QA figure should be drawn if qa is False'
+
+
 def test_reduce_version_mismatch(night, tmp_path, caplog):
     rdxdir = tmp_path / 'rdx'
-    reduce_all(night, rdxdir=rdxdir)
+    reduce_all(night, rdxdir=rdxdir, qa=False)
     with fits.open(rdxdir / 'DomeFlat_R.fits', mode='update') as hdu:
         hdu[0].header['PNVERS'] = '0.0.1'
     with fits.open(rdxdir / 'DomeFlat_V.fits', mode='update') as hdu:
         del hdu[0].header['PNVERS']
     report = StepReport('REDUCTION')
-    reduce_all(night, rdxdir=rdxdir, report=report)
+    reduce_all(night, rdxdir=rdxdir, report=report, qa=False)
     assert report.mismatched == {'DomeFlat_R.fits': '0.0.1', 'DomeFlat_V.fits': None}, (
         'Products made by another version, or with no version, should be reported'
     )
@@ -623,7 +662,7 @@ def test_reduce_failure(night, tmp_path):
     # A corrupt dark frame
     (tmp_path / 'raw' / 'n5009.fits').write_bytes(b'not a FITS file')
     report = StepReport('REDUCTION')
-    science = reduce_all(night, rdxdir=rdxdir, report=report)
+    science = reduce_all(night, rdxdir=rdxdir, report=report, qa=False)
     summary = Table.read(rdxdir / 'reduce' / 'summary.ecsv')
     assert summary['status'][summary['file'] == 'Dark_120s.fits'][0] == 'failed', (
         'The failed product should be recorded in the summary'
@@ -636,7 +675,7 @@ def test_reduce_failure(night, tmp_path):
 
 def test_reduction_status(night, tmp_path):
     rdxdir = tmp_path / 'rdx'
-    reduce_all(night, rdxdir=rdxdir)
+    reduce_all(night, rdxdir=rdxdir, qa=False)
     image = DataSet.from_file(night, rdxdir=rdxdir).science_images()[0]
     assert image.reduction_status() == ('ok', '-'), 'The reduced image should be up to date'
     set_column(night, ['n5011.fits', 'n5012.fits'], 'airmass', 1.5)

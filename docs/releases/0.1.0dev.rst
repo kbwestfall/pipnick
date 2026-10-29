@@ -162,7 +162,7 @@ Functionality/Performance Improvements and Additions
   not resubmitted after they are rewritten by ``pipnick_reduce``.  New options:
   ``--resolve``, ``--upload_image``, ``--dry_run``, ``--max_submissions``,
   ``--group_radius``, ``--min_matches``, ``--max_rms``, ``--search``,
-  ``--wide_search``, ``--wide_min_matches``, ``--images``, ``--qa``,
+  ``--wide_search``, ``--wide_min_matches``, ``--images``, ``--no_qa``,
   ``--max_sources``, ``--detect_thresh``, and ``--fwhm``.
 
 - ``pipnick_astrometry`` logs a summary of the solution of each image, with
@@ -230,7 +230,7 @@ Functionality/Performance Improvements and Additions
   airmass from the metadata table).  Reruns only measure images that, or
   whose settings, have changed, and only update the coordinates of images
   whose astrometric solution has changed.  A summary is written to
-  ``photometry/summary.ecsv``.  New options: ``--images``, ``--qa``,
+  ``photometry/summary.ecsv``.  New options: ``--images``, ``--no_qa``,
   ``--psf_thresh``, ``--fwhm``, ``--stack``, ``--min_sep``, ``--group_sep``,
   and ``--aper_radius``.
 
@@ -253,7 +253,7 @@ Functionality/Performance Improvements and Additions
   fits are not counted as neighbors.  The calibration is written to an editable TOML
   file, which is kept on rerun if edited.  The residuals of the standards,
   their leave-one-out residuals, and the drift of the zero point with time
-  are reported, with optional QA figures.  ``--apply`` writes calibrated
+  are reported, with QA figures.  ``--apply`` writes calibrated
   source tables and records the calibration in the image headers.
 
 - If the standards of a band do not span enough airmass to measure the
@@ -318,6 +318,32 @@ Functionality/Performance Improvements and Additions
 - Added ``pipnick_status``, which reports the state of every step for every
   science image of a per-setup metadata table, and the next command to run.
 
+- Every step writes its QA figures by default (``--no_qa`` skips them), for
+  each product it builds and for any product that lacks one.  The reduction
+  writes a figure of each product to ``reduce/qa``.
+
+- The photometry lists the sources removed by its vetting, with the reason,
+  in ``photometry/<image>_removed.ecsv``.
+
+- The calibration summary gives the zero point above the atmosphere and its
+  error, and its ``file`` column is renamed ``action``.
+
+- Missing values in the ``INPUTS`` table of a mosaic are masked instead of
+  being set to -1.
+
+- Added ``pipnick_report``, which writes a static HTML report of a data set to
+  ``<rdxdir>/report``: the status of every step for every science image, the
+  provenance and QA figures of each image, and the summary tables, QA
+  figures, and logs of every step.
+
+- Added ``pipnick_inspect``, which prints the provenance of one image, traces
+  one of its sources through the source, removed-source, calibrated, and
+  standard-star tables (``--id`` or ``--source``), and shows the image with
+  its sources (``--display`` or ``--ofile``).
+
+- ``pipnick_status`` has a ``--mosaic_dir`` option for mosaics written outside
+  the reduction directory.
+
 Under-the-hood Improvements
 ---------------------------
 
@@ -365,6 +391,31 @@ Under-the-hood Improvements
 - Added ``pipnick.image.io.read_reduced``, which reads the images, masks,
   and errors written by pipnick, replacing the separate readers of the
   photometry, astrometry, mosaic, and colour-image steps.
+
+- Added ``pipnick.pkg.summary.Summary``, which writes and logs the summary
+  table of every step, with missing values masked.
+
+- Added ``pipnick.report``, with the status of a data set (moved from
+  ``pipnick.pipelines.status``, which now only logs it), the provenance of
+  its images and sources, and the rendering of the report.
+
+- Added ``pipnick.qa``, which holds the QA figures of every step
+  (``display``, ``sources``, ``psf``, ``calibration``, and ``mosaic``);
+  ``pipnick.astrometry.qa`` and ``pipnick.photometry.fit`` are removed.
+
+- Added ``pipnick.datamodel.catalog.SourceCatalog``, which wraps the
+  photometry source tables (``ReducedImage.photometry`` returns one), and
+  ``pipnick.datamodel.calibration.Calibration``, which reads and writes the
+  calibration files.
+
+- The large pipeline modules are split: the astrometry into
+  ``pipnick.astrometry.header``, ``cache``, and ``solve``; the calibration
+  into ``pipnick.photometry.standards``, ``nightfit``, and ``apply``; the
+  frame processing of the reduction into ``pipnick.reduction.processing``
+  (with ``pipnick.utils.combiner``, now ``pipnick.reduction.combiner``); and
+  the preparation and scaling of the mosaics into ``pipnick.mosaic.prepare``.
+  ``pipnick.metadata`` is a package, with ``table``, ``setups``, ``groups``,
+  ``names``, and ``build`` modules.
 
 - The tests block internet access (``remote_data_strict``), and replace every
   method that would contact astrometry.net or the Gaia archive.

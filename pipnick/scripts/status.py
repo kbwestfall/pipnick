@@ -25,6 +25,11 @@ class Status(scriptbase.ScriptBase):
                  'file is used.'
         )
         parser.add_argument(
+            '--mosaic_dir', type=str, default=None,
+            help='Directory with the mosaics.  If not provided, the mosaic subdirectory of the '
+                 'reduction directory is used.'
+        )
+        parser.add_argument(
             '--ofile', type=str, default=None,
             help='Also write the status table to this ECSV file.'
         )
@@ -33,12 +38,11 @@ class Status(scriptbase.ScriptBase):
     @classmethod
     def main(cls, args):
         from pipnick.datamodel.dataset import reduction_dir
-        from pipnick.pipelines.status import log_status, night_status
+        from pipnick.pipelines.status import status_all
 
         # Initialize logger
         cls.init_log(args, log_dir=cls.log_dir(reduction_dir(args.raw_table, args.rdxdir)))
 
-        tbl, next_step = night_status(args.raw_table, rdxdir=args.rdxdir)
-        log_status(tbl, next_step)
-        if args.ofile is not None:
-            tbl.write(args.ofile, format='ascii.ecsv', overwrite=True)
+        status_all(
+            args.raw_table, rdxdir=args.rdxdir, mosaic_dir=args.mosaic_dir, ofile=args.ofile
+        )

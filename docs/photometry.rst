@@ -32,7 +32,8 @@ For each image:
 4. **Vet the sources.**  Sources whose fits failed, whose fitted positions
    are outside the image or moved more than one FWHM from where they were
    detected, or whose fitted fluxes are not positive are removed.  These are
-   typically spurious detections in the residuals of bright stars.
+   typically spurious detections in the residuals of bright stars.  They are
+   listed, with the reason, in ``photometry/<image>_removed.ecsv``.
 
 5. **Aperture photometry.**  The background-subtracted flux in a circular
    aperture of radius ``--aper_radius`` FWHM is measured at the position of
@@ -62,9 +63,12 @@ The options are:
   the extension) or combination group (``comb_id``).
 - ``-o``, ``--overwrite``: Measure the images again, even if they are up to
   date.
-- ``--qa``: Write QA figures for each measured image to ``photometry/qa``: the
-  PSF model (``<image>_psf.png``: the stacked stars, the model, the residuals,
-  and the radial profile) and the measured sources (``<image>_sources.png``).
+- ``--no_qa``: Do not write the QA figures to ``photometry/qa``: the PSF model
+  (``<image>_psf.png``: the stacked stars, the model, the residuals, and the
+  radial profile) and the measured sources (``<image>_sources.png``).  By
+  default, the figures are redrawn for each measured image, and drawn for an
+  image that is up to date but lacks them (its PSF stars are stacked again
+  from the image, without measuring the sources again).
 - ``--thresh``: The source detection threshold, as a multiple of the
   background noise (default 8).
 - ``--psf_thresh``: The detection threshold for the stars used to model the
@@ -116,6 +120,15 @@ image and its object, filter, exposure time, airmass, and MJD; the PSF model
 the number of sources removed by the vetting; the settings; and the
 provenance of the image and its astrometric solution.
 
+The sources removed by the vetting are written to
+``photometry/<image>_removed.ecsv``, with the 0-based pixel coordinates where
+they were detected (``x_init``, ``y_init``), their fitted coordinates and flux
+(``x_fit``, ``y_fit``, ``flux_fit``; masked if the fit failed), the iteration
+of the PSF photometry that detected them (``iter_detected``), and the reason
+they were removed (``failed``, ``outside``, ``moved``, or ``nonpositive``).
+Source tables measured before this file existed gain it when they are next
+measured.
+
 ``photometry/summary.ecsv``, also logged, summarizes each image: its status
 (``measured``, ``up to date``, ``coordinates updated``, ``missing``, or
 ``failed``), the number of sources, the FWHM, the number of PSF stars, and the
@@ -131,7 +144,7 @@ Using the pipeline in Python
 
    from pipnick.pipelines.photometry import photometry_all
 
-   tables = photometry_all('n1_2x2_slow_full.ecsv', qa=True)
+   tables = photometry_all('n1_2x2_slow_full.ecsv')
 
 See :func:`~pipnick.pipelines.photometry.photometry_all` for the full set of
 parameters.

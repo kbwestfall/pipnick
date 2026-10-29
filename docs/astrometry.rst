@@ -79,11 +79,13 @@ The options are:
 - ``--resolve``: Ignore the existing and cached solutions and solve the images
   (only those given by ``--images``, if provided) again.  This can submit
   images that were solved before.
-- ``--qa``: Write a check figure for each image solved in the run (for every
-  image, with ``--dry_run``) to ``astrometry/qa``.  It shows the image, the
-  detected sources (circles, numbered by brightness), and the sources matched
-  to the reference image or Gaia (crosses), with their residuals magnified
-  20 times (red).
+- ``--no_qa``: Do not write the check figures to ``astrometry/qa``.  By
+  default, a figure is redrawn for each image solved in the run, and drawn for
+  any image without one (e.g., an unsolved image, or every image in a first
+  dry run).  It shows the image, the detected sources (circles, numbered by
+  brightness), and, for an image solved in the run, the sources matched to the
+  reference image or Gaia (crosses), with their residuals magnified 20 times
+  (red).
 - ``--max_sources``, ``--detect_thresh``, ``--fwhm``: The maximum number of
   (brightest) sources detected in each image (default 100), the detection
   threshold as a multiple of the background noise (default 5), and the FWHM
@@ -151,7 +153,7 @@ The ``astrometry`` subdirectory of the reduction directory holds:
   `Providing a solution`_).
 - ``summary.ecsv``: The summary of the last run; see
   `Using the command-line script`_.
-- ``qa/<image>.png``: The check figures written with ``--qa``.
+- ``qa/<image>.png``: The check figures (unless ``--no_qa``).
 - ``dry_run/<image>_sources.ecsv``: The detected sources, written with
   ``--dry_run``.
 
@@ -223,8 +225,8 @@ solved, or their solutions are poor:
 
 - **Start with a dry run.**  ``--dry_run`` shows the pointing groups, the
   number of sources detected in each image, and which images would be
-  submitted.  With ``--qa``, it writes a figure of each image with its
-  detected sources, so you can check that they are stars and not, e.g.,
+  submitted.  It also writes a figure of each image with its detected
+  sources (unless the image already has one, or ``--no_qa`` is set), so you can check that they are stars and not, e.g.,
   knots in a galaxy, cosmic rays, or artifacts along the image edges.  Images
   with fewer than about 10 sources (e.g., short exposures in the B band, or
   sparse fields at high Galactic latitude) are the hardest to solve.
@@ -265,7 +267,7 @@ solved, or their solutions are poor:
 - **Rejected solutions.**  The log gives the reason, e.g., "RMS residual is
   0.41 arcsec".  In poor seeing or crowded fields, a modestly larger
   ``--max_rms`` (e.g., 0.5) may be acceptable for your science; check the
-  ``--qa`` figure first.
+  image's figure in ``astrometry/qa`` first.
 
 - **Iterate on the problem images.**  ``--images`` limits a run to the images
   you are working on.  Results are cached, and failed submissions are not
@@ -274,7 +276,7 @@ solved, or their solutions are poor:
 
 - **Inspect the result.**  Check ``PNASTMTH``, ``PNASTNPT``, ``PNASTRMS``, and
   ``PNASTPOE`` in the headers (or ``astrometry/summary.ecsv``), and the
-  ``--qa`` figures.
+  figures in ``astrometry/qa``.
 
 Coordinate frames
 -----------------
@@ -303,7 +305,7 @@ coordinates are 0-based (the numpy convention, as returned by ``photutils``).
 
    from astropy.coordinates import SkyCoord
    from pipnick.astrometry.fit import fit_wcs
-   from pipnick.pipelines.astrometry import apply_wcs
+   from pipnick.astrometry.header import apply_wcs
 
    coords = SkyCoord(ra, dec, unit='deg')
    wcs, stats = fit_wcs(x, y, coords)

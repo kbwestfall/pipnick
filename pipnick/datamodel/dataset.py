@@ -2,7 +2,7 @@
 The data set of one setup: its metadata table, reduction directory, and
 products.
 
-A per-setup metadata table (see :func:`~pipnick.metadata.build_metadata`)
+A per-setup metadata table (see :func:`~pipnick.metadata.build.build_metadata`)
 defines the frames of one setup and their combination groups (``comb_id``).
 Each group to be reduced produces one product (:class:`Product`), e.g., a
 combined bias or flat, or a reduced science image.  :class:`DataSet` reads
@@ -22,10 +22,10 @@ from astropy.time import Time
 
 from pipnick import cameras, log
 from pipnick.datamodel.image import ReducedImage
-from pipnick.metadata import (
-    build_metadata, filter_name, frame_path, read_metadata, safe_name, setup_tag,
-    update_metadata_meta
-)
+from pipnick.metadata.build import build_metadata
+from pipnick.metadata.names import filter_name, safe_name
+from pipnick.metadata.setups import setup_tag
+from pipnick.metadata.table import frame_path, read_metadata, update_metadata_meta
 from pipnick.pkg.exceptions import PipnickDataModelError, PipnickPathError
 from pipnick.pkg.paths import step_dir
 
@@ -100,11 +100,11 @@ class DataSet:
         The metadata file.
     table : :class:`astropy.table.Table`
         The metadata table, excluding commented-out rows; see
-        :func:`~pipnick.metadata.read_metadata`.
+        :func:`~pipnick.metadata.table.read_metadata`.
     rdxdir : :class:`pathlib.Path`
         The reduction directory, which may not yet exist.
     tag : str
-        The setup tag; see :func:`~pipnick.metadata.setup_tag`.
+        The setup tag; see :func:`~pipnick.metadata.setups.setup_tag`.
     camera : :class:`~pipnick.cameras.cameras.NickelCamera`
         The camera used to obtain the data.
     """
@@ -131,7 +131,7 @@ class DataSet:
             the metadata file is used or, if there is none, the parent
             directory of the raw data directory, which is then saved to the
             metadata file.  A directory that differs from the saved one is
-            also saved; see :func:`~pipnick.metadata.build_metadata`.
+            also saved; see :func:`~pipnick.metadata.build.build_metadata`.
         check_mosaics : bool, optional
             Also check the mosaic labels; see :func:`check_mosaic_groups`.
         read_only : bool, optional
@@ -450,7 +450,7 @@ class DataSet:
         -------
         tuple
             The ``mosaic`` and ``wcs_group`` labels (see
-            :data:`~pipnick.metadata.mosaic_columns`); empty strings if the
+            :data:`~pipnick.metadata.groups.mosaic_columns`); empty strings if the
             product is not in a mosaic, or the table has no mosaic columns.
             The WCS group defaults to the mosaic label.
         """
@@ -529,7 +529,7 @@ def check_single_setup(metadata, metafile):
     ----------
     metadata : :class:`astropy.table.Table`
         The metadata table, excluding commented-out rows; see
-        :func:`~pipnick.metadata.read_metadata`.
+        :func:`~pipnick.metadata.table.read_metadata`.
     metafile : str, :class:`pathlib.Path`
         The file the table was read from, used in error messages.
 
@@ -581,7 +581,7 @@ def check_comb_groups(metadata, metafile):
     ----------
     metadata : :class:`astropy.table.Table`
         The metadata table, excluding commented-out rows; see
-        :func:`~pipnick.metadata.read_metadata`.
+        :func:`~pipnick.metadata.table.read_metadata`.
     metafile : str, :class:`pathlib.Path`
         The file the table was read from, used in error messages.
 
@@ -760,7 +760,7 @@ def _flat_name(frametype, filt):
     """
     Return the name of the combined flat of a given type (``'skyflat'`` or
     ``'domeflat'``) and filter; e.g., ``SkyFlat_V.fits`` or
-    ``SkyFlat_ip.fits`` for the ``i'`` filter (see :func:`~pipnick.metadata.filter_name`).
+    ``SkyFlat_ip.fits`` for the ``i'`` filter (see :func:`~pipnick.metadata.names.filter_name`).
     """
     title = 'SkyFlat' if frametype == 'skyflat' else 'DomeFlat'
     return f'{title}_{filter_name(filt)}.fits'
@@ -839,7 +839,7 @@ def _science_name(metadata, indx, comb_id):
     ``<object>`` is the most common object name in the group (ties go to the
     earliest frame), ``<filter>`` is the filter of the earliest frame (all
     frames in a group have the same filter; see :func:`check_comb_groups` and
-    :func:`~pipnick.metadata.filter_name`), ``<comb_id>`` is zero-padded to three digits, and
+    :func:`~pipnick.metadata.names.filter_name`), ``<comb_id>`` is zero-padded to three digits, and
     ``<date>`` is the UT date of the earliest frame.
 
     Parameters

@@ -20,51 +20,22 @@ import numpy as np
 from astropy.table import MaskedColumn, Table
 
 from pipnick import log
-from pipnick.astrometry.fit import to_icrs, wcs_from_header
-from pipnick.astrometry.qa import plot_solution
+from pipnick.datamodel.catalog import SourceCatalog, celestial_coordinates
 from pipnick.datamodel.dataset import DataSet
 from pipnick.datamodel.psf import PSFModel
 from pipnick.image.io import invalid_error
 from pipnick.photometry.aperture_photometry import aperture_analysis
-from pipnick.photometry.fit import psf_plot
-from pipnick.photometry.psf_photometry import consolidate_groups, psf_analysis
+from pipnick.photometry.psf_photometry import (
+    build_moffat_psf_model, consolidate_groups, psf_analysis, subtract_background
+)
 from pipnick.pkg.exceptions import PipnickPathError
+from pipnick.pkg.paths import qa_figure
 from pipnick.pkg.provenance import image_hash, json_hash, solution_hash
 from pipnick.pkg.report import StepReport
+from pipnick.pkg.summary import Summary
 from pipnick.pkg.version import version
-
-
-def celestial_coordinates(header, x, y):
-    """
-    Compute the celestial coordinates of sources, if the image has an
-    astrometric solution found by pipnick.
-
-    Parameters
-    ----------
-    header : :class:`astropy.io.fits.Header`
-        The header of the reduced image.
-    x, y : :class:`numpy.ndarray`
-        The 0-based pixel coordinates of the sources.
-
-    Returns
-    -------
-    ra, dec : :class:`astropy.table.MaskedColumn`
-        The ICRS right ascension and declination in degrees, masked if the
-        image has no solution.
-    """
-    n = len(x)
-    if 'PNASTMTH' not in header or n == 0:
-        masked = np.ones(n, dtype=bool)
-        return (
-            MaskedColumn(np.zeros(n), name='ra', unit='deg', mask=masked),
-            MaskedColumn(np.zeros(n), name='dec', unit='deg', mask=masked)
-        )
-    coords = to_icrs(wcs_from_header(header).pixel_to_world(x, y))
-    unmasked = np.zeros(n, dtype=bool)
-    return (
-        MaskedColumn(coords.ra.deg, name='ra', unit='deg', mask=unmasked),
-        MaskedColumn(coords.dec.deg, name='dec', unit='deg', mask=unmasked)
-    )
+from pipnick.qa.psf import plot_psf
+from pipnick.qa.sources import plot_sources
 
 
 def _masked(values):
@@ -97,6 +68,8 @@ def measure_image(image, settings):
     -------
     tbl : :class:`astropy.table.Table`
         The source table; see :func:`photometry_all`.
+    removed : :class:`astropy.table.Table`
+        The sources removed from the source table; see :func:`vet_sources`.
     fit : object
         The fit to the PSF, a :class:`~pipnick.photometry.moffat.FitMoffat2D`
         or :class:`~pipnick.photometry.moffat.FitEllipticalMoffat2D` object.
@@ -109,17 +82,8 @@ def measure_image(image, settings):
     values = image.values
     mjd = image.mjd
     scale = image.nominal_scale
-    data, mask, error, hdr = image.read()
-    # The pixel errors propagated by the reduction (see
-    # pipnick.pipelines.reduction.process_frame)
-    if error is None:
-        log.warning(f'{path.name} has no uncertainty; the flux errors are not weighted.')
-    else:
-        # Pixels without a valid error are ignored
-        bad = invalid_error(error)
-        mask = mask | bad
-        error = np.where(bad, 1., error)
-    data = np.ma.MaskedArray(data, mask=mask)
+    data, error, hdr = _read_image(image, warn=True)
+    mask = np.ma.getmaskarray(data)
 
     fit, nstack, fwhm, phot, sub = psf_analysis(
         data, error=error, thresh=settings['thresh'], guess_fwhm=settings['fwhm'] / scale,
@@ -130,7 +94,11 @@ def measure_image(image, settings):
     if settings['group']:
         phot = consolidate_groups(phot)
 
-    phot, removed = vet_sources(phot, data.shape, fwhm)
+    phot, removed, rejected = vet_sources(phot, data.shape, fwhm)
+    rejected.meta = {
+        'image': path.name, 'removed': removed, 'image_hash': image_hash(hdr),
+        'pipnick_version': version
+    }
     x = np.asarray(phot['x_fit'], dtype=float)
     y = np.asarray(phot['y_fit'], dtype=float)
 
@@ -193,7 +161,43 @@ def measure_image(image, settings):
         f'{path.name}: measured {len(tbl)} sources; PSF FWHM {fwhm:.2f} pixels '
         f'({fwhm * scale:.2f} arcsec) from {nstack} stars; {coordinates}'
     )
-    return tbl, fit, sub, mask
+    return tbl, rejected, fit, sub, mask
+
+
+def _read_image(image, warn=False):
+    """
+    Read a reduced image for its photometry.
+
+    Pixels without a valid error (see
+    :func:`~pipnick.image.io.invalid_error`) are masked, and their error is
+    set to 1.  The errors are those propagated by the reduction; see
+    :func:`~pipnick.reduction.processing.process_frame`.
+
+    Parameters
+    ----------
+    image : :class:`~pipnick.datamodel.image.ReducedImage`
+        The reduced image.
+    warn : bool, optional
+        Warn if the image has no error.
+
+    Returns
+    -------
+    data : :class:`numpy.ma.MaskedArray`
+        The image, with its masked pixels.
+    error : :class:`numpy.ndarray`
+        The error of each pixel, or None if the image has no error.
+    header : :class:`astropy.io.fits.Header`
+        The primary header.
+    """
+    data, mask, error, hdr = image.read()
+    if error is None:
+        if warn:
+            log.warning(f'{image.name} has no uncertainty; the flux errors are not weighted.')
+    else:
+        bad = invalid_error(error)
+        mask = mask | bad
+        error = np.where(bad, 1., error)
+    return np.ma.MaskedArray(data, mask=mask), error, hdr
 
 
 def vet_sources(phot, shape, fwhm):
@@ -227,6 +231,14 @@ def vet_sources(phot, shape, fwhm):
     removed : dict
         The number of sources removed for each reason: ``failed``,
         ``outside``, ``moved``, and ``nonpositive``.
+    rejected : :class:`astropy.table.Table`
+        The removed sources, written to ``photometry/<image>_removed.ecsv``
+        (see :func:`~pipnick.pkg.paths.removed_table`): the 0-based pixel
+        coordinates where they were detected (``x_init``, ``y_init``), their
+        fitted coordinates and flux (``x_fit``, ``y_fit``, ``flux_fit``;
+        masked if not finite), the iteration of the PSF photometry that
+        detected them (``iter_detected``, if available), and the ``reason``
+        they were removed.
     """
     x = np.asarray(phot['x_fit'], dtype=float)
     y = np.asarray(phot['y_fit'], dtype=float)
@@ -251,13 +263,26 @@ def vet_sources(phot, shape, fwhm):
             f'Removed {sum(removed.values())} of {len(phot)} sources: '
             + ', '.join(f'{n} {k}' for k, n in removed.items() if n > 0) + '.'
         )
-    return phot[np.logical_not(failed | outside | moved | nonpositive)], removed
+    drop = failed | outside | moved | nonpositive
+    reason = np.full(len(phot), 'failed', dtype=object)
+    for flag, label in [(outside, 'outside'), (moved, 'moved'), (nonpositive, 'nonpositive')]:
+        reason[flag] = label
+    rejected = Table()
+    rejected['x_init'] = MaskedColumn(np.asarray(phot['x_init'], dtype=float)[drop], unit='pix')
+    rejected['y_init'] = MaskedColumn(np.asarray(phot['y_init'], dtype=float)[drop], unit='pix')
+    rejected['x_fit'] = MaskedColumn(_masked(x[drop]), unit='pix')
+    rejected['y_fit'] = MaskedColumn(_masked(y[drop]), unit='pix')
+    rejected['flux_fit'] = MaskedColumn(_masked(flux[drop]), unit='electron')
+    if 'iter_detected' in phot.colnames:
+        rejected['iter_detected'] = np.asarray(phot['iter_detected'])[drop]
+    rejected['reason'] = reason[drop].astype(str)
+    return phot[np.logical_not(drop)], removed, rejected
 
 
 def photometry_all(
     table, rdxdir=None, images=None, overwrite=False, thresh=8., fwhm=None, fittype='circ',
     mode='all', stack='mean', group=False, min_sep=1., group_sep=2., aper_radius=2.,
-    psf_thresh=15., qa=False, report=None
+    psf_thresh=15., qa=True, report=None
 ):
     r"""
     Measure the sources in the reduced science images.
@@ -287,10 +312,11 @@ def photometry_all(
           local background and the fit-quality measures and flags of
           ``photutils``.
 
-    Sources whose PSF fits are not credible are removed; see
-    :func:`vet_sources`.  Values that cannot be measured are masked.  The
-    table metadata record the image, its metadata, the PSF model, the
-    settings, and the provenance of the image and its astrometric solution.
+    Sources whose PSF fits are not credible are removed, and listed with the
+    reason in ``photometry/<image>_removed.ecsv``; see :func:`vet_sources`.
+    Values that cannot be measured are masked.  The table metadata record the
+    image, its metadata, the PSF model, the settings, and the provenance of
+    the image and its astrometric solution.
 
     When the photometry is rerun, an image is measured again only if it, or
     the settings, have changed (or ``overwrite`` is set).  If only its
@@ -341,10 +367,12 @@ def photometry_all(
         The detection threshold, as a multiple of the background noise, for
         the stars used to model the PSF.
     qa : bool, optional
-        Write QA figures for each measured image to ``photometry/qa``: the PSF
-        model (``<image>_psf.png``; see
-        :func:`~pipnick.photometry.fit.psf_plot`) and the measured sources
-        (``<image>_sources.png``).
+        Write the QA figures of each image to ``photometry/qa``: the PSF model
+        (``<image>_psf.png``; see :func:`~pipnick.qa.psf.plot_psf`) and the
+        measured sources (``<image>_sources.png``; see
+        :func:`~pipnick.qa.sources.plot_sources`).  The figures are redrawn
+        when an image is measured, and drawn for any image that is up to date
+        but lacks them, with its PSF model restacked from its image.
     report : :class:`~pipnick.pkg.report.StepReport`, optional
         Collects the failures and problems of the photometry for its closing
         verdict.  If None, a new one is used.
@@ -376,16 +404,12 @@ def photometry_all(
     }
 
     outputs = []
-    summary = []
+    summary = _summary()
     for k, image in enumerate(reduced):
         progress = f'[{k + 1}/{len(reduced)}]'
         path = image.path
         ofile = image.phot_file
-        row = {
-            'image': path.name, 'status': 'failed', 'nsources': -1, 'fwhm_pix': -1.,
-            'fwhm_arcsec': -1., 'nstack': -1, 'wcs': 'none', 'reason': '-'
-        }
-        summary.append(row)
+        row = summary.add(image=path.name, status='failed', wcs='none', reason='-')
         if not image.exists:
             _report.attention(
                 f'{progress} {path.name} does not exist; reduce the data first.  Skipping.'
@@ -397,7 +421,7 @@ def photometry_all(
 
         # Check if the existing table is up to date
         if ofile.is_file() and not overwrite:
-            existing = Table.read(ofile, format='ascii.ecsv')
+            existing = SourceCatalog.read(ofile)
             if (
                 existing.meta.get('image_hash') == image_hash(hdr)
                 and existing.meta.get('settings_hash') == json_hash(settings)
@@ -408,23 +432,21 @@ def photometry_all(
                     log.info(f'{progress} {ofile.name} is up to date.')
                     row['status'] = 'up to date'
                 else:
-                    existing['ra'], existing['dec'] = celestial_coordinates(
-                        hdr, np.asarray(existing['x']), np.asarray(existing['y'])
-                    )
-                    existing.meta['wcs_method'] = hdr.get('PNASTMTH', 'none')
-                    existing.meta['wcs_hash'] = solution_hash(hdr)
-                    existing.write(ofile, format='ascii.ecsv', overwrite=True)
+                    existing.update_coordinates(hdr, solution_hash(hdr))
+                    existing.write()
                     log.info(
                         f'{progress} The astrometric solution of {path.name} changed; updated '
                         f'the celestial coordinates in {ofile.name}.'
                     )
                     row['status'] = 'coordinates updated'
                 outputs.append(ofile)
+                if qa and not all(f.is_file() for f in _qa_files(phot_dir, path)):
+                    _write_qa(image, existing, settings, phot_dir, _report)
                 continue
 
         log.info(f'{progress} Measuring {path.name}.')
         try:
-            tbl, fit, sub, mask = measure_image(image, settings)
+            tbl, rejected, fit, sub, mask = measure_image(image, settings)
         except Exception as e:
             log.debug(f'Traceback of the failure of {path.name}:', exc_info=True)
             _report.fail(f'Photometry of {path.name} failed: {type(e).__name__}: {e}')
@@ -433,25 +455,28 @@ def photometry_all(
         phot_dir.mkdir(parents=True, exist_ok=True)
         tbl.write(ofile, format='ascii.ecsv', overwrite=True)
         log.info(f'Wrote photometry/{ofile.name}')
+        rejected.write(image.removed_file, format='ascii.ecsv', overwrite=True)
+        log.info(f'Wrote photometry/{image.removed_file.name}')
         row['status'] = 'measured'
         row.update(_summary_values(tbl))
         outputs.append(ofile)
         if qa:
-            _write_qa(path, tbl, fit, sub, mask, phot_dir / 'qa')
+            _write_qa(image, tbl, settings, phot_dir, _report, fit=fit, data=sub, mask=mask)
 
     expected = dataset.camera.expected_range('fwhm')
-    for row in summary:
-        if row['fwhm_arcsec'] > 0:
+    for row in summary.rows:
+        if row['fwhm_arcsec'] is not None:
             _report.check_range(
                 f'{row["image"]}: the PSF FWHM', row['fwhm_arcsec'], expected, ' arcsec',
                 advice='Check the focus and tracking.'
             )
-    _summarize(summary, phot_dir)
-    measured = [row for row in summary if row['fwhm_arcsec'] > 0]
+    if summary.write(phot_dir) is None:
+        log.warning('No reduced science images to measure.')
+    measured = [row for row in summary.rows if row['fwhm_arcsec'] is not None]
     counts = ', '.join(
-        f'{sum(row["status"] == s for row in summary)} {s}'
+        f'{sum(row["status"] == s for row in summary.rows)} {s}'
         for s in ['measured', 'up to date', 'coordinates updated', 'missing', 'failed']
-        if any(row['status'] == s for row in summary)
+        if any(row['status'] == s for row in summary.rows)
     )
     text = f'{len(summary)} images ({counts})'
     if len(measured) > 0:
@@ -465,7 +490,7 @@ def photometry_all(
 
 def _summary_values(tbl):
     """
-    Return the summary values of a source table; see :func:`_summarize`.
+    Return the summary values of a source table; see :func:`_summary`.
     """
     return {
         'nsources': len(tbl), 'fwhm_pix': tbl.meta['psf']['fwhm_pix'],
@@ -473,9 +498,9 @@ def _summary_values(tbl):
     }
 
 
-def _summarize(summary, phot_dir):
+def _summary():
     """
-    Log the summary of the photometry of each image, and write it to
+    Return the summary of the photometry, written to
     ``photometry/summary.ecsv``.
 
     The summary gives the status of each image (``measured``, ``up to date``,
@@ -484,38 +509,57 @@ def _summarize(summary, phot_dir):
     to model it, the method of the astrometric solution (``none`` if the
     celestial coordinates are masked), and the reason for any failure.
     """
-    if len(summary) == 0:
-        log.warning('No reduced science images to measure.')
+    return Summary(
+        'Photometry',
+        ['image', 'status', 'nsources', 'fwhm_pix', 'fwhm_arcsec', 'nstack', 'wcs', 'reason'],
+        dtypes={'nsources': int, 'fwhm_pix': float, 'fwhm_arcsec': float, 'nstack': int},
+        formats={'fwhm_pix': '.2f', 'fwhm_arcsec': '.2f'},
+        logged=['image', 'status', 'nsources', 'fwhm_pix', 'fwhm_arcsec', 'nstack', 'wcs']
+    )
+
+
+def _qa_files(phot_dir, path):
+    """
+    Return the QA figures of an image: the PSF model and the measured sources.
+    """
+    return [qa_figure(phot_dir, f'{path.stem}_{kind}') for kind in ['psf', 'sources']]
+
+
+def _write_qa(image, tbl, settings, phot_dir, report, fit=None, data=None, mask=None):
+    """
+    Write the QA figures of an image: the PSF model and the measured sources.
+
+    If the fit to the PSF is not given (for an image that is up to date), the
+    PSF model is rebuilt from the image with the photometry settings (see
+    :func:`~pipnick.photometry.psf_photometry.build_moffat_psf_model`), and
+    the sources are shown on the background-subtracted image.  A failure is
+    recorded in the report, and does not stop the photometry.
+    """
+    path = image.path
+    psf_file, sources_file = _qa_files(phot_dir, path)
+    try:
+        if fit is None:
+            masked, _, _ = _read_image(image)
+            mask = np.ma.getmaskarray(masked)
+            fit, _ = build_moffat_psf_model(
+                masked, thresh=settings['psf_thresh'],
+                fwhm=settings['fwhm'] / image.nominal_scale, fittype=settings['fittype'],
+                stack=settings['stack']
+            )
+            data = subtract_background(masked.filled(0.), mask=mask)
+        psf = tbl.meta['psf']
+        plot_psf(
+            psf_file, fit,
+            title=f'{path.name}: PSF FWHM {psf["fwhm_pix"]:.2f} pixels '
+                  f'({psf["fwhm_arcsec"]:.2f} arcsec) from {psf["nstack"]} stars'
+        )
+        order = np.argsort(-np.ma.filled(np.ma.asarray(tbl['flux_psf'], dtype=float), 0.))
+        plot_sources(
+            data, mask, tbl[order], sources_file,
+            title=f'{path.name}: {len(tbl)} sources, numbered by decreasing PSF flux'
+        )
+    except Exception as e:
+        log.debug(f'Traceback of the failure of the QA of {path.name}:', exc_info=True)
+        report.attention(f'The QA figures of {path.name} failed: {type(e).__name__}: {e}')
         return
-    tbl = Table(rows=summary)
-    # Missing values are masked, not set to an invalid number
-    for name in ['nsources', 'fwhm_pix', 'fwhm_arcsec', 'nstack']:
-        tbl[name] = np.ma.MaskedArray(tbl[name], mask=np.asarray(tbl[name]) < 0)
-    for name in ['fwhm_pix', 'fwhm_arcsec']:
-        tbl[name].info.format = '.2f'
-    phot_dir.mkdir(parents=True, exist_ok=True)
-    tbl.meta['pipnick_version'] = version
-    tbl.write(phot_dir / 'summary.ecsv', format='ascii.ecsv', overwrite=True)
-    columns = ['image', 'status', 'nsources', 'fwhm_pix', 'fwhm_arcsec', 'nstack', 'wcs']
-    log.info(
-        'Photometry summary (also in photometry/summary.ecsv):\n'
-        + '\n'.join(tbl[columns].pformat(max_lines=-1, max_width=-1))
-    )
-
-
-def _write_qa(path, tbl, fit, data, mask, qa_dir):
-    """
-    Write the QA figures for an image: the PSF model and the measured sources.
-    """
-    qa_dir.mkdir(parents=True, exist_ok=True)
-    psf = tbl.meta['psf']
-    psf_plot(
-        qa_dir / f'{path.stem}_psf.png', fit,
-        title=f'{path.name}: PSF FWHM {psf["fwhm_pix"]:.2f} pixels ({psf["fwhm_arcsec"]:.2f} '
-              f'arcsec) from {psf["nstack"]} stars'
-    )
-    order = np.argsort(-tbl['flux_psf'].filled(0.))
-    plot_solution(
-        data, mask, tbl[order], qa_dir / f'{path.stem}_sources.png',
-        title=f'{path.name}: {len(tbl)} sources, numbered by decreasing PSF flux'
-    )
+    log.info(f'Wrote photometry/qa/{psf_file.name} and {sources_file.name}')

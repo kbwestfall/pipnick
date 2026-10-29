@@ -5,6 +5,7 @@ fluxes, seeing, and transparency.
 
 import logging
 
+import matplotlib.image
 import numpy as np
 import pytest
 from astropy import units
@@ -17,7 +18,9 @@ from photutils.aperture import ApertureStats, CircularAnnulus, CircularAperture
 from photutils.psf import MoffatPSF
 from scipy.signal import fftconvolve
 
-from pipnick import metadata
+from pipnick.metadata.build import build_metadata
+from pipnick.metadata.groups import mosaic_columns
+from pipnick.metadata.table import read_metadata, write_metadata
 from pipnick.datamodel.dataset import DataSet, check_mosaic_groups
 from pipnick.datamodel.psf import PSFModel
 from pipnick.mosaic import coadd, psfmatch, scaling
@@ -116,7 +119,7 @@ def write_dithers(tmp_path, design, name='n7', stars=None):
             rawdir / f'{name}{i:03d}.fits', OBJECT=f'M11 {filt}', FILTER=filt, RA=ra, DEC=dec,
             XPOSURE=EXPTIME, AIRMASS=1.2 + 0.01 * i, **{'DATE-BEG': date.isot}
         )
-    files, _ = metadata.build_metadata(
+    files, _ = build_metadata(
         rawdir=rawdir, filename=tmp_path / f'{name}.ecsv', split=True, assign=True,
         mosaic_radius=1.
     )
@@ -331,8 +334,8 @@ def test_metadata_columns(tmp_path):
         rawdir / 'n8101.fits', OBJECT='SA 110 V', FILTER='V', RA='18:43:00.5', DEC='00:10:10',
         **{'DATE-BEG': '2026-08-20T06:05:00.000'}
     )
-    files, tbl = metadata.build_metadata(rawdir=rawdir, filename=tmp_path / 'n8.ecsv', split=True)
-    tbl = metadata.read_metadata(files[0])
+    files, tbl = build_metadata(rawdir=rawdir, filename=tmp_path / 'n8.ecsv', split=True)
+    tbl = read_metadata(files[0])
     assert np.all(tbl['mosaic'] == '') and np.all(tbl['wcs_group'] == ''), (
         'By default, no mosaics should be defined'
     )
@@ -340,11 +343,11 @@ def test_metadata_columns(tmp_path):
     # linking length of the pointing groups (half the field of view) is too
     # small, and it is given explicitly
 
-    files, _ = metadata.build_metadata(
+    files, _ = build_metadata(
         rawdir=rawdir, filename=tmp_path / 'n8.ecsv', split=True, append=True, assign=True,
         mosaic_radius=1.
     )
-    tbl = metadata.read_metadata(files[0])
+    tbl = read_metadata(files[0])
     labels = dict(zip(tbl['file'], tbl['mosaic']))
     groups = dict(zip(tbl['file'], tbl['wcs_group']))
     assert [labels[f'n8{i:03d}.fits'] for i in range(3)] == ['M11_V'] * 3, (
@@ -357,14 +360,14 @@ def test_metadata_columns(tmp_path):
     )
 
     # An edited label is kept
-    edited, commented = metadata.read_metadata(files[0], include_commented=True, expand=False)
+    edited, commented = read_metadata(files[0], include_commented=True, expand=False)
     edited['mosaic'][0] = 'mine'
-    metadata.write_metadata(edited, files[0], commented=commented)
-    files, _ = metadata.build_metadata(
+    write_metadata(edited, files[0], commented=commented)
+    files, _ = build_metadata(
         rawdir=rawdir, filename=tmp_path / 'n8.ecsv', split=True, append=True, assign=True,
         mosaic_radius=1.
     )
-    tbl = metadata.read_metadata(files[0])
+    tbl = read_metadata(files[0])
     assert tbl['mosaic'][0] == 'mine', 'An existing label should not be reassigned'
 
 
@@ -444,16 +447,30 @@ def test_mosaic(tmp_path, caplog):
     for h in hdus.values():
         h.close()
 
-    # Rerun: up to date
+    # Rerun: up to date, and only the missing QA figures are drawn
+    qa_dir = outputs[0].parent / 'qa'
+    figures = sorted(qa_dir.glob('*.png'))
+    assert [f.name for f in figures] == ['M11_R.png', 'M11_V.png'], (
+        'A QA figure should be written for each mosaic'
+    )
+    assert all(matplotlib.image.imread(f).ndim == 3 for f in figures), (
+        'The QA figures should be readable PNG images'
+    )
+    before = figures[1].stat().st_mtime_ns
+    figures[0].unlink()
     caplog.clear()
     with caplog.at_level(logging.INFO):
         mosaic.mosaic_all(table)
     assert caplog.text.count('is up to date') == 2, 'A rerun should not rebuild the mosaics'
+    assert figures[0].is_file(), 'A missing QA figure of an up-to-date mosaic should be drawn'
+    assert figures[1].stat().st_mtime_ns == before, (
+        'The QA figure of an up-to-date mosaic should not be redrawn'
+    )
 
     # Changing the membership of the group rebuilds all of its mosaics
-    tbl, commented = metadata.read_metadata(table, include_commented=True, expand=False)
+    tbl, commented = read_metadata(table, include_commented=True, expand=False)
     tbl['mosaic'][np.where(tbl['mosaic'] == 'M11_R')[0][-1]] = ''
-    metadata.write_metadata(tbl, table, commented=commented)
+    write_metadata(tbl, table, commented=commented)
     caplog.clear()
     with caplog.at_level(logging.INFO):
         mosaic.mosaic_all(table)
@@ -465,12 +482,20 @@ def test_mosaic(tmp_path, caplog):
 def test_mosaic_options(tmp_path, caplog):
     table, rdxdir, _ = write_dithers(tmp_path, three_dithers())
     outputs = mosaic.mosaic_all(
-        table, psf_match='none', scale='none', match_background=True, outdir=tmp_path / 'out'
+        table, psf_match='none', scale='none', match_background=True, outdir=tmp_path / 'out',
+        qa=False
     )
     hdr = fits.getheader(outputs[0])
     assert hdr['PNPSFMAT'] == 'none' and 'PNTGFWHM' not in hdr, 'The PSFs should not be matched'
     inputs = Table.read(outputs[0], hdu='INPUTS')
     assert np.all(inputs['offset'] == 0.), 'The images should not be scaled'
+    assert np.all(inputs['fwhm_out'].mask) and np.all(inputs['match_ee'].mask), (
+        'Without PSF matching, the matched FWHM and its accuracy should be masked'
+    )
+    known = np.ma.getmaskarray(inputs['fwhm_in']) | np.ma.getmaskarray(inputs['airmass'])
+    assert not np.any(known), (
+        'The known FWHM and airmasses should not be masked'
+    )
     assert np.any(inputs['level'] != 0.), 'The background levels should be matched'
     with pytest.raises(PipnickParameterError):
         mosaic.mosaic_all(table, psf_match='bad')
@@ -502,10 +527,10 @@ def test_two_tables(tmp_path):
     table2, _, _ = write_dithers(
         tmp_path, three_dithers()[2:] + three_dithers()[:1], name='nb', stars=stars
     )
-    labels1 = set(metadata.read_metadata(table1)['mosaic']) - {''}
-    labels2 = set(metadata.read_metadata(table2)['mosaic']) - {''}
+    labels1 = set(read_metadata(table1)['mosaic']) - {''}
+    labels2 = set(read_metadata(table2)['mosaic']) - {''}
     assert labels1 == labels2 == {'M11_V'}, 'The tables should have the same labels'
-    outputs = mosaic.mosaic_all([table1, table2], outdir=tmp_path / 'joint')
+    outputs = mosaic.mosaic_all([table1, table2], outdir=tmp_path / 'joint', qa=False)
     inputs = Table.read(outputs[0], hdu='INPUTS')
     assert len(inputs) == 4 and len(set(inputs['table'])) == 2, (
         'The mosaic should combine the images of both tables'
@@ -520,13 +545,13 @@ def test_single_image_mosaics(tmp_path):
         ('B', (-4., 2.), 4.5, 1.0, 50., 4.2)
     ]
     table, rdxdir, _ = write_dithers(tmp_path, design)
-    tbl, commented = metadata.read_metadata(table, include_commented=True, expand=False)
-    for name in metadata.mosaic_columns:
+    tbl, commented = read_metadata(table, include_commented=True, expand=False)
+    for name in mosaic_columns:
         tbl[name] = tbl[name].astype('U20')
     tbl['mosaic'] = [f'M11_{f}_single' for f in tbl['filter']]
     tbl['wcs_group'] = 'M11_single'
-    metadata.write_metadata(tbl, table, commented=commented)
-    outputs = mosaic.mosaic_all(table)
+    write_metadata(tbl, table, commented=commented)
+    outputs = mosaic.mosaic_all(table, qa=False)
     assert len(outputs) == 3, 'Each single-image mosaic should be constructed'
     headers = [fits.getheader(f) for f in outputs]
     for key in ['NAXIS1', 'NAXIS2', 'CRVAL1', 'CRVAL2', 'CRPIX1', 'CRPIX2']:

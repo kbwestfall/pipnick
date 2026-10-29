@@ -3,7 +3,7 @@ Mosaics of the reduced science images.
 
 The images to combine are selected by the ``mosaic`` and ``wcs_group``
 columns of the per-setup metadata tables (see
-:data:`~pipnick.metadata.mosaic_columns`): images with the same ``mosaic``
+:data:`~pipnick.metadata.groups.mosaic_columns`): images with the same ``mosaic``
 label are combined, and all of the mosaics with the same ``wcs_group`` label
 share an identical output WCS and shape (e.g., for colour images).  The
 labels are global, so a mosaic can combine the images of several tables,
@@ -35,35 +35,29 @@ from pathlib import Path
 
 import numpy as np
 
-from astropy.coordinates import SkyCoord
 from astropy.io import fits
-from astropy.stats import sigma_clipped_stats
-from astropy.table import Table
-from astropy.visualization import ZScaleInterval
-from matplotlib.figure import Figure
-from photutils.aperture import ApertureStats, CircularAnnulus
-from photutils.segmentation import detect_sources, detect_threshold
+from astropy.table import MaskedColumn, Table
 
 from pipnick import log
 from pipnick.astrometry.fit import wcs_from_header
 from pipnick.datamodel.dataset import DataSet
 from pipnick.datamodel.psf import PSFModel
-from pipnick.image.io import invalid_error, read_reduced
 from pipnick.mosaic.coadd import (
     combine, footprint_bbox, output_wcs, overlap_differences, reproject_image
 )
+from pipnick.mosaic.prepare import measure_offsets, prepare_image
 from pipnick.mosaic.psfmatch import image_kernel, normalized_convolve
 from pipnick.mosaic.scaling import solve_offsets
-from pipnick.photometry.aperture_photometry import aperture_analysis
-from pipnick.photometry.psf_photometry import build_moffat_psf_model, subtract_background
+from pipnick.photometry.psf_photometry import build_moffat_psf_model
 from pipnick.pkg.exceptions import (
     PipnickDataModelError, PipnickParameterError, PipnickPathError
 )
-from pipnick.pkg.paths import step_dir
+from pipnick.pkg.paths import qa_figure, step_dir
 from pipnick.pkg.provenance import image_hash, json_hash, solution_hash
 from pipnick.pkg.report import StepReport
+from pipnick.pkg.summary import Summary
 from pipnick.pkg.version import version
-from pipnick.utils.crossmatch import match_sky
+from pipnick.qa.mosaic import plot_mosaic
 
 
 def collect_images(tables, require_photometry=True, report=None):
@@ -268,185 +262,6 @@ def group_wcs(images, wcs_file, pixel_scale=None, overwrite=False):
     return wcs, shape, ghash
 
 
-def _background(data, good, method):
-    """
-    Return the background of an image: ``'constant'`` (the sigma-clipped
-    median of the pixels without sources, which are found by image
-    segmentation and dilated), ``'2d'`` (see
-    :func:`~pipnick.photometry.psf_photometry.subtract_background`, with
-    256-pixel boxes), or ``'none'`` (0).
-    """
-    if method == 'none':
-        return 0.
-    mask = np.logical_not(good)
-    if method == '2d':
-        return data - subtract_background(data, mask=mask, box_size=256)
-    threshold = detect_threshold(data, 2., mask=mask)
-    segm = detect_sources(data, threshold, 10, mask=mask)
-    sources = np.zeros(data.shape, dtype=bool) if segm is None else segm.make_source_mask(size=11)
-    _, median, _ = sigma_clipped_stats(data, mask=mask | sources, sigma=3.)
-    return median
-
-
-def prepare_image(image, background='constant'):
-    """
-    Read an image, convert it to electrons per second, and subtract its
-    background.
-
-    Returns
-    -------
-    data, var : :class:`numpy.ndarray`
-        The image and its variance, 0 at the masked pixels.
-    good : :class:`numpy.ndarray`
-        Boolean array selecting the good pixels.
-    """
-    data, mask, err, _ = read_reduced(image.path)
-    if err is None:
-        log.warning(f'{image.name} has no uncertainty; using unit errors.')
-        err = np.ones(data.shape, dtype=float)
-    good = np.logical_not(mask | invalid_error(err)) & np.isfinite(data)
-    t = image.exptime
-    data = np.where(good, data, 0.) / t
-    var = np.where(good, err, 0.)**2 / t**2
-    data = np.where(good, data - _background(data, good, background), 0.)
-    return data, var, good
-
-
-def _source_mags(image, data, var, good, target_pix, settings):
-    """
-    Return the positions and instrumental magnitudes of the sources of an
-    image used to measure the flux scale.
-
-    The sources are those of the photometry table that are not flagged, have
-    an unmasked aperture flux (so no saturated or masked pixels), and have
-    celestial coordinates.  With PSF matching, their fluxes are measured on
-    the matched image in apertures of radius 1.5 times the target FWHM, with
-    the local background (the sigma-clipped median in an annulus from 3 to 5
-    times the target FWHM) subtracted, so that errors in the background of the
-    image do not bias the scale; otherwise, their PSF fluxes are used.
-    Sources with a signal-to-noise ratio below ``settings['min_snr']``, or
-    without a local background, are excluded.
-    """
-    phot = image.photometry(require=False)
-    ok = (
-        (np.asarray(phot['flags']) == 0)
-        & np.logical_not(np.ma.getmaskarray(np.ma.asarray(phot['flux_aper'])))
-        & np.logical_not(np.ma.getmaskarray(np.ma.asarray(phot['ra'])))
-    )
-    x = np.asarray(phot['x'], dtype=float)[ok]
-    y = np.asarray(phot['y'], dtype=float)[ok]
-    ra = np.ma.filled(np.ma.asarray(phot['ra'], dtype=float), 0.)[ok]
-    dec = np.ma.filled(np.ma.asarray(phot['dec'], dtype=float), 0.)[ok]
-    if settings['psf_match'] != 'none':
-        mask = np.logical_not(good)
-        if len(x) > 0:
-            annulus = CircularAnnulus(np.column_stack([x, y]), 3 * target_pix, 5 * target_pix)
-            # NOTE: The median is NaN for an annulus without good pixels; these
-            # sources are flagged and excluded immediately
-            bkg = np.atleast_1d(np.asarray(ApertureStats(data, annulus, mask=mask).median))
-        else:
-            bkg = np.zeros(0)
-        has_bkg = np.isfinite(bkg)
-        flux, err = aperture_analysis(
-            data, x, y, 1.5 * target_pix, local_bkg=np.where(has_bkg, bkg, 0.),
-            error=np.sqrt(var), mask=mask
-        )
-        flux = np.where(has_bkg, np.ma.filled(flux, 0.), 0.)
-        err = np.where(has_bkg, np.ma.filled(err, 0.), 0.)
-    else:
-        t = image.exptime
-        flux = np.ma.filled(np.ma.asarray(phot['flux_psf'], dtype=float), 0.)[ok] / t
-        err = np.ma.filled(np.ma.asarray(phot['flux_psf_err'], dtype=float), 0.)[ok] / t
-    keep = (flux > 0) & (err > 0) & (flux > settings['min_snr'] * err)
-    _flux = np.where(keep, flux, 1.)
-    mag = -2.5 * np.log10(_flux)
-    mag_err = 2.5 / np.log(10.) * np.where(keep, err, 0.) / _flux
-    return ra[keep], dec[keep], mag[keep], mag_err[keep]
-
-
-def measure_offsets(images, prepared, targets, settings):
-    """
-    Measure the magnitude offsets of the images of a mosaic with respect to
-    the reference image.
-
-    Parameters
-    ----------
-    images : list
-        The images of the mosaic; see :func:`collect_images`.
-    prepared : list
-        The matched images: tuples of the image, variance, and good-pixel map.
-    targets : list
-        The target FWHM of each image, in its pixels.
-    settings : dict
-        The mosaic settings; see :func:`mosaic_all`.
-
-    Returns
-    -------
-    offset, error : :class:`numpy.ndarray`
-        The magnitude offset of each image (it is multiplied by
-        :math:`10^{0.4 z}`) and its error.
-    scaled : :class:`numpy.ndarray`
-        Flags the images whose offset was measured.
-    nused : :class:`numpy.ndarray`
-        The number of magnitude differences used for each image.
-    reference : int
-        The index of the reference image.
-    """
-    n = len(images)
-    reference = _reference(images, settings['reference'])
-    if settings['scale'] == 'none' or n == 1:
-        return np.zeros(n), np.zeros(n), np.ones(n, dtype=bool), np.zeros(n, dtype=int), reference
-    if settings['scale'] == 'calib':
-        zp = [image.header.get('PNCALZP') for image in images]
-        if any(z is None for z in zp):
-            raise PipnickDataModelError(
-                'Not all images have a photometric calibration (PNCALZP); run pipnick_calibrate '
-                '--apply image, or use --scale sources.'
-            )
-        offset = np.array([zp[reference] - z for z in zp], dtype=float)
-        return offset, np.zeros(n), np.ones(n, dtype=bool), np.zeros(n, dtype=int), reference
-    sources = [
-        _source_mags(image, d, v, g, t, settings)
-        for image, (d, v, g), t in zip(images, prepared, targets)
-    ]
-    measurements = []
-    for i in range(n):
-        for j in range(i + 1, n):
-            i1, i2, _ = match_sky(
-                SkyCoord(sources[i][0], sources[i][1], unit='deg'),
-                SkyCoord(sources[j][0], sources[j][1], unit='deg'), settings['match_radius']
-            )
-            if len(i1) == 0:
-                continue
-            dm = sources[i][2][i1] - sources[j][2][i2]
-            err = np.sqrt(sources[i][3][i1]**2 + sources[j][3][i2]**2)
-            measurements.append((i, j, dm, err))
-    offset, error, scaled, nused = solve_offsets(
-        n, measurements, reference=reference, min_common=settings['min_common']
-    )
-    for image, s in zip(images, scaled):
-        if not s:
-            log.warning(
-                f'{image.name} shares too few sources with the other images (fewer than '
-                f'{settings["min_common"]} per pair) to be scaled; it is not scaled.'
-            )
-    return offset, error, scaled, nused, reference
-
-
-def _reference(images, reference):
-    """
-    Return the index of the reference image: the image named ``reference``
-    (file name or stem), if it is in the mosaic, or the image with the lowest
-    airmass.
-    """
-    if reference is not None:
-        for i, image in enumerate(images):
-            if reference in [image.name, image.path.stem]:
-                return i
-    airmass = [np.inf if image.airmass is None else image.airmass for image in images]
-    return int(np.argmin(airmass))
-
-
 def build_mosaic(images, wcs_out, shape_out, target, settings):
     """
     Construct a mosaic.
@@ -492,7 +307,7 @@ def build_mosaic(images, wcs_out, shape_out, target, settings):
             # used without PSF matching (the PSF fluxes are used instead)
             target_pix = 0.
             kernels.append('none')
-            ee_ratios.append(-1.)
+            ee_ratios.append(None)
         prepared.append((data, var, good))
         targets.append(target_pix)
 
@@ -505,7 +320,7 @@ def build_mosaic(images, wcs_out, shape_out, target, settings):
         data = data * s
         var = var * s**2
         achieved.append(
-            -1. if target is None else _achieved_fwhm(image, data, good, t, target[1])
+            None if target is None else _achieved_fwhm(image, data, good, t, target[1])
         )
         weights.append(1. / float(np.median(var[good])))
         bbox = footprint_bbox(image.wcs, image.shape, wcs_out, shape_out)
@@ -552,15 +367,15 @@ def build_mosaic(images, wcs_out, shape_out, target, settings):
     inputs['image_hash'] = [image_hash(image.header) for image in images]
     inputs['wcs_hash'] = [solution_hash(image.header) for image in images]
     inputs['exptime'] = [image.exptime for image in images]
-    inputs['airmass'] = [-1. if image.airmass is None else image.airmass for image in images]
     fwhm_in = []
     for image in images:
         phot = image.photometry(require=False)
-        fwhm_in.append(_psf(image)[1] if phot is not None and 'psf' in phot.meta else -1.)
-    inputs['fwhm_in'] = fwhm_in
-    inputs['fwhm_out'] = achieved
+        fwhm_in.append(_psf(image)[1] if phot is not None and 'psf' in phot.meta else None)
+    inputs['airmass'] = _masked_column([image.airmass for image in images])
+    inputs['fwhm_in'] = _masked_column(fwhm_in)
+    inputs['fwhm_out'] = _masked_column(achieved)
     inputs['kernel'] = kernels
-    inputs['match_ee'] = ee_ratios
+    inputs['match_ee'] = _masked_column(ee_ratios)
     inputs['offset'] = offset
     inputs['offset_err'] = offset_err
     inputs['scale'] = 10**(0.4 * offset)
@@ -582,9 +397,17 @@ def build_mosaic(images, wcs_out, shape_out, target, settings):
     return hdus, inputs
 
 
+def _masked_column(values):
+    """
+    Return a float column with the values that are None masked.
+    """
+    missing = [v is None for v in values]
+    return MaskedColumn([0. if v is None else float(v) for v in values], mask=missing)
+
+
 def _achieved_fwhm(image, data, good, target_pix, target_beta):
     """
-    Return the FWHM (arcsec) of the PSF of a matched image, or -1 if it
+    Return the FWHM (arcsec) of the PSF of a matched image, or None if it
     cannot be measured.
 
     A circular Moffat model is fit to the stack of its bright, isolated stars
@@ -606,7 +429,7 @@ def _achieved_fwhm(image, data, good, target_pix, target_beta):
         fit.fit(p0=par, fix=np.array([False, False, False, False, True, False]))
     except (ValueError, RuntimeError) as e:
         log.warning(f'Could not measure the matched PSF of {image.name}: {e}')
-        return -1.
+        return None
     return PSFModel.from_fit(fit).fwhm * image.pixel_scale
 
 
@@ -702,13 +525,13 @@ def mosaic_all(
     tables, outdir=None, mosaics=None, psf_match='mosaic', kernel='moffat', psf_margin=1.05,
     scale='sources', reference=None, match_radius=1., min_common=3, min_snr=20.,
     background='constant', match_background=False, reproject='adaptive', pixel_scale=None,
-    rej=3., rej_frac=0.1, overwrite=False, qa=False, report=None
+    rej=3., rej_frac=0.1, overwrite=False, qa=True, report=None
 ):
     r"""
     Construct the mosaics defined in the metadata tables.
 
     The mosaics are defined by the ``mosaic`` and ``wcs_group`` columns of the
-    per-setup metadata tables; see :data:`~pipnick.metadata.mosaic_columns`.
+    per-setup metadata tables; see :data:`~pipnick.metadata.groups.mosaic_columns`.
     For each WCS group, the output WCS is found (see :func:`group_wcs`), and
     each of its mosaics is constructed (see :func:`build_mosaic`):
 
@@ -723,7 +546,7 @@ def mosaic_all(
         3. The images are scaled to the flux scale of the reference image
            (``scale``): by default, from the magnitudes of the sources common
            to overlapping images, measured in apertures on the matched images;
-           see :func:`measure_offsets`.
+           see :func:`~pipnick.mosaic.prepare.measure_offsets`.
         4. The images are reprojected onto the output WCS and combined, with
            one weight per image (the inverse of its median variance) and
            outlier rejection; see :mod:`pipnick.mosaic.coadd`.
@@ -798,7 +621,10 @@ def mosaic_all(
     overwrite : bool, optional
         Rebuild the mosaics even if they are up to date.
     qa : bool, optional
-        Write a QA figure for each mosaic to the ``qa`` subdirectory.
+        Write a QA figure of each mosaic to the ``qa`` subdirectory (see
+        :func:`~pipnick.qa.mosaic.plot_mosaic`): the figure is redrawn when
+        a mosaic is constructed, and drawn for a mosaic that is up to date
+        but lacks one.
     report : :class:`~pipnick.pkg.report.StepReport`, optional
         Collects the failures of the mosaics for the closing verdict.  A
         mosaic that fails is recorded, and the others are still constructed.
@@ -862,7 +688,15 @@ def mosaic_all(
             raise PipnickParameterError(f'Unknown mosaics: {", ".join(unknown)}.')
 
     outputs = []
-    summary = []
+    summary = Summary(
+        'Mosaic',
+        [
+            'mosaic', 'wcs_group', 'filter', 'nimages', 'nscaled', 'target_fwhm', 'status',
+            'file', 'reason'
+        ],
+        dtypes={'nimages': int, 'nscaled': int, 'target_fwhm': float},
+        formats={'target_fwhm': '.2f'}
+    )
     groups = sorted({wcs_group(image) for image in images})
     ntotal = len([m for m in mosaic_images if mosaics is None or m in mosaics])
     k = 0
@@ -888,12 +722,9 @@ def mosaic_all(
                     f'[{k}/{ntotal}] Mosaic {label} failed: the WCS group {group} failed: '
                     f'{type(e).__name__}: {e}'
                 )
-                summary.append(
-                    {
-                        'mosaic': label, 'wcs_group': group, 'filter': '-', 'nimages': -1,
-                        'nscaled': -1, 'target_fwhm': -1., 'status': 'failed',
-                        'file': f'{label}.fits', 'reason': f'{type(e).__name__}: {e}'
-                    }
+                summary.add(
+                    mosaic=label, wcs_group=group, filter='-', status='failed',
+                    file=f'{label}.fits', reason=f'{type(e).__name__}: {e}'
                 )
             continue
         for label in labels:
@@ -901,12 +732,10 @@ def mosaic_all(
             progress = f'[{k}/{ntotal}]'
             ofile = _outdir / f'{label}.fits'
             these = [image for image in members if mosaic_label(image) == label]
-            row = {
-                'mosaic': label, 'wcs_group': group, 'filter': str(these[0].filter),
-                'nimages': len(these), 'nscaled': -1, 'target_fwhm': -1., 'status': 'failed',
-                'file': ofile.name, 'reason': '-'
-            }
-            summary.append(row)
+            row = summary.add(
+                mosaic=label, wcs_group=group, filter=str(these[0].filter), nimages=len(these),
+                status='failed', file=ofile.name, reason='-'
+            )
             try:
                 if psf_match == 'group':
                     target = group_target
@@ -930,9 +759,11 @@ def mosaic_all(
                         row.update(_summary_values(ofile))
                         row['status'] = 'up to date'
                         outputs.append(ofile)
+                        if qa and not qa_figure(_outdir, label).is_file():
+                            _write_qa(ofile, _outdir, label, _report)
                         continue
                 log.info(f'{progress} Constructing mosaic {label} from {len(these)} images.')
-                hdus, inputs = build_mosaic(these, wcs_out, shape_out, target, settings)
+                hdus, _ = build_mosaic(these, wcs_out, shape_out, target, settings)
             except Exception as e:
                 log.debug(f'Traceback of the failure of mosaic {label}:', exc_info=True)
                 _report.fail(
@@ -950,17 +781,34 @@ def mosaic_all(
             row['status'] = 'constructed'
             outputs.append(ofile)
             if qa:
-                _write_qa(hdus, inputs, _outdir / 'qa' / f'{label}.png')
-    _summarize(summary, _outdir)
-    nbuilt = sum(row['status'] == 'constructed' for row in summary)
-    nup = sum(row['status'] == 'up to date' for row in summary)
-    nfail = sum(row['status'] == 'failed' for row in summary)
+                _write_qa(ofile, _outdir, label, _report)
+    summary.write(_outdir)
+    nbuilt = sum(row['status'] == 'constructed' for row in summary.rows)
+    nup = sum(row['status'] == 'up to date' for row in summary.rows)
+    nfail = sum(row['status'] == 'failed' for row in summary.rows)
     _report.finish(
         f'{len(summary)} mosaics ({nbuilt} constructed, {nup} up to date, {nfail} failed); '
         f'summary in {_outdir.name}/summary.ecsv.',
         next_step='pipnick_rgb, to combine the mosaics of a WCS group into a colour image'
     )
     return outputs
+
+
+def _write_qa(ofile, outdir, label, report):
+    """
+    Write the QA figure of a mosaic, read from its file; see
+    :func:`~pipnick.qa.mosaic.plot_mosaic`.  A failure is recorded in the
+    report, and does not stop the construction of the other mosaics.
+    """
+    qa_file = qa_figure(outdir, label)
+    try:
+        with fits.open(ofile) as hdus:
+            plot_mosaic(hdus, Table.read(hdus['INPUTS']), qa_file)
+    except Exception as e:
+        log.debug(f'Traceback of the failure of {qa_file.name}:', exc_info=True)
+        report.attention(f'The QA figure of mosaic {label} failed: {type(e).__name__}: {e}')
+        return
+    log.info(f'Wrote {outdir.name}/qa/{qa_file.name}')
 
 
 def _image_key(image):
@@ -978,67 +826,7 @@ def _image_key(image):
 
 def _summary_values(ofile):
     """
-    Return the summary values of a mosaic file; see :func:`_summarize`.
+    Return the summary values of a mosaic file; see :func:`mosaic_all`.
     """
     hdr = fits.getheader(ofile)
-    return {
-        'nscaled': int(hdr.get('PNNSCALE', -1)), 'target_fwhm': float(hdr.get('PNTGFWHM', -1.))
-    }
-
-
-def _summarize(summary, outdir):
-    """
-    Log the summary of the mosaics, and write it to ``summary.ecsv``.
-    """
-    if len(summary) == 0:
-        return
-    tbl = Table(rows=summary)
-    for name in ['nscaled', 'target_fwhm']:
-        tbl[name] = np.ma.MaskedArray(tbl[name], mask=np.asarray(tbl[name]) < 0)
-    tbl['target_fwhm'].info.format = '.2f'
-    tbl.meta['pipnick_version'] = version
-    outdir.mkdir(parents=True, exist_ok=True)
-    tbl.write(outdir / 'summary.ecsv', format='ascii.ecsv', overwrite=True)
-    log.info(
-        f'Mosaic summary (also in {outdir / "summary.ecsv"}):\n'
-        + '\n'.join(tbl.pformat(max_lines=-1, max_width=-1))
-    )
-
-
-def _write_qa(hdus, inputs, ofile):
-    """
-    Write the QA figure of a mosaic: the mosaic, its coverage, the magnitude
-    offsets of the images, and their PSF FWHM before and after the matching.
-    """
-    data = hdus[0].data
-    good = hdus['MASK'].data == 0
-    fig = Figure(figsize=(12, 10))
-    axes = fig.subplots(2, 2)
-    vmin, vmax = ZScaleInterval().get_limits(data[good]) if np.any(good) else (0., 1.)
-    axes[0,0].imshow(data, origin='lower', cmap='gray', vmin=vmin, vmax=vmax)
-    axes[0,0].set_title(f'{hdus[0].header["PNMOSAIC"]} ({hdus[0].header["FILTER"]})')
-    im = axes[0,1].imshow(hdus['COVERAGE'].data, origin='lower', cmap='viridis')
-    fig.colorbar(im, ax=axes[0,1], label='number of images')
-    axes[0,1].set_title('coverage')
-    index = np.arange(len(inputs))
-    axes[1,0].errorbar(index, inputs['offset'], yerr=inputs['offset_err'], fmt='o')
-    unscaled = np.logical_not(np.asarray(inputs['scaled']))
-    axes[1,0].scatter(
-        index[unscaled], np.asarray(inputs['offset'])[unscaled], marker='x', color='C3', s=60,
-        label='not scaled'
-    )
-    axes[1,0].set_xlabel('image')
-    axes[1,0].set_ylabel('magnitude offset (mag)')
-    axes[1,0].set_title(f'reference: {hdus[0].header["PNREFIMG"]}', fontsize=9)
-    axes[1,1].plot(index, inputs['fwhm_in'], 'o', label='input')
-    fwhm_out = np.asarray(inputs['fwhm_out'])
-    axes[1,1].plot(index[fwhm_out > 0], fwhm_out[fwhm_out > 0], 's', label='matched')
-    if 'PNTGFWHM' in hdus[0].header:
-        axes[1,1].axhline(hdus[0].header['PNTGFWHM'], color='k', lw=0.5, label='target')
-    axes[1,1].set_xlabel('image')
-    axes[1,1].set_ylabel('PSF FWHM (arcsec)')
-    axes[1,1].legend()
-    fig.tight_layout()
-    ofile.parent.mkdir(parents=True, exist_ok=True)
-    fig.savefig(ofile)
-    log.info(f'Wrote {ofile}')
+    return {'nscaled': hdr.get('PNNSCALE'), 'target_fwhm': hdr.get('PNTGFWHM')}

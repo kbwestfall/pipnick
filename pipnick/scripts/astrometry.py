@@ -51,10 +51,11 @@ class Astrometry(scriptbase.ScriptBase):
                  'astrometry.net, without solving or submitting anything.'
         )
         parser.add_argument(
-            '--qa', default=False, action='store_true',
-            help='Write a QA figure for each image solved in this run (for every image, with '
-                 '--dry_run) to the astrometry/qa directory, showing the detected sources and '
-                 'the matched sources with their residuals.'
+            '--no_qa', dest='qa', default=True, action='store_false',
+            help='Do not write the QA figures.  By default, a figure showing the detected '
+                 'sources, and the matched sources with their residuals, is written to the '
+                 'astrometry/qa directory for each image solved in this run, and for any image '
+                 'that lacks one.'
         )
         parser.add_argument(
             '--max_sources', type=int, default=100,

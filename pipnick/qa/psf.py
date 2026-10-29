@@ -1,5 +1,5 @@
 """
-Plot Moffat PSF fits.
+QA figure of the Moffat model of the PSF of an image.
 """
 
 import numpy as np
@@ -10,19 +10,17 @@ from astropy.modeling.functional_models import Moffat1D
 from astropy.visualization import AsinhStretch, ZScaleInterval, ImageNormalize
 
 from pipnick.photometry.moffat import FitMoffat2D, gamma_to_fwhm, make_ellipse
+from pipnick.qa.display import save_figure
 
 
-def psf_plot(plot_file, fit, plot_fit=True, title=None):
+def plot_psf(ofile, fit, plot_fit=True, title=None):
     """
     Plot a PSF fit: the stacked sources, the Moffat model, the residuals, and
     the radial profile.
 
-    The figure is constructed without :mod:`matplotlib.pyplot`, so that it
-    can be written in any environment.
-
     Parameters
     ----------
-    plot_file : str, :class:`pathlib.Path`
+    ofile : str, :class:`pathlib.Path`
         Output file; the format is set by its extension (e.g., ``.png`` or
         ``.pdf``).
     fit : object
@@ -132,4 +130,4 @@ def psf_plot(plot_file, fit, plot_fit=True, title=None):
             0.95, 0.66, f'beta = {beta:.2f}', ha='right', va='center', transform=ax.transAxes
         )
     ax.text(0.5, -0.15, 'R [pix]', ha='center', va='top', transform=ax.transAxes)
-    fig.savefig(plot_file)
+    save_figure(fig, ofile)

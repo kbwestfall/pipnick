@@ -4,9 +4,9 @@ Tests for the status of the processing of a data set.
 
 from astropy.io import fits
 
-from pipnick import metadata
+from pipnick.metadata.build import build_metadata
 from pipnick.pipelines.reduction import reduce_all
-from pipnick.pipelines.status import night_status
+from pipnick.report.status import night_status
 from pipnick.tests.test_reduction import comb_id, set_column, set_comb_id, write_night
 
 
@@ -16,7 +16,7 @@ def build_night(tmp_path):
     """
     rawdir = tmp_path / 'raw'
     write_night(rawdir)
-    files, _ = metadata.build_metadata(rawdir=rawdir, filename=tmp_path / 'n5.ecsv', split=True)
+    files, _ = build_metadata(rawdir=rawdir, filename=tmp_path / 'n5.ecsv', split=True)
     table = files[0]
     set_comb_id(table, ['n5012.fits'], comb_id(table, 'n5011.fits'))
     return table
@@ -31,7 +31,7 @@ def test_status(tmp_path):
     assert list(tbl['reduced']) == ['missing'], 'An unreduced image should be missing'
     assert next_step.startswith('pipnick_reduce'), 'The next step should be the reduction'
 
-    reduce_all(table, rdxdir=rdxdir)
+    reduce_all(table, rdxdir=rdxdir, qa=False)
     tbl, next_step = night_status(table, rdxdir=rdxdir)
     row = tbl[0]
     assert row['reduced'] == 'ok' and row['wcs'] == 'missing' and row['phot'] == 'missing', (

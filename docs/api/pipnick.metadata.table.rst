@@ -1,7 +1,7 @@
-pipnick.photometry.fit module
+pipnick.metadata.table module
 =============================
 
-.. automodule:: pipnick.photometry.fit
+.. automodule:: pipnick.metadata.table
    :members:
    :private-members:
    :show-inheritance:

@@ -1,21 +1,20 @@
 """
-Quality-assessment figures for the astrometric calibration.
+QA figure of the sources of an image, e.g., for the astrometry and the
+photometry.
 """
 
 import numpy as np
 
-from astropy.visualization import ZScaleInterval
 from matplotlib.figure import Figure
 from matplotlib.patches import Circle
 
+from pipnick.qa.display import save_figure, show_image
 
-def plot_solution(data, mask, sources, ofile, matched=None, title=None, vector_scale=20.):
+
+def plot_sources(data, mask, sources, ofile, matched=None, title=None, vector_scale=20.):
     """
-    Plot an image with its detected sources and, if available, the sources
-    matched to a reference with their residuals.
-
-    The figure is constructed without :mod:`matplotlib.pyplot`, so that it
-    can be written in any environment.
+    Plot an image with its sources and, if available, the sources matched to
+    a reference (e.g., by an astrometric solution) with their residuals.
 
     Parameters
     ----------
@@ -25,8 +24,8 @@ def plot_solution(data, mask, sources, ofile, matched=None, title=None, vector_s
         Boolean array selecting the masked pixels, which are not shown.
     sources : :class:`astropy.table.Table`
         The detected sources, with 0-based pixel coordinates ``x`` and ``y``;
-        see :func:`~pipnick.astrometry.detect.detect_sources`.  They are
-        marked by open circles and numbered by decreasing flux.
+        e.g., see :func:`~pipnick.astrometry.detect.detect_sources`.  They are
+        marked by open circles and numbered in order.
     ofile : str, :class:`pathlib.Path`
         The output file.
     matched : dict, optional
@@ -39,11 +38,9 @@ def plot_solution(data, mask, sources, ofile, matched=None, title=None, vector_s
     vector_scale : float, optional
         The factor used to magnify the residual vectors.
     """
-    image = np.ma.MaskedArray(data, mask=mask)
-    vmin, vmax = ZScaleInterval().get_limits(image.compressed())
     fig = Figure(figsize=(10, 10))
     ax = fig.add_subplot()
-    ax.imshow(image, origin='lower', cmap='gray', vmin=vmin, vmax=vmax)
+    show_image(ax, data, mask=mask)
     radius = 0.012 * max(data.shape)
     for i, (x, y) in enumerate(zip(sources['x'], sources['y'])):
         ax.add_patch(Circle((x, y), radius, fill=False, color='C0', lw=1))
@@ -70,4 +67,4 @@ def plot_solution(data, mask, sources, ofile, matched=None, title=None, vector_s
     if title is not None:
         ax.set_title(title)
     fig.tight_layout()
-    fig.savefig(ofile, dpi=100)
+    save_figure(fig, ofile, dpi=100)

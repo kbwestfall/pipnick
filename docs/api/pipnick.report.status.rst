@@ -1,7 +1,7 @@
-pipnick.astrometry.qa module
+pipnick.report.status module
 ============================
 
-.. automodule:: pipnick.astrometry.qa
+.. automodule:: pipnick.report.status
    :members:
    :private-members:
    :show-inheritance:

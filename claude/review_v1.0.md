@@ -1227,7 +1227,7 @@ camera lives in one place.
 | 2 | `pkg/provenance.py`, `pkg/paths.py`, `utils/lsq.py`, `utils/crossmatch.py` (§4) | less duplication; one hash implementation | low (needs byte-identical hash tests) | **complete** |
 | 3 | `DataSet`, `Product`, `ReducedImage`, `read_reduced`; `PSFModel` with one FWHM definition (§5) | removes the coupling between pipelines and the FWHM inconsistency | medium (some mosaics are rebuilt) | **complete** |
 | 4 | Logging (run header, progress, verdicts, next steps, default log files, version); a reduction summary; `pipnick_status` (§6, §7 P1–P3) | the most direct benefit to new observers | low | **complete** |
-| 5 | Split the large modules; `SourceCatalog`, `Summary`, `qa/`; QA on by default; `pipnick_report`, `pipnick_inspect` (§3, §5, §7) | maintainability and interrogation | medium | |
+| 5 | Split the large modules; `SourceCatalog`, `Summary`, `qa/`; QA on by default; `pipnick_report`, `pipnick_inspect` (§3, §5, §7) | maintainability and interrogation | medium | **complete** |
 | 6 | The common detection function and catalogue selections (§4.1); `PipelineStep` (§5.7) | one detection implementation, used with different settings by every step; a common step loop | higher (the astrometry.net cache, unless the astrometry's detections are reproduced exactly) | |
 
 ### Progress log
@@ -1648,3 +1648,225 @@ Checks after the work:
   documents.
 - The status vocabularies of the steps' own summaries are unchanged;
   `pipnick_status` maps them to its common vocabulary.
+
+#### Step 5, Phase A: restructuring (complete, 2026-10-28, branch `qa`)
+
+Decisions made with the author before starting:
+
+- Step 5 is done in three phases on one branch, with a check-in after each:
+  A, the restructuring (no change in the outputs); B, QA by default, the
+  reduction QA page and the P7 fixes; C, `pipnick_report` and
+  `pipnick_inspect`.
+- `metadata` becomes a package, and every caller imports from its modules;
+  there are no re-exports.
+- (For Phase B) the removed sources go in a separate file, and the report
+  uses relative links.
+
+Checks after the work:
+
+- `tox -r -e 3.13-test,codestyle` passes in a fresh environment: 198 tests
+  passed, 1 skipped.
+- The docs build without warnings.
+- All nine scripts start.
+- No pipeline imports `matplotlib` or another pipeline.
+- **End to end:** on scratch copies of the 2026-08-17 n3 (fast) reduction,
+  with the M11 images labelled as four mosaics in one WCS group, `main` and
+  this branch ran the reduction, photometry (remeasured), calibration (zero
+  point, applied to the headers and catalogues, with QA) and mosaics (with
+  QA).
+  - All reduced images (data, masks, errors and headers) are identical.
+  - The source catalogues differ, but by as much as two runs of `main`
+    differ from each other (9–1,800 lines per catalogue): **the photometry
+    is not deterministic from run to run.** This predates the branch; it
+    should be explained (and, if possible, removed) in a later step.
+  - The differences in the calibration (residuals, `_cal.ecsv`) and in the
+    I, R and V mosaic data (their flux scales) follow from the photometry. The other
+    differences are the calibration's creation time and hash, the hashes
+    that include the copies' absolute paths, and the mosaic QA figures,
+    which now hide masked pixels.
+  - Run without `--overwrite` on its own outputs, and on the reduction and
+    photometry made by `main`, this branch reports every product as up to
+    date and rebuilds nothing.
+
+**New modules.**
+
+- `pkg/summary.py`: `Summary`, the step summary tables (declared columns,
+  types and formats; masked missing values; the version in the metadata).
+  Used by every step.
+- `qa/`: the figures of every step, moved out of the pipelines and the
+  algorithm modules: `display` (`show_image`, `save_figure`), `sources`,
+  `psf`, `calibration` and `mosaic`. Only `qa/` imports `matplotlib`.
+- `datamodel/catalog.py`: `SourceCatalog`, the `_phot.ecsv` tables (column
+  access, the PSF model, the celestial coordinates, the usable sources,
+  instrumental magnitudes, and the residual-detection neighbours). It
+  replaces `pipelines.photometry.celestial_coordinates` and
+  `calibrate._instrumental` and `neighbors`.
+- `datamodel/calibration.py`: `Calibration`, the night's calibration TOML
+  (read, write, edits, bands, summary rows), with `toml_value`,
+  `calibration_hash` and `extinction_source`.
+
+**Module splits** (definitions moved unchanged; private names used in more
+than one module were made public).
+
+- `astrometry/qa.py` → `astrometry/header.py` (writing and removing the
+  solution), `cache.py` (the astrometry.net cache and its invalidation) and
+  `solve.py` (the pointing groups and the solving session).
+- `photometry/fit.py` → `photometry/standards.py` (matching the standards),
+  `nightfit.py` (the night's fit and its checks) and `apply.py` (applying
+  the calibration to the headers and catalogues). `landolt_band` was added
+  to `photometry/landolt.py`.
+- `reduction/processing.py` (the frame processing and combination) and
+  `reduction/combiner.py` (moved from `utils/`).
+- `mosaic/prepare.py`: preparing the images and measuring their offsets.
+- `metadata.py` → the `metadata` package: `table`, `setups`, `groups`,
+  `names` and `build`.
+
+**Pipelines** (lines after the work): astrometry 524, calibrate 541, mosaic
+803, photometry 472, reduction 814.
+
+**Tests:** new `test_summary.py` and `test_catalog.py`; the other tests use
+the new modules.
+
+**Updated:** the release notes and the API pages.
+
+#### Step 5, Phase B: QA by default and small output fixes (complete, 2026-10-28, branch `qa`)
+
+Decision made with the author:
+
+- **Missing values in FITS tables:** the mosaic `INPUTS` columns are masked,
+  so their missing values are written as NaN, the FITS null for floats, and
+  masked again when read. This is the one exception to the no-NaN rule,
+  limited to masked float columns of FITS binary tables.
+
+Checks after the work:
+
+- `tox -r -e 3.13-test,codestyle` passes in a fresh environment: 202 tests
+  passed, 1 skipped.
+- The docs build without warnings.
+- **Real data:** on a scratch copy of the 2026-08-17 n3 (fast) reduction
+  (with three existing figures deleted, and the M11 images labelled as four
+  mosaics in one WCS group), every step was run twice with the defaults; the
+  astrometry only as a dry run, so nothing could be submitted.
+  - First run: the 32 missing figures were drawn (24 reduction products, 1
+    astrometry, 2 photometry, 1 calibration, 4 mosaics), with nothing
+    rebuilt. Redrawing a missing photometry figure also redraws its pair.
+  - Second run: no figure was redrawn.
+  - Remeasuring one image redrew its two figures and wrote its
+    `_removed.ecsv` (263 sources: 96 moved, 119 non-positive, 39 outside,
+    9 failed; no NaN).
+  - Drawing the missing figures took about 1 s per reduction product and
+    about 5 s per photometry image (restacking the PSF and subtracting the
+    background).
+
+**QA by default.**
+
+- Every step has `qa=True` by default, and every script `--no_qa` in place of
+  `--qa`.
+- A figure is redrawn when its product is rebuilt, and drawn for any product
+  that lacks one. For the astrometry, "rebuilt" means solved in this run, so
+  a dry run only draws the missing figures.
+- Figures without the product's inputs in memory are drawn from the files:
+  the photometry restacks the PSF stars from the image with the saved
+  settings (`build_moffat_psf_model`), the calibration reads its residual
+  table, and the mosaics read the mosaic file.
+- A figure that fails needs attention, but does not stop the step.
+- `pkg.paths.qa_figure(outdir, name)` names every figure
+  (`<step>/qa/<name>.png`), for the report in Phase C.
+
+**Reduction QA.** `qa/reduction.py` (`plot_product`): each product, with
+the histogram of its pixel values and a title with its measurements, in
+`reduce/qa/<product>.png`.
+
+**P7 fixes.**
+
+- **Removed sources:** `vet_sources` also returns the removed sources, which
+  are written to `photometry/<image>_removed.ecsv` (`pkg.paths.removed_table`,
+  `ReducedImage.removed_file`): the detected and fitted positions, the
+  fitted flux (masked if the fit failed), `iter_detected`, and the reason.
+  Existing source tables gain the file when they are next measured.
+- **Calibration summary:** new `zp` and `zp_err` columns (the zero point
+  above the atmosphere, for color 0), and `file` renamed `action`.
+- **Mosaic `INPUTS`:** `airmass`, `fwhm_in`, `fwhm_out` and `match_ee` are
+  masked instead of -1; the QA figure uses the masks.
+
+**Tests:** new `test_reduce_qa`, `test_photometry_qa`, `test_vet_sources`
+and `test_qa_figure`; the QA, removed-source, summary and `INPUTS` checks
+added to the astrometry, photometry, calibration, mosaic and path tests.
+
+- With QA on by default, the suite took 193 s, against 78 s with QA off.
+  Every pipeline call in the tests now passes `qa=False`, except in the six
+  tests that check the figures (`test_reduce_qa`, `test_qa_and_detection`,
+  `test_photometry`, `test_photometry_qa`, `test_calibrate_all`,
+  `test_mosaic`), which also check that each figure is a readable PNG.
+  The suite takes 105 s.
+- The scripts' `--no_qa` sets `qa` (`dest='qa'`, `action='store_false'`).
+
+**Docs:** a "QA figures" section in `docs/status.rst`; the `--no_qa`
+options, the removed-source table, the calibration summary columns and the
+`INPUTS` nulls in the step pages; the release notes and the API pages.
+
+**Not done:** the rewrite of `docs/basics.rst` (P7) stays deferred with the
+other usage documents.
+
+#### Step 5, Phase C: `pipnick_report` and `pipnick_inspect` (complete, 2026-10-28, branch `qa`)
+
+Decisions made with the author:
+
+- **Shared code:** a new `pipnick/report/` package, used by the status,
+  report and inspect pipelines, so that no pipeline imports another.
+- **The report is written only by `pipnick_report`**, never by the steps.
+- **`pipnick_inspect --display`** opens an interactive window; `--ofile`
+  writes the figure instead.
+- **Mosaics** are found in `<rdxdir>/mosaic`, or in `--mosaic_dir`.
+
+Checks after the work:
+
+- The tests pass (208 passed, 1 skipped), and the code-style check.
+- The docs build without warnings.
+- All eleven scripts start.
+- **Real data:** on a scratch copy of the 2026-08-17 n3 (fast) reduction,
+  with every step run (the astrometry only as a dry run) and the M11 images
+  labelled as four mosaics:
+  - `pipnick_report` wrote 25 pages in 4 s, and all 608 links resolve.
+  - `pipnick_inspect` traced the standard 111 1965 in SA 111 1965 V C021 by
+    `--id` and by sexagesimal coordinates (used, residual -0.023 mag, with
+    its magnitudes in the seven other calibrated images), and a removed
+    (`moved`) source by its coordinates.  `--ofile` wrote the display.
+
+**`pipnick/report/`.**
+
+- `status.py`: the status logic, moved from `pipelines/status.py` (which now
+  only logs it, `status_all`).  The per-step state functions are public, and
+  the mosaics can be in another directory (`mosaic_file`, `mosaic_dir`).
+- `records.py`: `Record` (sections of label-value pairs and the QA figures),
+  `image_record` (the provenance of an image, step by step), `trace_source`
+  (a source through the source, removed-source, calibrated and standard-star
+  tables), and `format_record`.
+- `html.py`: the rendering of tables, records, figures and pages, with
+  relative links and the states colored.
+
+**Pipelines and scripts.**
+
+- `pipelines/report.py` (`write_report`) and `scripts/report.py`
+  (`pipnick_report`): `<rdxdir>/report/` with `index.html`, a page per
+  step, and a page per image.
+- `pipelines/inspect.py` (`inspect_image`, `parse_coordinates`),
+  `qa/inspect.py` (`plot_inspection`) and `scripts/inspect.py`
+  (`pipnick_inspect`).
+- `pipnick_status --mosaic_dir`.
+
+**Tests:** new `test_report_inspect.py` (the report's links and pages, the
+records, the traces by id, coordinates and removed source, the display to a
+file, the calibration page and its fallback banner).
+
+**Docs:** a new `docs/report.rst`; the status page, the release notes and
+the API pages.
+
+**Found while checking (not changed):**
+
+- `pipnick_status` reports the images of a band whose calibration failed as
+  `calibrated: missing`, so it suggests `pipnick_calibrate` as the next step
+  even though rerunning it cannot help.
+- Some sources removed as `failed` were detected (`x_init`, `y_init`) far
+  outside the image by the second iteration of the PSF photometry (4 of 39
+  in SA 111 1965 V C021).
