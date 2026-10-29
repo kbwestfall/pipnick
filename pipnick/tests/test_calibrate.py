@@ -888,3 +888,104 @@ def test_failed_night(tmp_path, monkeypatch):
     assert 'a problem with this night' in failed['reason'][0], (
         'The summary should give the reason for the failure'
     )
+
+
+def test_fixed_terms(tmp_path):
+    table, rdxdir, _ = write_night(tmp_path, wide_design())
+    camera = DataSet.from_file(table, rdxdir=rdxdir).camera
+    true_k = {band: k[1] for band, k in TRUE.items()}
+    cases = [
+        ({'airmass': true_k}, true_k),
+        ({'airmass': 0.2}, {band: 0.2 for band in TRUE}),
+        ({'airmass': 'nominal'}, extinction.nominal_extinction(camera, list(TRUE)))
+    ]
+    for k, (fix, expected) in enumerate(cases):
+        calibrate.calibrate_all(
+            table, rdxdir=rdxdir, fix=fix, overwrite=True, apply='image', qa=False
+        )
+        content, _ = read_calibration(calibration_file(rdxdir))
+        for band, (k0, k1, kc) in TRUE.items():
+            entry = content['band'][band]
+            assert entry['status'] == 'ok', f'Band {band} should be calibrated with {fix}'
+            assert entry['source'] == ['fit', 'fixed', 'fit'], (
+                'The fixed term should be recorded as fixed'
+            )
+            assert entry['coefficients'][1] == pytest.approx(expected[band]), (
+                f'The extinction of band {band} should be fixed at its given value ({fix})'
+            )
+            assert entry['errors'][1] == 0., 'A fixed term should have no error'
+            if k == 0:
+                # With the true extinction fixed, the other terms are recovered
+                coeff = np.array(entry['coefficients'])[[0, 2]]
+                err = np.array(entry['errors'])[[0, 2]]
+                assert np.all(np.abs(coeff - [k0, kc]) < 4 * err + 0.003), (
+                    f'The fitted terms of band {band} should be recovered with the extinction '
+                    'fixed'
+                )
+        image = DataSet.from_file(table, rdxdir=rdxdir).science_images()[0]
+        assert fits.getheader(image.path)['PNCALEXT'] == 'fixed', (
+            'The header should record that the extinction was fixed'
+        )
+
+
+def test_outlier_rejection(tmp_path):
+    table, rdxdir, _ = write_night(tmp_path, wide_design(), outlier=STARS[6])
+    calibrate.calibrate_all(table, rdxdir=rdxdir, qa=False)
+    resid = Table.read(sorted((rdxdir / 'calibrate').glob('*_residuals.ecsv'))[0])
+    out = np.asarray(resid['star'] == STARS[6])
+    assert np.all(resid['rejected'][out]) and not np.any(resid['rejected'][~out]), (
+        'Only the measurements of the outlier should be rejected'
+    )
+    assert not np.any(resid['used'][out]), 'The rejected measurements should not be used'
+    content, _ = read_calibration(calibration_file(rdxdir))
+    summary = Table.read(rdxdir / 'calibrate' / 'summary.ecsv')
+    for band, (k0, k1, kc) in TRUE.items():
+        entry = content['band'][band]
+        nout = int(np.sum(out & np.asarray(resid['band'] == band)))
+        assert entry['n_rejected'] == nout, (
+            f'The calibration of band {band} should record its rejected measurements'
+        )
+        assert summary['n_rejected'][summary['band'] == band][0] == nout, (
+            'The summary should give the number of rejected measurements'
+        )
+        k = np.array(entry['coefficients'])
+        assert np.all(np.abs(k - [k0, k1, kc]) < 4 * np.array(entry['errors']) + 0.003), (
+            f'The coefficients of band {band} should not be biased by the outlier'
+        )
+
+
+def test_remove_header_calibration(tmp_path):
+    table, rdxdir, _ = write_night(tmp_path, wide_design())
+    calibrate.calibrate_all(table, rdxdir=rdxdir, apply='image', qa=False)
+    images = DataSet.from_file(table, rdxdir=rdxdir).science_images()
+    assert all('PNCALZP' in fits.getheader(i.path) for i in images), (
+        'Every image should be calibrated'
+    )
+    # Refit without the R standards, so that R cannot be calibrated
+    keep = [str(i.product.comb_id) for i in images if i.filter != 'R']
+    calibrate.calibrate_all(
+        table, rdxdir=rdxdir, images=keep, apply='image', overwrite=True, qa=False
+    )
+    content, _ = read_calibration(calibration_file(rdxdir))
+    assert content['band']['R']['status'] == 'failed', 'R should not be calibrated'
+    for image in images:
+        hdr = fits.getheader(image.path)
+        calibrated = [k for k in hdr if k.startswith('PNCAL') or k == 'PHOTZP']
+        if image.filter == 'R':
+            assert len(calibrated) == 0, (
+                'The out-of-date calibration of an image whose band is no longer calibrated '
+                'should be removed'
+            )
+        else:
+            assert 'PNCALZP' in calibrated and 'PHOTZP' in calibrated, (
+                'The images of the calibrated bands should keep their calibration'
+            )
+
+
+def test_stale_photometry(tmp_path):
+    table, rdxdir, _ = write_night(tmp_path, wide_design())
+    image = DataSet.from_file(table, rdxdir=rdxdir).science_images()[0]
+    with fits.open(image.path, mode='update') as hdu:
+        hdu[0].header['PNRAWHSH'] = 'changed'
+    with pytest.raises(PipnickDataModelError, match='is out of date'):
+        calibrate.calibrate_all(table, rdxdir=rdxdir, qa=False)

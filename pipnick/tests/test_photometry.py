@@ -22,7 +22,7 @@ from pipnick.photometry import psf_photometry
 from pipnick.photometry.moffat import EllipticalMoffatPSF
 from pipnick.photometry.aperture_photometry import aperture_analysis
 from pipnick.pipelines.photometry import photometry_all, vet_sources
-from pipnick.pkg.exceptions import PipnickParameterError
+from pipnick.pkg.exceptions import PipnickDataModelError, PipnickParameterError
 from pipnick.pkg.paths import removed_table
 from pipnick.pkg.version import version
 from pipnick.tests.test_metadata import write_andor
@@ -457,3 +457,29 @@ def test_pixel_errors(tmp_path, caplog):
     caplog.clear()
     photometry_all(table, rdxdir=rdxdir, overwrite=True, qa=False)
     assert 'has no uncertainty' in caplog.text, 'A missing uncertainty should be reported'
+
+
+def test_stale_photometry_guard(tmp_path):
+    table, rdxdir, _ = write_field(tmp_path)
+    photometry_all(table, rdxdir=rdxdir, qa=False)
+    image = DataSet.from_file(table, rdxdir=rdxdir).science_images()[0]
+    assert image.photometry() is not None, 'An up-to-date source table should be returned'
+
+    # A new astrometric solution: the coordinates are out of date
+    apply_wcs(image.path, true_wcs())
+    image.reload()
+    with pytest.raises(PipnickDataModelError, match='celestial coordinates'):
+        image.photometry()
+
+    # A changed image: the whole table is out of date
+    with fits.open(image.path, mode='update') as hdu:
+        hdu[0].header['PNRAWHSH'] = 'changed'
+    image.reload()
+    with pytest.raises(PipnickDataModelError, match='is out of date'):
+        image.photometry()
+
+    image.phot_file.unlink()
+    image.reload()
+    assert image.photometry(require=False) is None, 'A missing table should not be required'
+    with pytest.raises(PipnickDataModelError, match='no source table'):
+        image.photometry()

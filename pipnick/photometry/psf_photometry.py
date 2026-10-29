@@ -21,9 +21,7 @@ from pipnick.photometry import starfind
 from pipnick.photometry.moffat import FitEllipticalMoffat2D, FitMoffat2D
 
 
-def build_moffat_psf_model(
-    image, thresh=15.0, fwhm=7., fittype='circ', stack='mean', pdf_file=None
-):
+def build_moffat_psf_model(image, thresh=15.0, fwhm=7., fittype='circ', stack='mean'):
     """
     Use well-detected and well-separated sources to model the image PSF as a
     2D Moffat function.
@@ -38,8 +36,8 @@ def build_moffat_psf_model(
 
     Parameters
     ----------
-    image : str, :class:`~pathlib.Path`, :class:`~astropy.nddata.CCDData`, array-like
-        Image for PSF analysis; see
+    image : :class:`numpy.ndarray`
+        Image for PSF analysis, masked or not; see
         :func:`~pipnick.photometry.starfind.as_masked_array`.
     thresh : float, optional
         Detection threshold in units of background standard deviation.
@@ -50,9 +48,6 @@ def build_moffat_psf_model(
         elliptical.
     stack : str, optional
         How the stamps are stacked: ``'mean'`` or ``'median'``.
-    pdf_file : str, :class:`pathlib.Path`, optional
-        If provided, plot the stacked stamps to this file; see
-        :func:`~pipnick.photometry.starfind.plot_stamps`.
 
     Returns
     -------
@@ -89,9 +84,6 @@ def build_moffat_psf_model(
     if nstack == 0:
         raise ValueError('No sources are good enough to model the PSF.')
 
-    if pdf_file is not None:
-        starfind.plot_stamps(stamps[indx], pdf_file, vmin=None, vmax=None)
-
     if stack == 'mean':
         stacked = np.ma.mean(stamps[indx], axis=0)
     else:
@@ -121,8 +113,8 @@ def psf_analysis(
 
     Parameters
     ----------
-    image : str, :class:`~pathlib.Path`, :class:`~astropy.nddata.CCDData`, array-like
-        Image for PSF analysis; see
+    image : :class:`numpy.ndarray`
+        Image for PSF analysis, masked or not; see
         :func:`~pipnick.photometry.starfind.as_masked_array`.
     error : :class:`numpy.ndarray`, optional
         The 1-sigma error in each pixel, used to weight the fits and to

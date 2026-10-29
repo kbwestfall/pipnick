@@ -4,101 +4,31 @@ around them, used to model the point-spread function.
 """
 
 import numpy as np
-from matplotlib import ticker
-from matplotlib.backends.backend_pdf import PdfPages
-from matplotlib.figure import Figure
 
 from astropy import table
 from astropy.stats import sigma_clipped_stats
-from astropy.nddata import CCDData
 from skimage import transform
 
 from pipnick import log
 from pipnick.image.detect import isolated
-from pipnick.image.io import read_reduced
 
 
 def as_masked_array(image):
     """
-    Return the image data as a masked array.
+    Return an image as a masked array.
 
     Parameters
     ----------
-    image : str, :class:`pathlib.Path`, :class:`astropy.nddata.CCDData`, :class:`numpy.ndarray`
-        The image: a file, a :class:`~astropy.nddata.CCDData` object (whose
-        mask is applied), or an array (masked or not).
+    image : :class:`numpy.ndarray`
+        The image: a masked array, whose mask is kept, or an array without
+        masked pixels.
 
     Returns
     -------
     :class:`numpy.ma.MaskedArray`
         The image data and mask.
     """
-    if isinstance(image, np.ndarray):
-        return np.ma.MaskedArray(image, mask=np.ma.getmaskarray(image))
-    if isinstance(image, CCDData):
-        mask = np.zeros(image.data.shape, dtype=bool) if image.mask is None else image.mask
-        return np.ma.MaskedArray(np.asarray(image.data, dtype=float), mask=mask)
-    data, mask, _, _ = read_reduced(image)
-    return np.ma.MaskedArray(data, mask=mask)
-
-
-def plot_stamps(stamps, pdf_file, vmin=None, vmax=None):
-    """
-    Plot images of the source stamps in a PDF file.
-
-    The figures are constructed without :mod:`matplotlib.pyplot`, so that they
-    can be written in any environment.
-
-    Parameters
-    ----------
-    stamps : :class:`numpy.ndarray`
-        Array of stamp images.
-    pdf_file : str
-        Path to the output PDF file.
-    vmin : float, optional
-        Minimum data value to map to colormap.
-    vmax : float, optional
-        Maximum data value to map to colormap.
-    """
-    dim = 8  # Dimension of the grid for displaying stamps
-    start = 0.01  # Starting position for the grid
-    buff = 0.01  # Buffer between stamps
-    dw = (1-2*start-(dim-1)*buff)/dim  # Width of each stamp
-    nstamps = stamps.shape[0]  # Total number of stamps
-
-    _vmin = np.ma.amin(stamps) if vmin is None else vmin
-    _vmax = np.ma.amax(stamps) if vmax is None else vmax
-
-    # Create a PDF file to save the stamps
-    with PdfPages(pdf_file) as pdf:
-        i = 0
-        while i < nstamps:
-            fig = Figure(figsize=(7.2, 7.2))
-            for j in range(dim):
-                for k in range(dim):
-                    if i < nstamps:
-                        # Add a subplot for each stamp
-                        ax = fig.add_axes(
-                            [start+k*(dw+buff), start+(dim-j-1)*dw+(dim-j-1)*buff, dw, dw]
-                        )
-                        ax.xaxis.set_major_formatter(ticker.NullFormatter())
-                        ax.xaxis.set_visible(False)
-                        ax.yaxis.set_major_formatter(ticker.NullFormatter())
-                        ax.yaxis.set_visible(False)
-                        ax.imshow(
-                            stamps[i], origin='lower', interpolation='nearest', vmin=_vmin,
-                            vmax=_vmax
-                        )
-                        ax.text(
-                            0.1, 0.9, str(i), ha='center', va='center', transform=ax.transAxes,
-                            color='C1'
-                        )
-                        ax.scatter(
-                            [stamps.shape[1]//2], [stamps.shape[2]//2], marker='+', s=50,
-                            color='C3', zorder=10, lw=0.5
-                        )
-                        i += 1
-            pdf.savefig(fig)  # Save the figure to the PDF file
+    return np.ma.MaskedArray(image, mask=np.ma.getmaskarray(image))
 
 
 def select_psf_stars(
@@ -110,8 +40,8 @@ def select_psf_stars(
 
     Parameters
     ----------
-    image : str, :class:`~pathlib.Path`, :class:`~astropy.nddata.CCDData`, array-like
-        The image; see :func:`as_masked_array`.
+    image : :class:`numpy.ndarray`
+        The image, masked or not; see :func:`as_masked_array`.
     sources : :class:`astropy.table.Table`
         The detected sources; see :func:`~pipnick.image.detect.find_sources`.
     fwhm : float, optional
@@ -298,8 +228,8 @@ def extract_stamps(image, source_data, inner_bkg=5., window=10., radius_unit='kr
 
     Parameters
     ----------
-    image : str, :class:`~pathlib.Path`, :class:`~astropy.nddata.CCDData`, array-like
-        Image with sources; see :func:`as_masked_array`.
+    image : :class:`numpy.ndarray`
+        Image with sources, masked or not; see :func:`as_masked_array`.
     source_data : :class:`astropy.table.Table`
         Table with the source data (see :func:`select_psf_stars`)
     inner_bkg : float, optional

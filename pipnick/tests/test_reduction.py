@@ -21,6 +21,7 @@ from pipnick.pipelines.reduction import reduce_all
 from pipnick.pkg.exceptions import PipnickDataModelError
 from pipnick.pkg.report import StepReport
 from pipnick.pkg.version import version
+from pipnick.report.status import night_status
 from pipnick.tests.test_metadata import write_andor, write_andor_image
 
 
@@ -694,3 +695,81 @@ def test_reduction_status(night, tmp_path):
     assert image.reduction_state()[0] == 'stale', (
         'A change in the metadata table values should make the image stale'
     )
+
+
+def test_default_reduction_dir(night, tmp_path):
+    # The night's raw directory is tmp_path / 'raw'
+    before, before_commented = read_metadata(night, include_commented=True, expand=False)
+    assert 'rdxdir' not in before.meta, 'The table should not yet have a reduction directory'
+    reduce_all(night, qa=False)
+    assert (tmp_path / 'Bias.fits').is_file(), (
+        'Without a reduction directory, the products should be in the parent of the raw '
+        'directory'
+    )
+    after, after_commented = read_metadata(night, include_commented=True, expand=False)
+    assert after.meta['rdxdir'] == str(tmp_path), (
+        'The default reduction directory should be saved to the metadata table'
+    )
+    assert after.pformat(max_lines=-1, max_width=-1) == before.pformat(
+        max_lines=-1, max_width=-1
+    ) and list(after_commented) == list(before_commented), (
+        'Saving the reduction directory should not change the rows of the table'
+    )
+    assert dataset.reduction_dir(night) == tmp_path, (
+        'The scripts should find the saved reduction directory'
+    )
+    # Rerunning finds the products in the saved directory
+    report = StepReport('REDUCTION')
+    reduce_all(night, qa=False, report=report)
+    summary = Table.read(tmp_path / 'reduce' / 'summary.ecsv')
+    assert np.all(summary['status'] == 'up to date'), (
+        'A rerun should use the saved reduction directory'
+    )
+
+
+def comment_out(table, files):
+    """
+    Comment out the rows of the given raw files in a metadata table.
+    """
+    tbl, commented = read_metadata(table, include_commented=True, expand=False)
+    commented = np.asarray(commented) | np.isin(np.asarray(tbl['file']), files)
+    write_metadata(tbl, table, commented=commented)
+
+
+def test_reduce_without_calibrations(night, tmp_path):
+    # No biases, and no V flats
+    comment_out(night, [f'n500{i}.fits' for i in range(1, 8)])
+    rdxdir = tmp_path / 'rdx'
+    report = StepReport('REDUCTION')
+    reduce_all(night, rdxdir=rdxdir, qa=False, report=report)
+    assert report.status == 'NEEDS ATTENTION' and report.exit_status == 0, (
+        'A reduction without calibrations should need attention, not fail'
+    )
+    assert any('There is no bias' in p for p in report.problems), 'The missing bias is a problem'
+    assert any('There is no V flat' in p for p in report.problems), (
+        'The missing flat is a problem'
+    )
+    image = DataSet.from_file(night, rdxdir=rdxdir).science_images()[0]
+    hdr = fits.getheader(image.path)
+    assert hdr['PNBIAS'] == 'none' and hdr['PNFLAT'] == 'none', (
+        'The science image should record that it has no bias or flat'
+    )
+    tbl, _ = night_status(night, rdxdir=rdxdir)
+    assert 'no bias' in tbl['attention'][0] and 'no flat' in tbl['attention'][0], (
+        'The status should flag the image without a bias or flat'
+    )
+
+
+def test_reduce_stale_outputs(night, tmp_path):
+    rdxdir = tmp_path / 'rdx'
+    reduce_all(night, rdxdir=rdxdir, qa=False)
+    science = DataSet.from_file(night, rdxdir=rdxdir).science_images()[0].path
+    # The science frames are no longer reduced
+    comment_out(night, ['n5011.fits', 'n5012.fits'])
+    report = StepReport('REDUCTION')
+    reduce_all(night, rdxdir=rdxdir, qa=False, report=report)
+    stale = [p for p in report.problems if 'not produced by this reduction' in p]
+    assert len(stale) == 1 and science.name in stale[0], (
+        'Products of the setup that are no longer produced should be reported'
+    )
+    assert science.is_file(), 'Products that are no longer produced should not be deleted'

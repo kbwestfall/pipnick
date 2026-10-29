@@ -29,8 +29,9 @@ from pipnick.photometry.moffat import fwhm_to_gamma
 from pipnick.pipelines import mosaic
 from pipnick.pkg.exceptions import PipnickDataModelError, PipnickParameterError
 from pipnick.pkg.provenance import image_hash
+from pipnick.pkg.report import StepReport
 from pipnick.pkg.version import version
-from pipnick.tests.test_metadata import write_andor
+from pipnick.tests.test_metadata import write_andor, write_andor_image
 
 SHAPE = (160, 160)
 SCALE = 0.333
@@ -568,3 +569,207 @@ def test_single_image_mosaics(tmp_path):
         )
         data = fits.getdata(f)
         assert np.all(np.isfinite(data)), 'The mosaic should be finite'
+
+
+def set_zero_points(table, zero_points):
+    """
+    Record photometric zero points (``PNCALZP``) in the headers of the reduced
+    images of a table, in order; None removes the keyword.
+    """
+    for image, zp in zip(DataSet.from_file(table).science_images(), zero_points):
+        with fits.open(image.path, mode='update') as hdu:
+            if zp is None:
+                hdu[0].header.remove('PNCALZP', ignore_missing=True)
+            else:
+                hdu[0].header['PNCALZP'] = zp
+
+
+def test_mosaic_calib_scale(tmp_path):
+    table, rdxdir, _ = write_dithers(tmp_path, three_dithers())
+    # The zero point of an image with transparency t, for which a source has
+    # the count rate t times that of the reference (t = 1), is 2.5 log10(t)
+    # larger than that of the reference
+    transparency = np.array([1., 0.8, 0.9])
+    set_zero_points(table, 25. + 2.5 * np.log10(transparency))
+    calib = mosaic.mosaic_all(table, scale='calib', outdir=tmp_path / 'calib', qa=False)[0]
+    inputs = Table.read(calib, hdu='INPUTS')
+    expected = -2.5 * np.log10(transparency)
+    assert np.allclose(inputs['offset'], expected) and np.all(inputs['offset_err'] == 0.), (
+        'The offsets should be the differences in zero point, relative to the reference'
+    )
+    assert np.all(inputs['scaled']), 'Every image with a zero point should be scaled'
+    hdr = fits.getheader(calib)
+    assert hdr['PHOTZP'] == pytest.approx(25.), (
+        'The mosaic should record the zero point of the reference image'
+    )
+    assert hdr.comments['PHOTZP'] == 'Reference image zero point (e-/s), color 0', (
+        'The comment of the zero point should fit in its card'
+    )
+
+    # The mosaic agrees with the one scaled by the sources common to the images
+    sources = mosaic.mosaic_all(table, scale='sources', outdir=tmp_path / 'sources', qa=False)[0]
+    d_calib = fits.getdata(calib)
+    d_sources = fits.getdata(sources)
+    bright = d_sources > 0.2 * np.max(d_sources)
+    ratio = np.median(d_calib[bright] / d_sources[bright])
+    assert ratio == pytest.approx(1., abs=0.02), (
+        'Scaling by the zero points should put the images on the flux scale of the reference'
+    )
+
+    # An image without a zero point fails the mosaic
+    set_zero_points(table, [25., None, 25.])
+    report = StepReport('MOSAICS')
+    mosaic.mosaic_all(
+        table, scale='calib', outdir=tmp_path / 'missing', qa=False, report=report
+    )
+    summary = Table.read(tmp_path / 'missing' / 'summary.ecsv')
+    assert report.status == 'FAILED' and 'PNCALZP' in summary['reason'][0], (
+        'A mosaic of images without a photometric calibration should fail, with the reason'
+    )
+
+
+def test_mosaic_reference_and_psf_fluxes(tmp_path):
+    table, rdxdir, _ = write_dithers(tmp_path, three_dithers())
+    images = DataSet.from_file(table).science_images()
+    # Without PSF matching, the images are scaled by the PSF fluxes of their
+    # sources; the reference is the second image
+    outputs = mosaic.mosaic_all(
+        table, psf_match='none', reference=images[1].path.stem, outdir=tmp_path / 'psf',
+        qa=False
+    )
+    inputs = Table.read(outputs[0], hdu='INPUTS')
+    assert list(inputs['reference']) == [False, True, False], (
+        'The named image should be the reference'
+    )
+    assert fits.getheader(outputs[0])['PNREFIMG'] == images[1].name, (
+        'The header should record the reference image'
+    )
+    transparency = np.array([1., 0.8, 0.9])
+    expected = -2.5 * np.log10(transparency / transparency[1])
+    assert np.allclose(inputs['offset'], expected, atol=0.005), (
+        'The PSF fluxes should give the flux scales relative to the reference'
+    )
+
+    # Too few common sources: the images are not scaled, which is recorded
+    outputs = mosaic.mosaic_all(
+        table, psf_match='none', min_common=1000, outdir=tmp_path / 'few', qa=False
+    )
+    hdr = fits.getheader(outputs[0])
+    assert hdr['PNNSCALE'] == 1 and hdr['PNWARN2'] == '2 images could not be scaled', (
+        'The images that could not be scaled should be recorded in the header'
+    )
+
+
+def test_mosaic_mixed_filters(tmp_path):
+    design = three_dithers('V')[:2] + three_dithers('R', hour=5.)[2:]
+    table, rdxdir, _ = write_dithers(tmp_path, design)
+    tbl, commented = read_metadata(table, include_commented=True, expand=False)
+    for name in mosaic_columns:
+        tbl[name] = tbl[name].astype('U20')
+    science = tbl['frametype'] == 'science'
+    tbl['mosaic'][science] = 'M11_all'
+    tbl['wcs_group'][science] = 'M11'
+    write_metadata(tbl, table, commented=commented)
+    outputs = mosaic.mosaic_all(table, scale='none', qa=False)
+    hdr = fits.getheader(outputs[0])
+    assert hdr['FILTER'] == 'mixed' and hdr['PNWARN'].startswith('Images with different'), (
+        'A mosaic of images with different filters should be flagged in its header'
+    )
+
+
+def test_kernel_fallback(tmp_path, monkeypatch, caplog):
+    table, rdxdir, _ = write_dithers(tmp_path, three_dithers())
+    # A Moffat matching kernel that fails
+    monkeypatch.setattr(psfmatch, 'matching_kernel', lambda psf, target: (None, 0.5))
+    with caplog.at_level(logging.WARNING):
+        outputs = mosaic.mosaic_all(table, qa=False)
+    inputs = Table.read(outputs[0], hdu='INPUTS')
+    assert all(k in ['gaussian (fallback)', 'none'] for k in inputs['kernel']), (
+        'A failed Moffat kernel should fall back to a Gaussian kernel'
+    )
+    assert 'gaussian (fallback)' in list(inputs['kernel']), 'The fallback should be recorded'
+    assert 'using a Gaussian kernel instead' in caplog.text, 'The fallback should be logged'
+
+
+def test_solve_offsets_rejection():
+    rng = np.random.default_rng(5)
+    true = np.array([0., 0.1, -0.2])
+    pairs = [(0, 1), (1, 2), (0, 2)]
+    noise = 0.05
+    measurements = []
+    for i, j in pairs:
+        dm = true[i] - true[j] + rng.normal(0., noise, 30)
+        measurements.append((i, j, dm, np.full(30, noise)))
+    offset, error, _, nused = scaling.solve_offsets(3, measurements, reference=0, floor=0.)
+    assert np.allclose(offset, true, atol=0.03), 'The offsets should be recovered'
+
+    # Underestimated errors are inflated by the reduced chi-square
+    understated = [(i, j, dm, err / 5.) for i, j, dm, err in measurements]
+    _, error_u, _, _ = scaling.solve_offsets(3, understated, reference=0, floor=0.)
+    assert np.allclose(error_u[1:], error[1:], rtol=0.3), (
+        'Errors that are too small should be scaled up to the observed scatter'
+    )
+
+    # An outlying difference is rejected
+    i, j, dm, err = measurements[0]
+    dm = dm.copy()
+    dm[3] += 1.
+    outlier = [(i, j, dm, err)] + measurements[1:]
+    offset_o, _, _, nused_o = scaling.solve_offsets(3, outlier, reference=0, floor=0.)
+    assert nused_o[0] == nused[0] - 1 and nused_o[1] == nused[1] - 1, (
+        'The outlying difference should be rejected'
+    )
+    assert np.allclose(offset_o, offset, atol=0.01), (
+        'The offsets should not be biased by the outlier'
+    )
+
+
+def test_reproject_methods():
+    stars = star_field()
+    wcs_in = image_wcs()
+    image, sigma, _, _, _ = render(wcs_in, stars, 4., 1., 0., seed=3)
+    good = np.ones(SHAPE, dtype=bool)
+    wcs_out, shape = coadd.output_wcs([wcs_in, image_wcs(20., 5.)], [SHAPE, SHAPE])
+    bbox = coadd.footprint_bbox(wcs_in, SHAPE, wcs_out, shape)
+    sub = (bbox[0].stop - bbox[0].start, bbox[1].stop - bbox[1].start)
+    for method in ['interp', 'exact']:
+        d, v, g = coadd.reproject_image(
+            image, sigma**2, good, wcs_in, wcs_out[bbox], sub, method=method
+        )
+        assert np.all(np.isfinite(d)) and np.all(np.isfinite(v)), (
+            f'The {method} reprojection should be finite, with masks instead of NaN'
+        )
+        assert abs(np.sum(d[g]) / np.sum(image) - 1) < 0.01, (
+            f'The {method} reprojection should conserve the flux'
+        )
+    with pytest.raises(PipnickParameterError):
+        coadd.reproject_image(image, sigma**2, good, wcs_in, wcs_out[bbox], sub, method='bad')
+
+
+def test_default_mosaic_radius(tmp_path):
+    rawdir = tmp_path / 'raw'
+    rawdir.mkdir()
+    # Three dithers of one field, and a field 30 arcmin away, in full-size
+    # frames: the default radius is half their field of view (about 2.8 arcmin)
+    centers = [image_wcs(dx, 0.).pixel_to_world((SHAPE[1] - 1) / 2, (SHAPE[0] - 1) / 2)
+               for dx in [0., 30., 60.]]
+    centers.append(CENTER.directional_offset_by(0. * units.deg, 30. * units.arcmin))
+    for i, coo in enumerate(centers):
+        ra, dec = coo.to_string('hmsdms', sep=':', precision=2).split()
+        date = Time('2026-08-20T04:00:00', scale='utc') + 0.1 * i * units.hour
+        write_andor_image(
+            rawdir / f'n7{i:03d}.fits', 1000, OBJECT='M11 V', FILTER='V', RA=ra, DEC=dec,
+            XPOSURE=EXPTIME, AIRMASS=1.2, **{'DATE-BEG': date.isot}
+        )
+    files, _ = build_metadata(
+        rawdir=rawdir, filename=tmp_path / 'n7.ecsv', split=True, assign=True
+    )
+    tbl = read_metadata(files[0])
+    labels = [str(m) for m in tbl['mosaic'][np.argsort(tbl['file'])]]
+    assert len(labels[0]) > 0 and labels[:3] == [labels[0]] * 3, (
+        'Without a radius, the dithers of one field should share a mosaic'
+    )
+    assert labels[3] == '', (
+        'A field more than a field of view away should not join the mosaic (and, alone, '
+        'should not be a mosaic)'
+    )
