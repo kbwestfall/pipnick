@@ -11,44 +11,23 @@ their photometric calibrations (see :func:`measure_offsets` and
 import numpy as np
 
 from astropy.coordinates import SkyCoord
-from astropy.stats import sigma_clipped_stats
 from photutils.aperture import ApertureStats, CircularAnnulus
-from photutils.segmentation import detect_sources, detect_threshold
 
 from pipnick import log
+from pipnick.image.background import estimate_background
 from pipnick.image.io import invalid_error, read_reduced
 from pipnick.mosaic.scaling import solve_offsets
 from pipnick.photometry.aperture_photometry import aperture_analysis
-from pipnick.photometry.psf_photometry import subtract_background
 from pipnick.pkg.exceptions import PipnickDataModelError
 from pipnick.utils.crossmatch import match_sky
-
-
-def _background(data, good, method):
-    """
-    Return the background of an image: ``'constant'`` (the sigma-clipped
-    median of the pixels without sources, which are found by image
-    segmentation and dilated), ``'2d'`` (see
-    :func:`~pipnick.photometry.psf_photometry.subtract_background`, with
-    256-pixel boxes), or ``'none'`` (0).
-    """
-    if method == 'none':
-        return 0.
-    mask = np.logical_not(good)
-    if method == '2d':
-        return data - subtract_background(data, mask=mask, box_size=256)
-    threshold = detect_threshold(data, 2., mask=mask)
-    segm = detect_sources(data, threshold, 10, mask=mask)
-    sources = np.zeros(data.shape, dtype=bool) if segm is None else segm.make_source_mask(size=11)
-    _, median, _ = sigma_clipped_stats(data, mask=mask | sources, sigma=3.)
-    return median
-
 
 
 def prepare_image(image, background='constant'):
     """
     Read an image, convert it to electrons per second, and subtract its
-    background.
+    background: ``'constant'``, the median of the pixels without sources;
+    ``'2d'``, a smooth background in 256-pixel boxes; or ``'none'``.  See
+    :func:`~pipnick.image.background.estimate_background`.
 
     Returns
     -------
@@ -65,7 +44,8 @@ def prepare_image(image, background='constant'):
     t = image.exptime
     data = np.where(good, data, 0.) / t
     var = np.where(good, err, 0.)**2 / t**2
-    data = np.where(good, data - _background(data, good, background), 0.)
+    bkg = estimate_background(data, mask=np.logical_not(good), method=background, box_size=256)
+    data = np.where(good, data - bkg, 0.)
     return data, var, good
 
 
@@ -82,7 +62,7 @@ def _source_mags(image, data, var, good, target_pix, settings):
     the local background (the sigma-clipped median in an annulus from 3 to 5
     times the target FWHM) subtracted, so that errors in the background of the
     image do not bias the scale; otherwise, their PSF fluxes are used.
-    Sources with a signal-to-noise ratio below ``settings['min_snr']``, or
+    Sources with a signal-to-noise ratio below ``settings.min_snr``, or
     without a local background, are excluded.
     """
     phot = image.photometry(require=False)
@@ -91,7 +71,7 @@ def _source_mags(image, data, var, good, target_pix, settings):
     y = np.asarray(phot['y'], dtype=float)[ok]
     ra = np.ma.filled(np.ma.asarray(phot['ra'], dtype=float), 0.)[ok]
     dec = np.ma.filled(np.ma.asarray(phot['dec'], dtype=float), 0.)[ok]
-    if settings['psf_match'] != 'none':
+    if settings.psf_match != 'none':
         mask = np.logical_not(good)
         if len(x) > 0:
             annulus = CircularAnnulus(np.column_stack([x, y]), 3 * target_pix, 5 * target_pix)
@@ -111,7 +91,7 @@ def _source_mags(image, data, var, good, target_pix, settings):
         t = image.exptime
         flux = np.ma.filled(np.ma.asarray(phot['flux_psf'], dtype=float), 0.)[ok] / t
         err = np.ma.filled(np.ma.asarray(phot['flux_psf_err'], dtype=float), 0.)[ok] / t
-    keep = (flux > 0) & (err > 0) & (flux > settings['min_snr'] * err)
+    keep = (flux > 0) & (err > 0) & (flux > settings.min_snr * err)
     _flux = np.where(keep, flux, 1.)
     mag = -2.5 * np.log10(_flux)
     mag_err = 2.5 / np.log(10.) * np.where(keep, err, 0.) / _flux
@@ -147,8 +127,8 @@ def measure_offsets(images, prepared, targets, settings):
         The matched images: tuples of the image, variance, and good-pixel map.
     targets : list
         The target FWHM of each image, in its pixels.
-    settings : dict
-        The mosaic settings; see :func:`~pipnick.pipelines.mosaic.mosaic_all`.
+    settings : :class:`~pipnick.pkg.settings.MosaicSettings`
+        The mosaic settings.
 
     Returns
     -------
@@ -163,10 +143,10 @@ def measure_offsets(images, prepared, targets, settings):
         The index of the reference image.
     """
     n = len(images)
-    reference = _reference(images, settings['reference'])
-    if settings['scale'] == 'none' or n == 1:
+    reference = _reference(images, settings.reference)
+    if settings.scale == 'none' or n == 1:
         return np.zeros(n), np.zeros(n), np.ones(n, dtype=bool), np.zeros(n, dtype=int), reference
-    if settings['scale'] == 'calib':
+    if settings.scale == 'calib':
         zp = [image.header.get('PNCALZP') for image in images]
         if any(z is None for z in zp):
             raise PipnickDataModelError(
@@ -184,7 +164,7 @@ def measure_offsets(images, prepared, targets, settings):
         for j in range(i + 1, n):
             i1, i2, _ = match_sky(
                 SkyCoord(sources[i][0], sources[i][1], unit='deg'),
-                SkyCoord(sources[j][0], sources[j][1], unit='deg'), settings['match_radius']
+                SkyCoord(sources[j][0], sources[j][1], unit='deg'), settings.match_radius
             )
             if len(i1) == 0:
                 continue
@@ -192,13 +172,13 @@ def measure_offsets(images, prepared, targets, settings):
             err = np.sqrt(sources[i][3][i1]**2 + sources[j][3][i2]**2)
             measurements.append((i, j, dm, err))
     offset, error, scaled, nused = solve_offsets(
-        n, measurements, reference=reference, min_common=settings['min_common']
+        n, measurements, reference=reference, min_common=settings.min_common
     )
     for image, s in zip(images, scaled):
         if not s:
             log.warning(
                 f'{image.name} shares too few sources with the other images (fewer than '
-                f'{settings["min_common"]} per pair) to be scaled; it is not scaled.'
+                f'{settings.min_common} per pair) to be scaled; it is not scaled.'
             )
     return offset, error, scaled, nused, reference
 

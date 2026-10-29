@@ -8,7 +8,6 @@ Submodules
    :maxdepth: 4
 
    pipnick.astrometry.cache
-   pipnick.astrometry.detect
    pipnick.astrometry.fit
    pipnick.astrometry.header
    pipnick.astrometry.match

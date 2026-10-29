@@ -350,9 +350,22 @@ def test_coordinates_and_reruns(tmp_path, caplog):
         'An up-to-date table should not be rewritten'
     )
 
+    reduced = DataSet.from_file(table, rdxdir=rdxdir).science_images()[0]
+    settings_hash = tbl.meta['settings_hash']
+    assert reduced.photometry_state(settings_hash=settings_hash) == ('ok', '-'), (
+        'The source table should be up to date'
+    )
+    assert reduced.photometry_state(settings_hash='other')[0] == 'stale', (
+        'A source table measured with other settings should be stale'
+    )
+
     # A new astrometric solution only updates the coordinates
     wcs = true_wcs()
     apply_wcs(image, wcs)
+    reduced.reload()
+    assert reduced.photometry_state(settings_hash=settings_hash)[0] == 'coordinates', (
+        'Only the coordinates should be out of date after a new solution'
+    )
     caplog.clear()
     photometry_all(table, rdxdir=rdxdir, qa=False)
     assert 'updated the celestial coordinates' in caplog.text, (

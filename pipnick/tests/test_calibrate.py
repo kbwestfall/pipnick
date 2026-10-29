@@ -16,7 +16,7 @@ from astropy.time import Time
 
 from pipnick.metadata.build import build_metadata
 from pipnick.astrometry.services import propagate_proper_motion
-from pipnick.datamodel.calibration import Calibration, toml_value
+from pipnick.datamodel.calibration import Calibration, header_calibration_state, toml_value
 from pipnick.datamodel.catalog import SourceCatalog
 from pipnick.datamodel.dataset import DataSet
 from pipnick.photometry import extinction, landolt, nightfit
@@ -26,7 +26,9 @@ from pipnick.photometry.calibrate import (
 )
 from pipnick.pipelines import calibrate
 from pipnick.pkg.exceptions import PipnickDataModelError, PipnickParameterError
-from pipnick.pkg.provenance import image_hash
+from pipnick.pkg.provenance import file_hash, image_hash
+from pipnick.pkg.report import StepReport
+from pipnick.pkg.settings import CalibrationSettings
 from pipnick.pkg.version import version
 from pipnick.tests.test_metadata import write_andor
 
@@ -160,7 +162,7 @@ def write_night(tmp_path, design, seed=1, science=False, outlier=None):
             coo = propagate_proper_motion(stars, epoch)
             # Filters other than UBVRI are given the V calibration
             band = filt if filt in TRUE else 'V'
-            color, _ = landolt.catalog_color(stars, calibrate.default_colors()[band])
+            color, _ = landolt.catalog_color(stars, landolt.default_colors()[band])
             mag = instrumental(np.asarray(stars[band]), np.asarray(color), airmass, band, rng)
             if outlier is not None:
                 mag[STARS.index(outlier)] += 0.3
@@ -767,10 +769,7 @@ def test_leave_one_out_no_dof(tmp_path):
             'reason': ['-'] * 3
         }
     )
-    settings = {
-        'maxiter': 0, 'min_stars': 3, 'force': False, 'min_airmass_span': 0.2,
-        'fallback': True, 'min_color_span': 0.3, 'rej': 3.
-    }
+    settings = CalibrationSettings(terms=['zp', 'airmass'])
     resid = loo(meas, 'V', ['zp', 'airmass'], {}, 0.17, settings, np.ones(3, dtype=bool))
     assert np.all(np.ma.getmaskarray(resid)), (
         'The leave-one-out residuals should be masked when the reduced fit has no degrees of '
@@ -841,3 +840,51 @@ def test_toml_round_trip(tmp_path):
     )
     path.write_text(path.read_text().replace('0.1]', '0.2]'))
     assert Calibration.read(path).edited, 'An edited file should be reported as edited'
+
+
+def test_header_calibration_state(tmp_path):
+    cfile = tmp_path / 'cal.toml'
+    cfile.write_text('a = 1\n')
+    hdr = fits.Header()
+    assert header_calibration_state(hdr, cfile) == 'missing', (
+        'A header without a calibration should be missing'
+    )
+    hdr['PNCALHSH'] = file_hash(cfile)
+    assert header_calibration_state(hdr, cfile) == 'ok', 'The calibration should be up to date'
+    cfile.write_text('a = 2\n')
+    assert header_calibration_state(hdr, cfile) == 'stale', (
+        'A changed calibration file should make the header calibration stale'
+    )
+
+
+def test_failed_night(tmp_path, monkeypatch):
+    # The same standards observed on two nights
+    design = wide_design() + [(f, a, h + 24.) for f, a, h in wide_design()]
+    table, rdxdir, _ = write_night(tmp_path, design)
+    fit_night = calibrate.calibrate_night
+
+    def fail_second(night, *args):
+        if night == '2026-08-21':
+            raise RuntimeError('a problem with this night')
+        return fit_night(night, *args)
+
+    monkeypatch.setattr(calibrate, 'calibrate_night', fail_second)
+    report = StepReport('CALIBRATION')
+    outputs = calibrate.calibrate_all(table, rdxdir=rdxdir, qa=False, report=report)
+    assert [f.name for f in outputs] == [f'{DataSet.from_file(table).tag}_2026-08-20.toml'], (
+        'The other night should still be calibrated'
+    )
+    assert report.status == 'FAILED' and report.exit_status != 0, (
+        'A failed night should fail the step'
+    )
+    assert any('2026-08-21 failed: RuntimeError' in m for m in report.failures), (
+        'The failure should be reported'
+    )
+    summary = Table.read(rdxdir / 'calibrate' / 'summary.ecsv')
+    failed = summary[summary['night'] == '2026-08-21']
+    assert len(failed) == 1 and failed['status'][0] == 'failed', (
+        'The failed night should be recorded in the summary'
+    )
+    assert 'a problem with this night' in failed['reason'][0], (
+        'The summary should give the reason for the failure'
+    )

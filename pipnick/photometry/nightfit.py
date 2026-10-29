@@ -8,6 +8,7 @@ rejection, a leave-one-out assessment of its accuracy, and a test for a drift
 of the zero point; see :func:`calibrate_night`.
 """
 
+import dataclasses
 import datetime
 
 import numpy as np
@@ -56,7 +57,9 @@ def _resolve_fixed(fix, band, terms, nominal):
 
 
 
-def calibrate_night(night, images, standards, catalog, camera, tag, settings, nominal, fix):
+def calibrate_night(
+    night, images, standards, catalog, camera, tag, settings, nominal, fix, input_hash
+):
     """
     Fit the calibration of each band from the standards observed in a night.
 
@@ -74,12 +77,15 @@ def calibrate_night(night, images, standards, catalog, camera, tag, settings, no
         The camera.
     tag : str
         The setup tag.
-    settings : dict
-        The calibration settings; see :func:`~pipnick.pipelines.calibrate.calibrate_all`.
+    settings : :class:`~pipnick.pkg.settings.CalibrationSettings`
+        The calibration settings.
     nominal : dict
         The nominal extinction of each band, or None.
     fix : dict
         The fixed terms; see :func:`~pipnick.pipelines.calibrate.parse_fix`.
+    input_hash : str
+        The hash of the inputs of the calibration, recorded in the
+        calibration; see :func:`~pipnick.pipelines.calibrate.calibrate_all`.
 
     Returns
     -------
@@ -93,7 +99,7 @@ def calibrate_night(night, images, standards, catalog, camera, tag, settings, no
     if np.any(missing):
         log.warning(
             f'{night}: {np.sum(missing)} usable standard measurements have no catalog error; '
-            f'their errors include only the instrumental and systematic ({settings["sys_err"]} '
+            f'their errors include only the instrumental and systematic ({settings.sys_err} '
             'mag) errors.'
         )
     nmeas = len(meas)
@@ -113,9 +119,9 @@ def calibrate_night(night, images, standards, catalog, camera, tag, settings, no
         'calibration': {
             'setup': tag, 'night': night, 'camera': camera.name,
             'catalog': 'Landolt (2009, 2013)', 'catalog_hash': file_hash(catalog_path()),
-            'magnitude': settings['mag'],
+            'magnitude': settings.mag,
             'created': datetime.datetime.now(datetime.UTC).isoformat(timespec='seconds'),
-            'pipnick_version': version, 'input_hash': settings['input_hash']
+            'pipnick_version': version, 'input_hash': input_hash
         },
         'band': {}
     }
@@ -124,21 +130,21 @@ def calibrate_night(night, images, standards, catalog, camera, tag, settings, no
         indx = np.where(meas['band'] == band)[0]
         bmeas = meas[indx]
         names = sorted({str(i) for i in bmeas['image']})
-        fixed = _resolve_fixed(fix, band, settings['terms'], nominal)
+        fixed = _resolve_fixed(fix, band, settings.terms, nominal)
         nominal_k = None if nominal is None else nominal[band]
         if len(bmeas) == 0:
             result = {'status': 'failed', 'reason': 'no standards observed in this band'}
             content['band'][band] = _band_entry(
-                band, settings['colors'][band], bmeas, result, None, None, names
+                band, settings.colors[band], bmeas, result, None, None, names
             )
             continue
-        result = calibrate_band(bmeas, band, settings['terms'], fixed, nominal_k, settings)
+        result = calibrate_band(bmeas, band, settings.terms, fixed, nominal_k, settings)
         for msg in result['warnings']:
             log.warning(f'{night} {msg}.')
         if result['status'] != 'ok':
             log.warning(f'{night}: the calibration of band {band} failed: {result["reason"]}.')
             content['band'][band] = _band_entry(
-                band, settings['colors'][band], bmeas, result, None, None, names
+                band, settings.colors[band], bmeas, result, None, None, names
             )
             continue
         if result['fallback_reason'] is not None:
@@ -161,24 +167,24 @@ def calibrate_night(night, images, standards, catalog, camera, tag, settings, no
         meas['resid'][indx] = np.ma.MaskedArray(resid, mask=np.logical_not(good))
         meas['resid_err'][indx] = np.ma.MaskedArray(resid_err, mask=np.logical_not(good))
         loo = _leave_one_out(
-            bmeas, band, settings['terms'], fixed, nominal_k, settings, result['used']
+            bmeas, band, settings.terms, fixed, nominal_k, settings, result['used']
         )
         meas['resid_loo'][indx] = loo
         meas['used'][indx] = result['used']
         meas['rejected'][indx] = result['rejected']
         drift = _drift(bmeas, result['used'], meas['resid'][indx], meas['resid_err'][indx], mjd0)
-        _check_drift(f'{night} {band}', drift, settings['drift_warn'])
+        _check_drift(f'{night} {band}', drift, settings.drift_warn)
         drift_sel[indx] = result['used']
         content['band'][band] = _band_entry(
-            band, settings['colors'][band], bmeas, result, loo, drift, names
+            band, settings.colors[band], bmeas, result, loo, drift, names
         )
 
     drift = _drift(meas, drift_sel, meas['resid'], meas['resid_err'], mjd0)
-    _check_drift(f'{night} (all bands)', drift, settings['drift_warn'])
+    _check_drift(f'{night} (all bands)', drift, settings.drift_warn)
     if drift is not None:
         content['calibration']['drift'] = [drift[0], drift[1]]
     meas.meta = {
-        'night': night, 'setup': tag, 'magnitude': settings['mag'],
+        'night': night, 'setup': tag, 'magnitude': settings.mag,
         'extinction': {
             band: extinction_source(entry) for band, entry in content['band'].items()
         },
@@ -197,24 +203,24 @@ def calibrate_band(meas, band, terms, fixed, nominal_k, settings, usable=None, s
     The fit is iterated: the measurements are checked (see below), the model
     is fit, and outliers are rejected (see
     :func:`~pipnick.photometry.calibrate.reject_outliers`), until no
-    measurements are rejected or ``settings['maxiter']`` rejection iterations
+    measurements are rejected or ``settings.maxiter`` rejection iterations
     are done.  Outliers are not rejected if this would leave no more
     measurements than fitted terms.
 
     Before each fit, the measurements are checked:
 
-        - If there are fewer than ``settings['min_stars']`` distinct stars,
-          the calibration fails, unless ``settings['force']`` is set, in
+        - If there are fewer than ``settings.min_stars`` distinct stars,
+          the calibration fails, unless ``settings.force`` is set, in
           which case a warning is issued.
-        - If the airmass span is less than ``settings['min_airmass_span']``
+        - If the airmass span is less than ``settings.min_airmass_span``
           while the ``airmass`` or ``airmass_color`` term is fit, the
-          extinction cannot be measured.  If ``settings['fallback']`` is set
+          extinction cannot be measured.  If ``settings.fallback`` is set
           (the default), the extinction is fixed at its nominal value, the
           ``airmass_color`` term is fixed at 0, and the reason is recorded.
           Otherwise, the calibration fails.
-        - If the color span is less than ``settings['min_color_span']`` while
+        - If the color span is less than ``settings.min_color_span`` while
           a color term is fit, the calibration fails, unless
-          ``settings['force']`` is set.
+          ``settings.force`` is set.
         - If there are no more measurements than fitted terms, or the fitted
           terms are degenerate, the calibration fails.
 
@@ -231,8 +237,8 @@ def calibrate_band(meas, band, terms, fixed, nominal_k, settings, usable=None, s
     nominal_k : float
         The nominal extinction coefficient of the band, or None if not
         available.
-    settings : dict
-        The calibration settings; see :func:`~pipnick.pipelines.calibrate.calibrate_all`.
+    settings : :class:`~pipnick.pkg.settings.CalibrationSettings`
+        The calibration settings.
     usable : :class:`numpy.ndarray`, optional
         Boolean array selecting the measurements to use.  If None, the
         measurements without a reason not to use them are used.
@@ -264,13 +270,13 @@ def calibrate_band(meas, band, terms, fixed, nominal_k, settings, usable=None, s
         'fallback_reason': None, 'used': used, 'rejected': rejected, 'warnings': warnings
     }
     fit = None
-    for iteration in range(settings['maxiter'] + 1):
+    for iteration in range(settings.maxiter + 1):
         _fixed = dict(fixed)
         fallback = []
         nstars = len(np.unique(np.asarray(meas['star'])[used]))
-        if strict and nstars < settings['min_stars']:
-            msg = f'only {nstars} standard stars (fewer than {settings["min_stars"]})'
-            if not settings['force']:
+        if strict and nstars < settings.min_stars:
+            msg = f'only {nstars} standard stars (fewer than {settings.min_stars})'
+            if not settings.force:
                 result['reason'] = msg
                 return result
             if f'{band}: {msg}' not in warnings:
@@ -278,10 +284,10 @@ def calibrate_band(meas, band, terms, fixed, nominal_k, settings, usable=None, s
         span = float(np.ptp(airmass[used])) if np.any(used) else 0.
         if (
             any(t in terms and t not in _fixed for t in ['airmass', 'airmass_color'])
-            and span < settings['min_airmass_span']
+            and span < settings.min_airmass_span
         ):
-            reason = f'airmass span {span:.2f} < {settings["min_airmass_span"]}'
-            if not settings['fallback']:
+            reason = f'airmass span {span:.2f} < {settings.min_airmass_span}'
+            if not settings.fallback:
                 result['reason'] = f'{reason}, and the extinction fallback is disabled'
                 return result
             if 'airmass' in terms and 'airmass' not in _fixed:
@@ -297,10 +303,10 @@ def calibrate_band(meas, band, terms, fixed, nominal_k, settings, usable=None, s
         cspan = float(np.ptp(color[used])) if np.any(used) else 0.
         if (
             strict and any(t in terms and t not in _fixed for t in ['color', 'color2'])
-            and cspan < settings['min_color_span']
+            and cspan < settings.min_color_span
         ):
-            msg = f'color span {cspan:.2f} < {settings["min_color_span"]}'
-            if not settings['force']:
+            msg = f'color span {cspan:.2f} < {settings.min_color_span}'
+            if not settings.force:
                 result['reason'] = f'{msg}; fix the color terms (--fix)'
                 return result
             if f'{band}: {msg}' not in warnings:
@@ -317,9 +323,9 @@ def calibrate_band(meas, band, terms, fixed, nominal_k, settings, usable=None, s
         except PipnickParameterError as e:
             result['reason'] = str(e)
             return result
-        if iteration == settings['maxiter']:
+        if iteration == settings.maxiter:
             break
-        outliers = reject_outliers(fit, mag_c, color, mag_i, airmass, err=err, rej=settings['rej'])
+        outliers = reject_outliers(fit, mag_c, color, mag_i, airmass, err=err, rej=settings.rej)
         if not np.any(outliers) or nused - int(np.sum(outliers)) <= nfree:
             break
         used = used & np.logical_not(outliers)
@@ -356,7 +362,7 @@ def _leave_one_out(meas, band, terms, fixed, nominal_k, settings, used):
     """
     loo = np.ma.MaskedArray(np.zeros(len(meas)), mask=np.ones(len(meas), dtype=bool))
     stars = np.asarray(meas['star'])
-    _settings = dict(settings, maxiter=0)
+    _settings = dataclasses.replace(settings, maxiter=0)
     for star in np.unique(stars[used]):
         others = used & (stars != star)
         result = calibrate_band(

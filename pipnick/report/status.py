@@ -24,9 +24,9 @@ from astropy.io import fits
 from astropy.table import MaskedColumn, Table
 
 from pipnick import log
+from pipnick.datamodel.calibration import header_calibration_state
 from pipnick.datamodel.dataset import DataSet
 from pipnick.pkg.paths import calibration_file, step_dir
-from pipnick.pkg.provenance import file_hash
 from pipnick.pkg.version import version
 
 
@@ -63,7 +63,8 @@ def astrometry_status(image, by_name):
 def photometry_status(image):
     """
     Return the state of the source table of an image; see
-    :mod:`pipnick.report.status`.
+    :mod:`pipnick.report.status` and
+    :meth:`~pipnick.datamodel.image.ReducedImage.photometry_state`.
 
     Parameters
     ----------
@@ -82,12 +83,8 @@ def photometry_status(image):
         failed = _summary_status(step_dir(image.dataset.rdxdir, 'photometry'), image.name)
         return 'failed' if failed == 'failed' else 'missing', None
     phot = Table.read(image.phot_file, format='ascii.ecsv')
-    if (
-        phot.meta.get('image_hash') != image.image_hash
-        or phot.meta.get('wcs_hash') != image.solution_hash
-    ):
-        return 'stale', phot
-    return 'ok', phot
+    state, _ = image.photometry_state(phot)
+    return 'ok' if state == 'ok' else 'stale', phot
 
 
 def _summary_status(outdir, name):
@@ -126,9 +123,7 @@ def calibration_status(image):
     cfile = calibration_file(image.dataset.rdxdir, image.dataset.tag, image.night)
     if not cfile.is_file():
         return 'n/a'
-    if 'PNCALHSH' not in image.header:
-        return 'missing'
-    return 'ok' if image.header['PNCALHSH'] == file_hash(cfile) else 'stale'
+    return header_calibration_state(image.header, cfile)
 
 
 def mosaic_file(image, mosaic_dir=None):
@@ -160,6 +155,12 @@ def mosaic_status(image, mosaic_dir=None):
     """
     Return the state of the mosaic of an image; see
     :mod:`pipnick.report.status`.
+
+    Only the image itself is checked, against its hashes in the ``INPUTS``
+    table of the mosaic.  The mosaics also rebuild a mosaic whose settings,
+    images, or WCS group have changed (``PNMOSHSH``; see
+    :func:`~pipnick.pipelines.mosaic.mosaic_all`), which cannot be checked
+    here, because a mosaic does not record all of its settings.
 
     Parameters
     ----------
@@ -278,7 +279,7 @@ def night_status(table, rdxdir=None, mosaic_dir=None):
             'calibrated': 'n/a', 'zp': None, 'mosaic': 'n/a', 'attention': ''
         }
         rows.append(row)
-        row['reduced'], _ = image.reduction_status()
+        row['reduced'], _ = image.reduction_state()
         if row['reduced'] == 'missing':
             row['mosaic'] = 'n/a' if len(label) == 0 else 'missing'
             continue

@@ -25,9 +25,9 @@ def match_standards(images, catalog, settings):
         The images, as returned by :class:`~pipnick.datamodel.image.ReducedImage`.
     catalog : :class:`astropy.table.Table`
         The Landolt catalog; see :func:`~pipnick.photometry.landolt.load_landolt`.
-    settings : dict
+    settings : :class:`~pipnick.pkg.settings.CalibrationSettings`
         The calibration settings, including the color used to calibrate each
-        band (``colors``); see :func:`~pipnick.pipelines.calibrate.calibrate_all`.
+        band (``colors``).
 
     Returns
     -------
@@ -50,21 +50,21 @@ def match_standards(images, catalog, settings):
         epoch = Time(image.mjd, format='mjd', scale='utc').jyear
         isrc, icat, sep = match_landolt(
             catalog, ra[good].filled(0.), dec[good].filled(0.), epoch,
-            radius=settings['match_radius']
+            radius=settings.match_radius
         )
         isrc = np.where(good)[0][isrc]
         band = landolt_band(image.filter)
-        mag_i, err_i = phot.instrumental_mag(settings['mag'])
+        mag_i, err_i = phot.instrumental_mag(settings.mag)
         cat = catalog[icat]
         mag_c = np.ma.asarray(cat[band], dtype=float)
         err_c = np.ma.asarray(cat[f'e_{band}'], dtype=float)
-        color, color_err = catalog_color(cat, settings['colors'][band])
+        color, color_err = catalog_color(cat, settings.colors[band])
         flags = np.asarray(phot['flags'])
         aper_masked = np.ma.getmaskarray(np.ma.asarray(phot['flux_aper']))
         for j, (s, c) in enumerate(zip(isrc, icat)):
             n_residual, n_contaminating = phot.neighbors(
-                s, residual_radius=settings['residual_radius'],
-                max_neighbor_flux=settings['max_neighbor_flux']
+                s, residual_radius=settings.residual_radius,
+                max_neighbor_flux=settings.max_neighbor_flux
             )
             if np.ma.getmaskarray(mag_c)[j]:
                 reason = 'no catalog magnitude'
@@ -79,10 +79,10 @@ def match_standards(images, catalog, settings):
             elif n_contaminating > 0:
                 reason = 'contaminated'
             elif (
-                not np.ma.getmaskarray(err_c)[j] and err_c[j] > settings['max_cat_err']
+                not np.ma.getmaskarray(err_c)[j] and err_c[j] > settings.max_cat_err
             ):
                 reason = 'catalog error'
-            elif cat['nobs'][j] < settings['min_cat_obs']:
+            elif cat['nobs'][j] < settings.min_cat_obs:
                 reason = 'few catalog observations'
             else:
                 reason = '-'
@@ -96,7 +96,7 @@ def match_standards(images, catalog, settings):
                     'mag_inst_err': err_i[s], 'n_residual': n_residual, 'reason': reason
                 }
             )
-    return _measurement_table(rows, settings['sys_err'])
+    return _measurement_table(rows, settings.sys_err)
 
 
 

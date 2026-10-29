@@ -11,10 +11,10 @@ from matplotlib.figure import Figure
 from astropy import table
 from astropy.stats import sigma_clipped_stats
 from astropy.nddata import CCDData
-from photutils.detection import DAOStarFinder
 from skimage import transform
 
 from pipnick import log
+from pipnick.image.detect import isolated
 from pipnick.image.io import read_reduced
 
 
@@ -101,24 +101,19 @@ def plot_stamps(stamps, pdf_file, vmin=None, vmax=None):
             pdf.savefig(fig)  # Save the figure to the PDF file
 
 
-def detect_sources(
-    image, thresh=15., fwhm=7., inner_bkg=3., outer_bkg=5., min_dist_fwhm=5., min_flux=1e3,
-    sigma=3.
+def select_psf_stars(
+    image, sources, fwhm=7., inner_bkg=3., outer_bkg=5., min_dist_fwhm=5., min_flux=1e3
 ):
     """
-    Perform point-source detection on the provided image.
-
-    Sources are detected with :class:`photutils.detection.DAOStarFinder`.  An
-    alternative would be the segmentation tools in ``photutils``
-    (:mod:`photutils.segmentation`).
+    Measure the Kron radii and fluxes of detected sources, and select the
+    well-separated sources with good fluxes, used to model the PSF.
 
     Parameters
     ----------
     image : str, :class:`~pathlib.Path`, :class:`~astropy.nddata.CCDData`, array-like
-        Image to process; see :func:`as_masked_array`.
-    thresh : float, optional
-        Detection threshold in units of the standard deviation in the
-        background.
+        The image; see :func:`as_masked_array`.
+    sources : :class:`astropy.table.Table`
+        The detected sources; see :func:`~pipnick.image.detect.find_sources`.
     fwhm : float, optional
         Rough FWHM of the point-spread function in pixels
     inner_bkg : float, optional
@@ -128,19 +123,18 @@ def detect_sources(
         Outer radius used for determination of the local background near
         sources, in units of the provided FWHM.
     min_dist_fwhm : float, optional
-        Minimum distance in pixels for "isolated" sources.
+        Minimum distance, in units of the FWHM, for "isolated" sources; see
+        :func:`~pipnick.image.detect.isolated`.
     min_flux : float, optional
-        Minimum flux for a well-detected source (takes precedence over ``thresh``)
-    sigma : float, optional
-        The sigma-clipping threshold used to measure the background level and
-        its standard deviation; see :func:`astropy.stats.sigma_clipped_stats`.
+        Minimum Kron flux for a well-detected source.
 
     Returns
     -------
     :class:`astropy.table.Table`
 
-        Table with detected sources and initial metrics. The table metadata
-        provides all of the input parameters (except for the image), as well as
+        Table with the sources and their Kron measurements.  The table
+        metadata provides the detection threshold (``threshold``, in the
+        units of the image), the other input parameters, and
         'mean_kron_radius', the sigma-clipped mean of the Kron radius measured
         for each source.  The table columns are:
 
@@ -158,26 +152,24 @@ def detect_sources(
               measured using "mean_kron_radius"
             - 'good': a boolean flag selecting well-separated sources with good
               fluxes
+
+    Raises
+    ------
+    ValueError
+        Raised if there are no sources.
     """
     _image = as_masked_array(image)
     # Create images for coordinates
     nx, ny = _image.shape
     x, y = np.meshgrid(np.arange(ny, dtype=float), np.arange(nx, dtype=float))
 
-    # Determine the clipped statistics.
-    mean, median, std = sigma_clipped_stats(_image, sigma=sigma)
-    log.debug(f'Background median and standard deviation: {median:.1f}, {std:.2f}')
-
-    # Source detection
-    starfind = DAOStarFinder(fwhm=fwhm, threshold=thresh*std)
-    sources = starfind((_image - median).filled(0.0), mask=np.ma.getmaskarray(_image))
-    nsources = 0 if sources is None else len(sources)
+    nsources = len(sources)
     log.debug(f'Detected {nsources} sources.')
     if nsources == 0:
         raise ValueError('No sources detected.')
 
     # Get the size and flux of each source via Kron measurements
-    ap_centers = np.column_stack((sources['x_centroid'], sources['y_centroid']))
+    ap_centers = np.column_stack((sources['x'], sources['y']))
     kron_bkg_raw, kron_radius, kron_flux_raw = kron_stats(
         x, y, _image, ap_centers, fwhm, inner_bkg=inner_bkg, outer_bkg=outer_bkg
     )
@@ -188,37 +180,29 @@ def detect_sources(
         source_radius=mean_kron_radius
     )
 
-    # Remove sources that are too close to each other
-    i, j = np.triu_indices(nsources, k=1)
-    dist = np.sqrt(
-        (sources['x_centroid'][j] - sources['x_centroid'][i])**2
-        + (sources['y_centroid'][j] - sources['y_centroid'][i])**2
-    )
-    too_close = np.identity(nsources).astype(bool)
-    too_close[i,j] = dist < min_dist_fwhm * fwhm
-    too_close[j,i] = too_close[i,j]
-
-    # Remove sources with low flux
-    _kflux = np.tile(kron_flux, (nsources, 1))
-    _kflux[np.logical_not(too_close)] = np.ma.masked
+    # Keep the brightest of sources that are too close to each other, and
+    # remove sources with low flux
     good = (
-        (np.ma.argmax(_kflux, axis=1) == np.arange(nsources))
+        isolated(
+            np.asarray(sources['x']), np.asarray(sources['y']), kron_flux, min_dist_fwhm * fwhm
+        )
         & (kron_flux.data > min_flux)
         & np.logical_not(np.ma.getmaskarray(kron_flux))
     )
     log.debug(f'Selected {np.sum(good)} well-separated sources with good flux')
 
     meta = {
-        'thresh': thresh, 'fwhm': fwhm, 'inner_bkg': inner_bkg, 'outer_bkg': outer_bkg,
-        'min_dist_fwhm': min_dist_fwhm, 'min_flux': min_flux, 'mean_kron_radius': mean_kron_radius
+        'threshold': sources.meta.get('threshold'), 'fwhm': fwhm, 'inner_bkg': inner_bkg,
+        'outer_bkg': outer_bkg, 'min_dist_fwhm': min_dist_fwhm, 'min_flux': min_flux,
+        'mean_kron_radius': mean_kron_radius
     }
 
     # Construct and return the table
     return table.Table(
         [
             table.Column(name='id', data=np.arange(nsources, dtype=int)),
-            table.Column(name='xcen', data=np.asarray(sources['x_centroid'])),
-            table.Column(name='ycen', data=np.asarray(sources['y_centroid'])),
+            table.Column(name='xcen', data=np.asarray(sources['x'])),
+            table.Column(name='ycen', data=np.asarray(sources['y'])),
             table.MaskedColumn(
                 name='kron_bkg_raw', data=kron_bkg_raw.data, mask=np.ma.getmaskarray(kron_bkg_raw)
             ),
@@ -317,7 +301,7 @@ def extract_stamps(image, source_data, inner_bkg=5., window=10., radius_unit='kr
     image : str, :class:`~pathlib.Path`, :class:`~astropy.nddata.CCDData`, array-like
         Image with sources; see :func:`as_masked_array`.
     source_data : :class:`astropy.table.Table`
-        Table with the source data (see :func:`detect_sources`)
+        Table with the source data (see :func:`select_psf_stars`)
     inner_bkg : float, optional
         Inner radius for background determination
     window : float, optional

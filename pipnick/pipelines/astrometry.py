@@ -40,21 +40,60 @@ from astropy.table import Table
 
 from pipnick import log
 from pipnick.astrometry.cache import anet_input_hash, invalidate_chains, restore_solution
-from pipnick.astrometry.detect import detect_sources
 from pipnick.astrometry.services import GaiaCatalog, astrometry_net_hints
 from pipnick.astrometry.solve import (
     AstrometryImage, Session, group_by_pointing, group_order, group_reference, handle_result,
     log_pointing_offset, nsources, read_image, solve_group
 )
 from pipnick.datamodel.dataset import DataSet
+from pipnick.image.detect import brightest, find_sources
 from pipnick.pkg.exceptions import PipnickPathError
 from pipnick.pkg.paths import qa_figure
 from pipnick.pkg.report import StepReport
+from pipnick.pkg.settings import AstrometrySettings
+from pipnick.pkg.step import Attempt, needs_qa, progress
 from pipnick.pkg.summary import Summary
 from pipnick.qa.sources import plot_sources
 
 
-def _load_images(dataset, upload_image, max_sources=100, detect_thresh=5., fwhm=None):
+def _detect(data, mask, fwhm, thresh, max_sources):
+    """
+    Detect the brightest point sources in an image, excluding those at the
+    border; see :func:`~pipnick.image.detect.find_sources`.
+
+    The masked pixels are set to 0 before the global background is
+    subtracted.  The detected sources are part of the key of the cached
+    astrometry.net results (see
+    :func:`~pipnick.astrometry.cache.anet_input_hash`), so this detection
+    must not change.
+
+    Parameters
+    ----------
+    data : :class:`numpy.ndarray`
+        The image data.
+    mask : :class:`numpy.ndarray`
+        Boolean array selecting the pixels to ignore.
+    fwhm : float
+        The expected FWHM of the sources in pixels.
+    thresh : float
+        The detection threshold, as a multiple of the standard deviation of
+        the background.
+    max_sources : int
+        The maximum number of sources to return.
+
+    Returns
+    -------
+    :class:`astropy.table.Table`
+        The 0-based pixel coordinates (``x`` and ``y``) and the flux (``flux``)
+        of the detected sources, ordered by decreasing flux.
+    """
+    sources = find_sources(
+        data, mask=mask, fwhm=fwhm, thresh=thresh, masked='zero', exclude_border=True
+    )
+    return brightest(sources, max_sources)['x', 'y', 'flux']
+
+
+def _load_images(dataset, settings):
     """
     Read the reduced science images and detect their sources.
 
@@ -65,16 +104,11 @@ def _load_images(dataset, upload_image, max_sources=100, detect_thresh=5., fwhm=
     ----------
     dataset : :class:`~pipnick.datamodel.dataset.DataSet`
         The data set.
-    upload_image : bool
-        Images will be uploaded to astrometry.net, instead of source lists.
-    max_sources : int, optional
-        The maximum number of (brightest) sources to detect in each image.
-    detect_thresh : float, optional
-        The detection threshold, as a multiple of the standard deviation of the
-        background.
-    fwhm : float, optional
-        The FWHM of the sources in arcsec.  If None, the typical value for the
-        camera is used.
+    settings : :class:`~pipnick.pkg.settings.AstrometrySettings`
+        The settings, with the FWHM resolved: the detection settings
+        (``max_sources``, ``detect_thresh``, ``fwhm``), and whether images
+        will be uploaded to astrometry.net instead of source lists
+        (``upload_image``).
 
     Returns
     -------
@@ -91,7 +125,7 @@ def _load_images(dataset, upload_image, max_sources=100, detect_thresh=5., fwhm=
     images = []
     reduced = dataset.science_images()
     for k, image in enumerate(reduced):
-        progress = f'[{k + 1}/{len(reduced)}]'
+        label = progress(k, len(reduced))
         path = image.path
         data, mask, hdr = read_image(path)
         pointing = image.pointing
@@ -99,21 +133,20 @@ def _load_images(dataset, upload_image, max_sources=100, detect_thresh=5., fwhm=
             log.warning(f'{path.name} has no coordinates.  Skipping.')
             continue
         scale = image.nominal_scale
-        fwhm_pix = (dataset.camera.fwhm_guess if fwhm is None else fwhm) / scale
-        sources = detect_sources(
-            data, mask=mask, fwhm=fwhm_pix, thresh=detect_thresh, nmax=max_sources
-        )
+        fwhm_pix = settings.fwhm / scale
+        sources = _detect(data, mask, fwhm_pix, settings.detect_thresh, settings.max_sources)
         # Allow for a pointing error of up to the image width
         radius = max(data.shape) * scale / 3600.
         hints = astrometry_net_hints(pointing, radius, scale)
         images.append(
             AstrometryImage(
                 path, hdr, data.shape, pointing, image.epoch, scale, fwhm_pix, sources, hints,
-                anet_input_hash(data, sources, hints, upload_image), comb_id=image.product.comb_id,
+                anet_input_hash(data, sources, hints, settings.upload_image),
+                comb_id=image.product.comb_id,
                 image=image
             )
         )
-        log.info(f'{progress} {path.name}: detected {len(sources)} sources.')
+        log.info(f'{label} {path.name}: detected {len(sources)} sources.')
         if len(sources) < 10:
             log.warning(
                 f'Only {len(sources)} sources were detected in {path.name}, which may be hard to '
@@ -232,19 +265,17 @@ def _write_qa(images, astro_dir, report, solved=None):
     nwritten = 0
     for image in images:
         ofile = qa_figure(astro_dir, image.path.stem)
-        if image.name not in _solved and ofile.is_file():
+        if not needs_qa(True, image.name in _solved, [ofile]):
             continue
         title = f'{image.name}: {len(image.sources)} detected sources'
         if image.status == 'solved':
             title += f'; {image.method} solution'
-        try:
+        attempt = Attempt(report, f'The QA figure of {image.name}', problem=True)
+        with attempt:
             data, mask, _ = read_image(image.path)
             plot_sources(data, mask, image.sources, ofile, matched=image.matched, title=title)
-        except Exception as e:
-            log.debug(f'Traceback of the failure of the QA of {image.name}:', exc_info=True)
-            report.attention(f'The QA figure of {image.name} failed: {type(e).__name__}: {e}')
-            continue
-        nwritten += 1
+        if not attempt.failed:
+            nwritten += 1
     if nwritten > 0:
         log.info(f'Wrote {nwritten} QA figures to astrometry/qa.')
 
@@ -436,18 +467,26 @@ def astrometry_all(
     ------
     :exc:`~pipnick.pkg.exceptions.PipnickPathError`
         Raised if the reduction directory does not exist.
+    :exc:`~pipnick.pkg.exceptions.PipnickParameterError`
+        Raised if a setting is invalid; see
+        :class:`~pipnick.pkg.settings.AstrometrySettings`.
     """
     _report = StepReport('ASTROMETRY') if report is None else report
+    settings = AstrometrySettings(
+        max_sources=max_sources, detect_thresh=detect_thresh, fwhm=fwhm,
+        upload_image=upload_image, max_submissions=max_submissions, group_radius=group_radius,
+        min_matches=min_matches, max_rms=max_rms, search=search, wide_search=wide_search,
+        wide_min_matches=wide_min_matches
+    )
     dataset = DataSet.from_file(table, rdxdir=rdxdir)
     if not dataset.rdxdir.is_dir():
         raise PipnickPathError(f'{dataset.rdxdir} does not exist; reduce the data first.')
     _report.check_version(dataset.metafile.name, dataset.table.meta.get('pipnick_version'))
+    settings = settings.resolve(dataset.camera)
     astro_dir = dataset.outdir('astrometry')
     log.info(f'Astrometric calibration of the images in {dataset.rdxdir}')
 
-    _images = _load_images(
-        dataset, upload_image, max_sources=max_sources, detect_thresh=detect_thresh, fwhm=fwhm
-    )
+    _images = _load_images(dataset, settings)
     if len(_images) == 0:
         _report.attention('There are no reduced science images to calibrate.')
         _report.finish('no images.', next_step=f'pipnick_reduce -t {dataset.metafile}')
@@ -466,7 +505,7 @@ def astrometry_all(
             # An existing solution, restored above
             _report.check_version(image.name, image.header.get('PNASTVER'))
     log_pointing_offset(_images)
-    groups = group_by_pointing(_images, group_radius)
+    groups = group_by_pointing(_images, settings.group_radius)
 
     if dry_run:
         _report_dry_run(_images, groups, astro_dir)
@@ -481,7 +520,7 @@ def astrometry_all(
 
     session = Session(
         solver, GaiaCatalog(astro_dir) if catalog is None else catalog, api_key, astro_dir,
-        upload_image, max_submissions, min_matches, max_rms, search, wide_search, wide_min_matches
+        settings
     )
     session.pending = set(image.name for image in _images if image.status == 'pending')
     previous = set(image.name for image in _images if image.status == 'solved')

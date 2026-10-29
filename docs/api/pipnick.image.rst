@@ -7,6 +7,8 @@ Submodules
 .. toctree::
    :maxdepth: 4
 
+   pipnick.image.background
+   pipnick.image.detect
    pipnick.image.io
 
 Module contents

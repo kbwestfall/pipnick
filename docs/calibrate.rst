@@ -77,8 +77,11 @@ Overview
      are degenerate (e.g., the color does not vary).
 
    ``--force`` downgrades the first two to warnings.  Large coefficient
-   errors and a negative extinction are reported as warnings.  The run fails
-   only if no band can be calibrated.
+   errors and a negative extinction are reported as warnings.  The run stops
+   with an error only if no band can be calibrated.  A night whose
+   calibration fails for another reason (e.g., an unreadable source table) is
+   recorded as failed in the summary and the verdict, and the other nights
+   are still calibrated.
 
 5. **Assess the fit.**  The residuals (calibrated minus catalog magnitudes)
    of every standard measurement are recorded, along with *leave-one-out*

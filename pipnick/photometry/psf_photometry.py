@@ -10,14 +10,13 @@ the image are measured by fitting this PSF with ``photutils``
 import numpy as np
 
 from astropy.modeling.fitting import TRFLSQFitter
-from photutils.background import (
-    Background2D, LocalBackground, MADStdBackgroundRMS, MMMBackground
-)
-from photutils.detection import DAOStarFinder
+from photutils.background import LocalBackground, MADStdBackgroundRMS, MMMBackground
 from photutils.psf import IterativePSFPhotometry, SourceGrouper
 
 from pipnick import log
 from pipnick.datamodel.psf import PSFModel
+from pipnick.image.background import subtract_background
+from pipnick.image.detect import SourceFinder, find_sources
 from pipnick.photometry import starfind
 from pipnick.photometry.moffat import FitEllipticalMoffat2D, FitMoffat2D
 
@@ -29,8 +28,10 @@ def build_moffat_psf_model(
     Use well-detected and well-separated sources to model the image PSF as a
     2D Moffat function.
 
-    Sources are detected and selected with
-    :func:`~pipnick.photometry.starfind.detect_sources`, background-subtracted
+    Sources are detected with :func:`~pipnick.image.detect.find_sources`
+    (with the global background, and the masked pixels set to the background
+    level) and selected with
+    :func:`~pipnick.photometry.starfind.select_psf_stars`, background-subtracted
     stamps are extracted around them
     (:func:`~pipnick.photometry.starfind.extract_stamps`), and the stamps with
     less than 1% masked pixels are stacked and fit.
@@ -74,7 +75,8 @@ def build_moffat_psf_model(
     if stack not in ['mean', 'median']:
         raise ValueError(f'Unknown stacking method {stack}; must be mean or median.')
     _image = starfind.as_masked_array(image)
-    source_data = starfind.detect_sources(_image, thresh=thresh, fwhm=fwhm)
+    sources = find_sources(_image, fwhm=fwhm, thresh=thresh)
+    source_data = starfind.select_psf_stars(_image, sources, fwhm=fwhm)
     log.debug(f'Found {len(source_data)} well-separated sources with well-detected fluxes.')
 
     log.debug('Extracting image stamps.')
@@ -99,32 +101,6 @@ def build_moffat_psf_model(
     return fit, nstack
 
 
-def subtract_background(data, mask=None, box_size=64):
-    """
-    Subtract a smooth, 2D background from an image.
-
-    The background is measured with :class:`photutils.background.Background2D`
-    in boxes of ``box_size`` pixels, ignoring masked pixels.  The source
-    detection used by the PSF photometry assumes background-subtracted data.
-
-    Parameters
-    ----------
-    data : :class:`numpy.ndarray`
-        The image data.
-    mask : :class:`numpy.ndarray`, optional
-        Boolean array selecting the pixels to ignore.
-    box_size : int, optional
-        The size of the boxes used to measure the background.
-
-    Returns
-    -------
-    :class:`numpy.ndarray`
-        The background-subtracted data.
-    """
-    bkg = Background2D(data, box_size, mask=mask)
-    return data - bkg.background
-
-
 def psf_analysis(
     image, error=None, thresh=10.0, guess_fwhm=7., mode='all', fittype='circ', stack='mean',
     min_sep=1., group_sep=2., psf_thresh=15.
@@ -134,10 +110,13 @@ def psf_analysis(
     fitting.
 
     The PSF is modeled with :func:`build_moffat_psf_model`.  A smooth
-    background is subtracted (:func:`subtract_background`), and the sources
-    are found (with :class:`photutils.detection.DAOStarFinder`) and fit with
-    :class:`photutils.psf.IterativePSFPhotometry`, with the PSF shape fixed and
-    the flux and position of each source free.
+    background is subtracted (see
+    :func:`~pipnick.image.background.subtract_background`), and the sources
+    are found (with :class:`~pipnick.image.detect.SourceFinder`, above
+    ``thresh`` times a robust estimate of the noise of the subtracted image)
+    and fit with :class:`photutils.psf.IterativePSFPhotometry`, with the PSF
+    shape fixed and the flux and position of each source free.  The residual
+    images of the later iterations are searched with the same threshold.
     Sources closer than ``group_sep`` FWHM are fit simultaneously.
 
     Parameters
@@ -209,9 +188,10 @@ def psf_analysis(
     # A robust estimate of the background noise
     std = MADStdBackgroundRMS()(np.ma.MaskedArray(data, mask=mask))
 
-    # NOTE: DAOStarFinder applies a matched filter before thresholding;
-    # IRAFStarFinder does not, and so detects many more spurious sources
-    finder = DAOStarFinder(threshold=thresh * std, fwhm=fwhm, min_separation=min_sep * fwhm)
+    # NOTE: DAOStarFinder (see find_sources) applies a matched filter before
+    # thresholding; IRAFStarFinder does not, and so detects many more
+    # spurious sources
+    finder = SourceFinder(fwhm, thresh * std, min_sep=min_sep * fwhm)
     grouper = SourceGrouper(min_separation=group_sep * fwhm)
     local_bkg = LocalBackground(*local_bkg_range, bkg_estimator=MMMBackground())
 

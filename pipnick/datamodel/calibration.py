@@ -20,7 +20,7 @@ import numpy as np
 from pipnick.photometry.calibrate import check_terms, zero_point
 from pipnick.photometry.landolt import parse_color
 from pipnick.pkg.exceptions import PipnickDataModelError, PipnickParameterError
-from pipnick.pkg.provenance import json_hash
+from pipnick.pkg.provenance import file_hash, json_hash
 
 
 def toml_value(value):
@@ -85,6 +85,34 @@ def calibration_hash(content):
     _content = json.loads(json.dumps(content))
     _content.get('calibration', {}).pop('fit_hash', None)
     return json_hash(_content)
+
+
+def header_calibration_state(header, cfile):
+    """
+    Determine if the photometric calibration recorded in the header of an
+    image is up to date with the calibration file.
+
+    This is the check of the application of the calibration (see
+    :func:`~pipnick.photometry.apply.apply_to_headers`) and of the status of
+    the data set (see :mod:`pipnick.report.status`).
+
+    Parameters
+    ----------
+    header : :class:`astropy.io.fits.Header`
+        The header of the image.
+    cfile : :class:`pathlib.Path`
+        The calibration file of its night.
+
+    Returns
+    -------
+    str
+        ``'ok'``, ``'stale'`` (the calibration file has changed since it was
+        recorded, ``PNCALHSH``), or ``'missing'`` (no calibration is
+        recorded).
+    """
+    if 'PNCALHSH' not in header:
+        return 'missing'
+    return 'ok' if header['PNCALHSH'] == file_hash(cfile) else 'stale'
 
 
 def extinction_source(entry):

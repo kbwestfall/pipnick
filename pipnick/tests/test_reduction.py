@@ -675,11 +675,22 @@ def test_reduce_failure(night, tmp_path):
 
 def test_reduction_status(night, tmp_path):
     rdxdir = tmp_path / 'rdx'
+    dataset = DataSet.from_file(night, rdxdir=rdxdir, read_only=True)
+    bias = dataset.products('bias')[0]
+    assert dataset.reduction_state(bias) == ('missing', 'not reduced'), (
+        'A product that has not been reduced should be missing'
+    )
     reduce_all(night, rdxdir=rdxdir, qa=False)
+    assert dataset.reduction_state(bias) == ('ok', '-'), 'The reduced bias should be up to date'
+    science = dataset.products('science')[0]
+    state, reason = dataset.reduction_state(science, calib_hashes={'bias': 'none', 'flat': 'x'})
+    assert state == 'stale' and reason == 'the bias changed', (
+        'A product reduced with other calibrations should be stale'
+    )
     image = DataSet.from_file(night, rdxdir=rdxdir).science_images()[0]
-    assert image.reduction_status() == ('ok', '-'), 'The reduced image should be up to date'
+    assert image.reduction_state() == ('ok', '-'), 'The reduced image should be up to date'
     set_column(night, ['n5011.fits', 'n5012.fits'], 'airmass', 1.5)
     image = DataSet.from_file(night, rdxdir=rdxdir).science_images()[0]
-    assert image.reduction_status()[0] == 'stale', (
+    assert image.reduction_state()[0] == 'stale', (
         'A change in the metadata table values should make the image stale'
     )

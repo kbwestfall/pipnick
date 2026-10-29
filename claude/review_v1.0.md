@@ -197,8 +197,12 @@ Proposals:
    [progress log](#progress-log)).
 5. Split the large modules, and add `SourceCatalog`, `Summary` and the `qa/`
    package.
+   **Complete** (2026-10-28, branch `qa`; see the
+   [progress log](#progress-log)).
 6. Move every step to the common detection function, then add
    `PipelineStep`.
+   **Complete** (2026-10-29, branch `detection`; see the
+   [progress log](#progress-log)).
 
 ---
 
@@ -1228,7 +1232,7 @@ camera lives in one place.
 | 3 | `DataSet`, `Product`, `ReducedImage`, `read_reduced`; `PSFModel` with one FWHM definition (§5) | removes the coupling between pipelines and the FWHM inconsistency | medium (some mosaics are rebuilt) | **complete** |
 | 4 | Logging (run header, progress, verdicts, next steps, default log files, version); a reduction summary; `pipnick_status` (§6, §7 P1–P3) | the most direct benefit to new observers | low | **complete** |
 | 5 | Split the large modules; `SourceCatalog`, `Summary`, `qa/`; QA on by default; `pipnick_report`, `pipnick_inspect` (§3, §5, §7) | maintainability and interrogation | medium | **complete** |
-| 6 | The common detection function and catalogue selections (§4.1); `PipelineStep` (§5.7) | one detection implementation, used with different settings by every step; a common step loop | higher (the astrometry.net cache, unless the astrometry's detections are reproduced exactly) | |
+| 6 | The common detection function and catalogue selections (§4.1); `PipelineStep` (§5.7) | one detection implementation, used with different settings by every step; a common step loop | higher (the astrometry.net cache, unless the astrometry's detections are reproduced exactly) | **complete** |
 
 ### Progress log
 
@@ -1870,3 +1874,258 @@ the API pages.
 - Some sources removed as `failed` were detected (`x_init`, `y_init`) far
   outside the image by the second iteration of the PSF photometry (4 of 39
   in SA 111 1965 V C021).
+
+#### Step 6, Phase A: detection and backgrounds (complete, 2026-10-29, branch `detection`)
+
+Decisions made with the author before starting:
+
+- Step 6 is done in three phases on one branch, with a check-in after each:
+  A, the detection and backgrounds; B, the settings dataclasses; C,
+  `PipelineStep`.
+- The astrometry's detections must stay identical, so that no
+  astrometry.net cache key changes.
+- Only the image backgrounds are consolidated; the four local backgrounds
+  around sources stay as they are, since unifying them would change the
+  measured fluxes.
+- `find_sources` returns a plain `Table`, with the selections as functions;
+  `SourceCatalog` stays the wrapper of the measured `_phot.ecsv` tables.
+
+Checks after the work:
+
+- `tox -r -e 3.13-test,codestyle` passes in a fresh environment: 213 tests
+  passed, 1 skipped.
+- The docs build without warnings.
+- **Detections, on all 19 n3 (fast) science images, main against this
+  branch in separate processes:** 627 arrays compared, and all are
+  bit-for-bit identical except the mosaic's 2D background (see below): the
+  astrometry sources and their astrometry.net cache keys, the PSF-star tables
+  and the PSF fits, the census finder's positions, and the mosaic's constant
+  background.
+- **End to end:** on scratch copies of n3 (fast), with every step run (the
+  astrometry only as a dry run) by main and by this branch:
+  - the reduced images are identical, as are the 19 astrometry source lists
+    and the PSF models of all 19 source tables;
+  - the source tables differ by the known run-to-run nondeterminism of the
+    PSF photometry (the same size as between two runs of main; see Step 5,
+    Phase A), and the calibration and mosaics differ through them;
+  - run on main's outputs without `--overwrite`, this branch reports every
+    product as up to date.
+
+**`pipnick/image/detect.py` (§4.1).**
+
+- `find_sources`: the background (`'global'`, or `'none'` for an image whose
+  background is subtracted), the threshold (a multiple of the noise, or
+  absolute), `DAOStarFinder`, and the treatment of the masked pixels
+  (`masked`): `'zero'` (0 before the background is subtracted, the
+  astrometry's convention), `'background'` (the PSF stars), or `'keep'` (the
+  census, whose residual images come from photutils).  It returns a `Table`
+  (`x`, `y`, `flux`, `peak`, `sharpness`, `roundness1`, `roundness2`), with
+  the background, noise and threshold in its metadata.
+- `SourceFinder`: the finder of `IterativePSFPhotometry`, at a fixed
+  threshold, so that the residual images are searched with the threshold of
+  the original image.
+- Selections: `brightest(sources, n)` and `isolated(x, y, flux, min_dist)`.
+  The review's `inside` and `above_snr` were not added, since nothing needs
+  them (the astrometry's border cut is `DAOStarFinder`'s `exclude_border`).
+
+**`pipnick/image/background.py` (§4.2, image backgrounds only).**
+
+- `global_background`, `subtract_background` (moved from
+  `photometry/psf_photometry.py`), `masked_median` (the segmentation-masked
+  median of the mosaics), and `estimate_background` (the mosaic's choice of
+  `'constant'`, `'2d'` or `'none'`).
+
+**Callers.**
+
+- Astrometry: `pipelines/astrometry._detect` (`find_sources` with
+  `masked='zero'` and `exclude_border=True`, then `brightest`).
+  `astrometry/detect.py` is removed.  `read_image` still sets the masked
+  pixels to 0, for the uploaded image.
+- PSF stars: `starfind.detect_sources` is replaced by `select_psf_stars`,
+  which applies the Kron, isolation and flux cuts to the output of
+  `find_sources`; `build_moffat_psf_model` uses both.
+- Census: `psf_analysis` uses `SourceFinder`.
+- Mosaics: `mosaic/prepare.py` uses `estimate_background`.
+
+**Behaviour change (minor):** the mosaic's `--background 2d` now subtracts
+the 2D background itself, where it subtracted `data - (data - background)`;
+the background differs by at most 4e-13 e-/s.  The default (`constant`) is
+unchanged.
+
+**Tests:** new `test_detect.py`, including the astrometry.net cache key of a
+synthetic image, pinned to the value computed by main's detection.
+
+**Docs:** the release notes and the API pages; the user docs describe the
+detection by its behaviour, which is unchanged.
+
+#### Step 6, Phase B: settings dataclasses (complete, 2026-10-29, branch `detection`)
+
+Decisions made with the author:
+
+- All four dataclasses are in one module, `pipnick/pkg/settings.py`.
+- The `*_all` functions keep their keyword arguments and build the settings
+  inside, so the scripts and the tests are unchanged.
+
+Checks after the work:
+
+- `tox -r -e 3.13-test,codestyle` passes in a fresh environment: 217 tests
+  passed, 1 skipped.
+- The docs build without warnings.
+- **Real data:** on a scratch copy of n3 (fast), main built every product
+  (the photometry remeasured, the calibration and the mosaics).  This branch,
+  rerun on them, reported every reduction product, source table, calibration
+  and mosaic as up to date, and remeasuring one image recorded the same
+  settings and settings hash as main.
+
+**`pipnick/pkg/settings.py` (§5.6).**
+
+- `AstrometrySettings`, `PhotometrySettings`, `CalibrationSettings` and
+  `MosaicSettings`: frozen dataclasses whose values are normalized and
+  checked (`validate`) when they are constructed, including by
+  `dataclasses.replace`.
+- `as_dict()` and `hash()` (the `json_hash` of the fields) are shared through
+  a base class.  The field names, values and types are those of the old
+  dictionaries, so the recorded hashes are unchanged; `test_settings.py`
+  pins the default hash of each.
+- The camera's default FWHM (photometry, astrometry) is set by
+  `resolve(camera)`; the photometry's `hash()` refuses an unresolved FWHM.
+- The mosaic's `reference` and `pixel_scale` are hashed as given, as
+  before.
+
+**Callers.**
+
+- The photometry records `settings.as_dict()` and `settings.hash()` in the
+  source tables, as before.
+- The calibration's per-night `input_hash` is no longer written into the
+  settings: `calibrate_night` takes it as an argument, and
+  `_leave_one_out` uses `dataclasses.replace(settings, maxiter=0)`.  The
+  warning for a color that does not include its band stays in
+  `calibrate_all`, so that it is not repeated by `replace`.
+- `Session` (astrometry) takes an `AstrometrySettings` instead of seven
+  values, and `_load_images` the settings instead of four.
+- `mosaic_all` reads its settings from the dataclass throughout.
+- `nightfit`, `standards`, `apply` and `mosaic/prepare` use attribute
+  access.
+- `default_colors` moved from `pipelines/calibrate.py` to
+  `photometry/landolt.py`, so that the settings module does not import a
+  pipeline.
+
+**Behaviour changes (minor):** invalid settings are rejected before anything
+is read, e.g., an unknown photometry `fittype` or `stack` (formerly found in
+the PSF fit), or a non-positive threshold or radius.
+
+**Tests:** new `test_settings.py`; the leave-one-out test uses
+`CalibrationSettings`.
+
+#### Step 6, Phase C: shared step bookkeeping and up-to-date checks (complete, 2026-10-29, branch `detection`)
+
+The reassessment before starting found that Steps 4 and 5 had already
+shared most of what `PipelineStep` (§5.7) was for (`StepReport`, `Summary`,
+`qa_figure` and the QA rules), and that the five loops differ more than §5.7
+assumed (the reduction's dependent stages, the mosaics' two levels, the
+calibration's apply phase and edited files, the astrometry's global solve).
+Decisions made with the author:
+
+- **Shared helpers instead of a base class:** each pipeline keeps its own
+  loop, using helpers for the common bookkeeping.
+- **One up-to-date check per product**, used by the pipelines and by
+  `pipnick_status` and the report (the deferred half of §4.4).
+- **The calibration catches the failure of a night** and continues, like the
+  other steps.
+
+Checks after the work:
+
+- `tox -r -e 3.13-test,codestyle` passes in a fresh environment: 223 tests
+  passed, 1 skipped.
+- The docs build without warnings.
+- **Real data:** on a scratch copy of n3 (fast), main built every product;
+  main and this branch then reran every step without `--overwrite` (the
+  astrometry only as a dry run).
+  - This branch reported every product up to date and rebuilt nothing: the
+    24 reduction products, the 19 source tables, the calibration file, the
+    13 calibrated headers and the 4 mosaics.
+  - The logs of the two reruns are identical, line for line (apart from the
+    version and the paths).
+  - `pipnick_status` agrees with the pipelines: every image is `ok` in every
+    step, except the six I-band images, whose band cannot be calibrated
+    (`calibrated: missing`; see the issue found in Step 5, Phase C).
+
+**`pipnick/pkg/step.py`.**
+
+- `progress(k, n)`: the `[k/N]` label.
+- `reuse(report, name, version, label)`: the "is up to date" line and the
+  version check.
+- `Attempt`: a context manager that records an exception as a failure (or,
+  for a QA figure, a problem), with the traceback at the debug level and the
+  reason in the summary row, and lets the loop continue.  Exceptions that are
+  not `Exception` (e.g., `KeyboardInterrupt`) still stop the step.
+- `needs_qa(qa, rebuilt, figures)`: the QA rule.
+- `count_statuses(rows, statuses, keep_zero)`: the counts in the verdicts.
+
+**Up-to-date checks (§4.4).**
+
+- `DataSet.reduction_state(product, calib_hashes=None)`, with
+  `DataSet.calibration_hashes`: used by the reduction (with the hashes of the
+  calibrations it built) and by `ReducedImage.reduction_state` (renamed from
+  `reduction_status`).  `_needs_update` is removed.
+- `ReducedImage.photometry_state(phot=None, settings_hash=None)`: `ok`,
+  `coordinates` (only the solution changed), `stale` or `missing`; used by the
+  photometry (with its settings), by `ReducedImage.photometry`, and by the
+  status.
+- `datamodel.calibration.header_calibration_state(header, cfile)`: used by
+  `apply_to_headers` and the status.
+- The mosaics keep their own check (`PNMOSHSH`), which covers the settings
+  and the WCS group; the status can only check the input images, since a
+  mosaic does not record all of its settings.  This difference is now
+  documented in `report.status.mosaic_status`.
+
+**Pipelines.**
+
+- Reduction, photometry, mosaics: their failures, reuse, QA rule and
+  verdict counts use the helpers; the reduction's `_attempt` uses `Attempt`.
+- Calibration: each night is processed inside an `Attempt`; a failed night
+  is one summary row (`band` `-`, `status` and `action` `failed`, with the
+  reason), and the step fails.  "No band could be calibrated" still stops it.
+- Astrometry: its QA figures and progress labels use the helpers.
+- Every QA function uses `Attempt` for a failed figure.
+
+**Behaviour changes (minor):**
+
+- The failure messages share one format, `<what> failed: <error>.
+  Continuing with <the other items>.`  (e.g., the reduction's `Building
+  Dark_120s.fits failed: ...`, formerly `Failed to build ...`).
+- A failed WCS group is reported once (`The WCS group ... failed`), with the
+  reason in the summary row of each of its mosaics, instead of once per
+  mosaic.
+- A product without provenance keywords, rebuilt with `--overwrite`, is
+  logged as rebuilt because `overwrite is set`.
+
+**Tests:** new `test_step.py`; new cases for the reduction and photometry
+states, `header_calibration_state`, and a calibration with a failed night.
+
+**Docs:** the calibration page (failed nights), the release notes, and the
+API pages.
+
+#### Step 6, follow-up: photutils 3.1 and the astrometry.net cache keys (2026-10-29, branch `detection`)
+
+The CI environment with the minimum photutils (`3.12-test-photutilsmin`,
+photutils 3.0.0) failed the pinned astrometry.net cache key of
+`test_detect.py::test_astrometry_detection`.
+
+- **Cause:** photutils 3.1.0 changed the `flux` of `DAOStarFinder` from the
+  sum of the whole cutout around a source (3.0.0) to the sum within the
+  kernel footprint.  The detections themselves (positions, peaks, shapes)
+  are identical, but the ranking by flux differs, so the brightest
+  `max_sources` and their order differ, and so does the cache key.  The
+  astrometry before Step 6 ranked by the same flux, so its keys depended on
+  the photutils version in the same way; the pinned key exposed it.
+  photutils 3.1.0 and 3.1.1 give identical results.
+- **Fix (author's decision):** pipnick requires `photutils>=3.1`, and the
+  minimum-version CI environment uses photutils 3.1.0, so every supported
+  environment ranks the sources the same way.  Caches made with photutils
+  3.0 would miss once.
+- **Docs:** the astrometry page explains what the cache key depends on,
+  including the photutils version; the release notes, the tox note and the
+  test comment record the change.
+- **Check:** `tox -r -e 3.12-test-photutilsmin,codestyle` passes (223
+  passed, 1 skipped), and the docs build without warnings.

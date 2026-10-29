@@ -18,6 +18,7 @@ import numpy as np
 
 from astropy import units
 from astropy.coordinates import SkyCoord
+from astropy.io import fits
 from astropy.time import Time
 
 from pipnick import cameras, log
@@ -28,6 +29,7 @@ from pipnick.metadata.setups import setup_tag
 from pipnick.metadata.table import frame_path, read_metadata, update_metadata_meta
 from pipnick.pkg.exceptions import PipnickDataModelError, PipnickPathError
 from pipnick.pkg.paths import step_dir
+from pipnick.pkg.provenance import names_hash, values_hash
 
 
 @dataclass(frozen=True, eq=False)
@@ -329,6 +331,83 @@ class DataSet:
                 calibs['flat'] = flats[0]
                 break
         return calibs
+
+    def calibration_hashes(self, product):
+        """
+        Return the hashes of the calibrations used to reduce a product, as
+        recorded in its header (``PNBIASH``, ``PNFLATH``).
+
+        Parameters
+        ----------
+        product : :class:`Product`
+            The product.
+
+        Returns
+        -------
+        dict
+            The hash of the raw frames of each calibration (see
+            :meth:`calibrations` and :func:`~pipnick.pkg.provenance.names_hash`),
+            or ``'none'`` for a calibration that the data set does not have or
+            that has not been reduced.
+        """
+        return {
+            name: 'none' if calib is None or not calib.file.is_file()
+            else names_hash(self.raw_files(calib))
+            for name, calib in self.calibrations(product).items()
+        }
+
+    def reduction_state(self, product, calib_hashes=None):
+        """
+        Determine if a reduced product is up to date with its raw frames,
+        metadata table values, and calibrations.
+
+        This is the check of the reduction (see
+        :func:`~pipnick.pipelines.reduction.reduce_all`) and of the status of
+        the data set (see :mod:`pipnick.report.status`).
+
+        Parameters
+        ----------
+        product : :class:`Product`
+            The product.
+        calib_hashes : dict, optional
+            The hashes of the calibrations to compare to the header, e.g., of
+            the calibrations constructed by the reduction.  If None, the
+            calibrations the data set would use; see
+            :meth:`calibration_hashes`.
+
+        Returns
+        -------
+        state : str
+            ``'ok'``, ``'stale'`` (the product must be reduced again), or
+            ``'missing'`` (the product has not been reduced).
+        reason : str
+            The reason for a stale or missing product (``'-'`` if it is up
+            to date).
+
+        Raises
+        ------
+        :exc:`~pipnick.pkg.exceptions.PipnickDataModelError`
+            Raised if the existing file is from a different setup.
+        """
+        if not product.file.is_file():
+            return 'missing', 'not reduced'
+        hdr = fits.getheader(product.file)
+        if 'PNSETUP' not in hdr:
+            return 'stale', 'the existing file has no provenance keywords'
+        if hdr['PNSETUP'] != self.tag:
+            raise PipnickDataModelError(
+                f'{product.file} is from setup {hdr["PNSETUP"]}, not {self.tag}.  A reduction '
+                'directory can only hold the products from one setup.'
+            )
+        if hdr.get('PNRAWHSH') != names_hash(self.raw_files(product)):
+            return 'stale', 'the raw frames changed'
+        if hdr.get('PNTABH') != values_hash(self.table_values(product)):
+            return 'stale', 'the metadata table values changed'
+        _calib_hashes = self.calibration_hashes(product) if calib_hashes is None else calib_hashes
+        for name, value in _calib_hashes.items():
+            if hdr.get(f'PN{name.upper()}H') != value:
+                return 'stale', f'the {name} changed'
+        return 'ok', '-'
 
     def raw_files(self, product):
         """

@@ -82,8 +82,11 @@ Dependency Changes
 
 - Supports python 3.12, 3.13, and 3.14.
 
-- Requires ``photutils>=3.0``, for ``photutils.psf.MoffatPSF`` and the
-  photutils 3.x PSF-photometry interface.
+- Requires ``photutils>=3.1``, for ``photutils.psf.MoffatPSF``, the
+  photutils 3.x PSF-photometry interface, and the definition of the
+  ``DAOStarFinder`` flux used to rank the sources submitted to astrometry.net
+  (the sum within the kernel footprint, since photutils 3.1), on which the
+  keys of the cached astrometry.net results depend.
 
 - Requires ``numpy>=2.0`` and ``astropy>=7.0``.
 
@@ -394,6 +397,36 @@ Under-the-hood Improvements
 
 - Added ``pipnick.pkg.summary.Summary``, which writes and logs the summary
   table of every step, with missing values masked.
+
+- Every step detects sources with ``pipnick.image.detect.find_sources``
+  (with ``SourceFinder`` for the PSF photometry, and the ``brightest`` and
+  ``isolated`` selections), with its own settings; the detections are
+  unchanged.  ``pipnick.astrometry.detect`` is removed, and
+  ``pipnick.photometry.starfind.detect_sources`` is replaced by
+  ``select_psf_stars``.
+
+- The steps share the bookkeeping of their loops (``pipnick.pkg.step``):
+  progress labels, the reuse of up-to-date products, failures recorded
+  without stopping the step, the QA rule, and the counts in the verdict.  The
+  reduction, photometry, and header calibration decide whether a product is
+  up to date with the same checks as ``pipnick_status``
+  (``DataSet.reduction_state``, ``ReducedImage.photometry_state``, and
+  ``header_calibration_state``); ``ReducedImage.reduction_status`` is renamed
+  ``reduction_state``.
+
+- A night whose calibration fails is recorded as failed in the summary and
+  the verdict, and the other nights are still calibrated.
+
+- The settings of the astrometry, photometry, calibration, and mosaics are
+  frozen dataclasses (``pipnick.pkg.settings``), checked when they are
+  constructed, so invalid settings are rejected before anything is
+  processed.  Their hashes, recorded with the products, are unchanged.
+  ``default_colors`` moved from ``pipnick.pipelines.calibrate`` to
+  ``pipnick.photometry.landolt``.
+
+- Added ``pipnick.image.background``, with the global, 2D, and source-masked
+  backgrounds of an image (``subtract_background`` moved from
+  ``pipnick.photometry.psf_photometry``).
 
 - Added ``pipnick.report``, with the status of a data set (moved from
   ``pipnick.pipelines.status``, which now only logs it), the provenance of

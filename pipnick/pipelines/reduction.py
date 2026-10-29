@@ -24,6 +24,7 @@ from pipnick.pkg.exceptions import PipnickDataModelError
 from pipnick.pkg.paths import qa_figure
 from pipnick.pkg.provenance import names_hash, values_hash
 from pipnick.pkg.report import StepReport
+from pipnick.pkg.step import Attempt, count_statuses, needs_qa, progress, reuse
 from pipnick.pkg.summary import Summary
 from pipnick.pkg.version import version
 from pipnick.qa.reduction import plot_product
@@ -167,14 +168,14 @@ def reduce_all(table, rdxdir=None, overwrite=False, qa=True, report=None):
         + [p for p in products if p.frametype in ['dark', 'domeflat', 'skyflat']]
         + dataset.products('science')
     )
-    progress = {product.name: f'[{k + 1}/{len(order)}]' for k, product in enumerate(order)}
+    labels = {product.name: progress(k, len(order)) for k, product in enumerate(order)}
 
     # Combine the biases
     bias = None
     for product in dataset.products('bias'):
         bias = _attempt(
             rows, _report, product, _reduce_calibration, product, dataset, overwrite, _report,
-            progress[product.name]
+            labels[product.name]
         )
     if bias is None:
         _report.attention(
@@ -189,7 +190,7 @@ def reduce_all(table, rdxdir=None, overwrite=False, qa=True, report=None):
             continue
         calib = _attempt(
             rows, _report, product, _reduce_calibration, product, dataset, overwrite, _report,
-            progress[product.name], bias=bias
+            labels[product.name], bias=bias
         )
         if calib is not None and product.frametype != 'dark':
             flats[(product.frametype, product.filter)] = calib
@@ -203,7 +204,7 @@ def reduce_all(table, rdxdir=None, overwrite=False, qa=True, report=None):
             unflattened.setdefault(product.filter, []).append(product.name)
         _attempt(
             rows, _report, product, _reduce_science, product, dataset, overwrite, _report,
-            progress[product.name], bias=bias, flat=flat
+            labels[product.name], bias=bias, flat=flat
         )
         science.append(product.file)
     for filt, names in unflattened.items():
@@ -230,12 +231,9 @@ def reduce_all(table, rdxdir=None, overwrite=False, qa=True, report=None):
     _summarize(rows, dataset.outdir('reduce'))
     if qa:
         _write_qa(rows, products, dataset.outdir('reduce'), _report)
-    nup = sum(row['status'] == 'up to date' for row in rows)
-    nbuilt = sum(row['status'] == 'built' for row in rows)
-    nfail = sum(row['status'] == 'failed' for row in rows)
+    counts = count_statuses(rows, ['up to date', 'built', 'failed'], keep_zero=True)
     _report.finish(
-        f'{len(rows)} products ({nup} up to date, {nbuilt} built, {nfail} failed); summary in '
-        'reduce/summary.ecsv.',
+        f'{len(rows)} products ({counts}); summary in reduce/summary.ecsv.',
         next_step=f'pipnick_astrometry -t {dataset.metafile}'
     )
     return science
@@ -312,63 +310,40 @@ def _find_products(rdxdir):
     return products
 
 
-def _needs_update(ofile, tag, raw_hash, table_hash, calib_hashes, overwrite):
+def _rebuild_reason(dataset, product, calibs, overwrite):
     """
-    Determine if an output file must be (re)constructed.
+    Return the reason to (re)construct a product, or None if it is up to
+    date; see :meth:`~pipnick.datamodel.dataset.DataSet.reduction_state`.
 
     Parameters
     ----------
-    ofile : :class:`pathlib.Path`
-        The output file.
-    tag : str
-        The setup tag; see :func:`~pipnick.metadata.setups.setup_tag`.
-    raw_hash : str
-        The hash of the raw frames used to construct the output; see
-        :func:`~pipnick.pkg.provenance.names_hash`.
-    table_hash : str
-        The hash of the metadata table values written to the output header;
-        see :func:`~pipnick.pkg.provenance.values_hash`.  Compared to the
-        ``PNTABH`` header keyword.
-    calib_hashes : dict
-        The hash of each calibration used to construct the output, keyed by
-        the calibration type (e.g., ``'bias'``), or ``'none'`` if the
-        calibration is not available.  Each is compared to the ``PN<TYPE>H``
-        header keyword, e.g., ``PNBIASH``.
+    dataset : :class:`~pipnick.datamodel.dataset.DataSet`
+        The data set.
+    product : :class:`~pipnick.datamodel.dataset.Product`
+        The product.
+    calibs : dict
+        The calibrations used to construct the product, keyed by their type
+        (e.g., ``'bias'``), or None if a calibration is not available; see
+        :func:`_reduce_calibration`.
     overwrite : bool
-        Reconstruct the output even if it is up to date.
+        Reconstruct the product even if it is up to date.
 
     Returns
     -------
-    update : bool
-        True if the output must be (re)constructed.
-    reason : str
-        The reason.
+    str
+        The reason, or None.
 
     Raises
     ------
     :exc:`~pipnick.pkg.exceptions.PipnickDataModelError`
         Raised if the existing file is from a different setup.
     """
-    if not ofile.is_file():
-        return True, 'new output'
-    hdr = fits.getheader(ofile)
-    if 'PNSETUP' not in hdr:
-        return True, 'the existing file has no provenance keywords'
-    if hdr['PNSETUP'] != tag:
-        raise PipnickDataModelError(
-            f'{ofile} is from setup {hdr["PNSETUP"]}, not {tag}.  A reduction directory can '
-            'only hold the products from one setup.'
-        )
+    state, reason = dataset.reduction_state(product, calib_hashes=_calib_hashes(calibs))
+    if state == 'missing':
+        return 'new output'
     if overwrite:
-        return True, 'overwrite is set'
-    if hdr.get('PNRAWHSH') != raw_hash:
-        return True, 'the raw frames changed'
-    if hdr.get('PNTABH') != table_hash:
-        return True, 'the metadata table values changed'
-    for name, value in calib_hashes.items():
-        if hdr.get(f'PN{name.upper()}H') != value:
-            return True, f'the {name} changed'
-    return False, 'up to date'
+        return 'overwrite is set'
+    return None if state == 'ok' else reason
 
 
 def _calib_hashes(calibs):
@@ -538,16 +513,10 @@ def _attempt(rows, report, product, func, *args, **kwargs):
         The calibration returned by :func:`_reduce_calibration` (None for a
         science product, or if the reduction failed).
     """
-    try:
+    failed = _product_row(product, 'failed', '-')
+    calib, row = None, failed
+    with Attempt(report, f'Building {product.name}', row=failed, then='the other products'):
         calib, row = func(*args, **kwargs)
-    except Exception as e:
-        log.debug(f'Traceback of the failure of {product.name}:', exc_info=True)
-        report.fail(
-            f'Failed to build {product.name}: {type(e).__name__}: {e}.  Continuing with the '
-            'other products.'
-        )
-        row = _product_row(product, 'failed', f'{type(e).__name__}: {e}')
-        calib = None
     rows.append(row)
     return calib
 
@@ -634,7 +603,7 @@ def _write_qa(rows, products, outdir, report):
     for row in rows:
         product = by_name[row['file']]
         ofile = qa_figure(outdir, product.file.stem)
-        if row['status'] == 'failed' or (row['status'] == 'up to date' and ofile.is_file()):
+        if row['status'] == 'failed' or not needs_qa(True, row['status'] == 'built', [ofile]):
             continue
         frames = 'frame' if row['nframes'] == 1 else 'frames'
         title = f'{product.name}: {row["frametype"]}, {row["nframes"]} {frames}'
@@ -648,16 +617,12 @@ def _write_qa(rows, products, outdir, report):
             title += f'; sky {row["sky"]:.0f} e-'
         if row['cr_frac'] is not None:
             title += f', {100 * row["cr_frac"]:.2f}% cosmic rays'
-        try:
+        attempt = Attempt(report, f'The QA figure of {product.name}', problem=True)
+        with attempt:
             data, mask, _, hdr = read_reduced(product.file)
             plot_product(data, mask, ofile, title=title, unit=hdr.get('BUNIT'))
-        except Exception as e:
-            log.debug(f'Traceback of the failure of the QA of {product.name}:', exc_info=True)
-            report.attention(
-                f'The QA figure of {product.name} failed: {type(e).__name__}: {e}'
-            )
-            continue
-        nwritten += 1
+        if not attempt.failed:
+            nwritten += 1
     if nwritten > 0:
         log.info(f'Wrote {nwritten} QA figures to reduce/qa.')
 
@@ -696,7 +661,7 @@ def _summarize(rows, outdir):
     summary.write(outdir)
 
 
-def _reduce_calibration(product, dataset, overwrite, report, progress, bias=None):
+def _reduce_calibration(product, dataset, overwrite, report, label, bias=None):
     """
     Construct a combined calibration frame, unless it is up to date.
 
@@ -717,8 +682,8 @@ def _reduce_calibration(product, dataset, overwrite, report, progress, bias=None
         Reconstruct the calibration even if it is up to date.
     report : :class:`~pipnick.pkg.report.StepReport`
         Records the version of an existing calibration that is up to date.
-    progress : str
-        The progress of the reduction, e.g., ``'[3/17]'``.
+    label : str
+        The progress label of the product, e.g., ``'[3/17]'``.
     bias : dict, optional
         The bias, as returned by this function, used for darks and flats.
 
@@ -740,16 +705,13 @@ def _reduce_calibration(product, dataset, overwrite, report, progress, bias=None
     calibs = {} if frametype == 'bias' else {'bias': bias}
     values = dataset.table_values(product)
     table_hash = values_hash(values)
-    update, reason = _needs_update(
-        product.file, tag, raw_hash, table_hash, _calib_hashes(calibs), overwrite
-    )
-    if not update:
-        log.info(f'{progress} {product.name} is up to date.')
+    reason = _rebuild_reason(dataset, product, calibs, overwrite)
+    if reason is None:
         hdr = fits.getheader(product.file)
-        report.check_version(product.name, hdr.get('PNVERS'))
+        reuse(report, product.name, hdr.get('PNVERS'), label=label)
         return calib, _product_row(product, 'up to date', '-', header=hdr)
 
-    log.info(f'{progress} Building {product.name} ({reason}) from {len(files)} frames.')
+    log.info(f'{label} Building {product.name} ({reason}) from {len(files)} frames.')
     frames = process_frames(
         files, bias=_calibration_data(calibs.get('bias')), flag_cosmics=False,
         photon_noise=frametype != 'bias'
@@ -790,7 +752,7 @@ def _reduce_calibration(product, dataset, overwrite, report, progress, bias=None
     return calib, _product_row(product, 'built', reason, header=ccd.meta)
 
 
-def _reduce_science(product, dataset, overwrite, report, progress, bias=None, flat=None):
+def _reduce_science(product, dataset, overwrite, report, label, bias=None, flat=None):
     """
     Process and combine a group of science frames, unless the output is up to
     date.
@@ -815,8 +777,8 @@ def _reduce_science(product, dataset, overwrite, report, progress, bias=None, fl
     report : :class:`~pipnick.pkg.report.StepReport`
         Records the version of an existing image that is up to date, and
         frames combined with different pointings.
-    progress : str
-        The progress of the reduction, e.g., ``'[3/17]'``.
+    label : str
+        The progress label of the product, e.g., ``'[3/17]'``.
     bias : dict, optional
         The bias; see :func:`_reduce_calibration`.
     flat : dict, optional
@@ -835,16 +797,13 @@ def _reduce_science(product, dataset, overwrite, report, progress, bias=None, fl
     calibs = {'bias': bias, 'flat': flat}
     values = dataset.table_values(product)
     table_hash = values_hash(values)
-    update, reason = _needs_update(
-        product.file, tag, raw_hash, table_hash, _calib_hashes(calibs), overwrite
-    )
-    if not update:
-        log.info(f'{progress} {product.name} is up to date.')
+    reason = _rebuild_reason(dataset, product, calibs, overwrite)
+    if reason is None:
         hdr = fits.getheader(product.file)
-        report.check_version(product.name, hdr.get('PNVERS'))
+        reuse(report, product.name, hdr.get('PNVERS'), label=label)
         return None, _product_row(product, 'up to date', '-', header=hdr)
 
-    log.info(f'{progress} Building {product.name} ({reason}) from {len(files)} frames.')
+    log.info(f'{label} Building {product.name} ({reason}) from {len(files)} frames.')
     if _check_pointing(dataset, product):
         report.attention(
             f'The frames of {product.name} have different pointings, but are combined without '
