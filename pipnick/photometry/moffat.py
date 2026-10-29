@@ -14,7 +14,6 @@ from scipy import optimize
 
 from astropy.modeling.functional_models import Moffat2D, Fittable2DModel
 from astropy.modeling.parameters import Parameter
-from astropy.units import UnitsError
 from astropy.stats import sigma_clipped_stats
 
 
@@ -94,15 +93,14 @@ class FitMoffat2D:
         self.nfree = self.npar
         self.free = np.ones(self.npar, dtype=bool)
 
-    def guess_par(self, image_moments=True, alpha=3.5):
+    def guess_par(self, alpha=3.5):
         """
         Guess initial parameters for the Moffat fit based on data.
 
+        The center and amplitude are set using the image moments.
+
         Parameters
         ----------
-        image_moments : bool, optional
-            Use the image moments to set the center and amplitude.  If False,
-            these are set using the center of the image.
         alpha : float, optional
             Moffat fall-off slope.
 
@@ -116,18 +114,20 @@ class FitMoffat2D:
         # Clip high values to guess the background
         par[5] = sigma_clipped_stats(self.c, sigma_lower=3., sigma_upper=1.)[1]
         c_bkg = self.c - par[5]
-        if image_moments:
-            # Use moments to calculate the center, peak value, and width
-            par[0] = np.ma.sum(self.x * c_bkg)/np.ma.sum(c_bkg)
-            par[1] = np.ma.sum(self.y * c_bkg)/np.ma.sum(c_bkg)
-            # Set the amplitude to be the value at the image center (the
-            # image is indexed by row, y, then column, x)
-            par[2] = c_bkg[int(np.round(par[1])), int(np.round(par[0]))]
-        else:
-            # Set the parameters based on the image center
-            par[0] = self.x[self.shape[0]//2, self.shape[1]//2]
-            par[1] = self.y[self.shape[0]//2, self.shape[1]//2]
-            par[2] = self.c[self.shape[0]//2, self.shape[1]//2]
+        # Use moments to calculate the center, peak value, and width
+        par[0] = np.ma.sum(self.x * c_bkg)/np.ma.sum(c_bkg)
+        par[1] = np.ma.sum(self.y * c_bkg)/np.ma.sum(c_bkg)
+        # Set the amplitude to be the value at the image center (the image is
+        # indexed by row, y, then column, x)
+        par[2] = c_bkg[int(np.round(par[1])), int(np.round(par[0]))]
+# NOTE: The following code is viable, but it is not currently used by the
+# pipnick pipelines.
+# It sets the center and amplitude using the center of the image instead of the
+# image moments (formerly selected by image_moments=False).
+#        # Set the parameters based on the image center
+#        par[0] = self.x[self.shape[0]//2, self.shape[1]//2]
+#        par[1] = self.y[self.shape[0]//2, self.shape[1]//2]
+#        par[2] = self.c[self.shape[0]//2, self.shape[1]//2]
         # Always set alpha explicitly
         par[4] = alpha
         # Set the width based on the first moment of the radius
@@ -205,18 +205,20 @@ class FitMoffat2D:
         """
         return self.c.ravel() - self.model(par).ravel()
 
-    def deriv_resid(self, par):
-        """
-        Calculate the derivative of the residuals with respect to the parameters.
-        """
-        self._set_par(par)
-        dmoff = self.moff.fit_deriv(
-            self.x.ravel(), self.y.ravel(), self.par[2], self.par[0], self.par[1], self.par[3],
-            self.par[4]
-        )
-        return np.array(
-            [-d for d in dmoff] + [np.full(np.prod(self.shape), -1., dtype=float)]
-        ).T
+# NOTE: The following code is viable, but it is not currently used by the
+# pipnick pipelines.
+#    def deriv_resid(self, par):
+#        """
+#        Calculate the derivative of the residuals with respect to the parameters.
+#        """
+#        self._set_par(par)
+#        dmoff = self.moff.fit_deriv(
+#            self.x.ravel(), self.y.ravel(), self.par[2], self.par[0], self.par[1], self.par[3],
+#            self.par[4]
+#        )
+#        return np.array(
+#            [-d for d in dmoff] + [np.full(np.prod(self.shape), -1., dtype=float)]
+#        ).T
 
     def fit(self, p0=None, fix=None, lb=None, ub=None):
         """
@@ -315,15 +317,14 @@ class FitEllipticalMoffat2D:
 #        par[7] = 0.
 #        return par
 
-    def guess_par(self, image_moments=True, alpha=3.5):
+    def guess_par(self, alpha=3.5):
         """
         Guess initial parameters for the Moffat fit based on data.
 
+        The center and amplitude are set using the image moments.
+
         Parameters
         ----------
-        image_moments : bool, optional
-            Use the image moments to set the center and amplitude.  If False,
-            these are set using the center of the image.
         alpha : float, optional
             Moffat fall-off slope.
 
@@ -337,18 +338,20 @@ class FitEllipticalMoffat2D:
         # Clip high values to guess the background
         par[7] = sigma_clipped_stats(self.c, sigma_lower=3., sigma_upper=1.)[1]
         c_bkg = self.c - par[7]
-        if image_moments:
-            # Use moments to calculate the center, peak value, and width
-            par[0] = np.ma.sum(self.x * c_bkg)/np.ma.sum(c_bkg)
-            par[1] = np.ma.sum(self.y * c_bkg)/np.ma.sum(c_bkg)
-            # Set the amplitude to be the value at the image center (the
-            # image is indexed by row, y, then column, x)
-            par[2] = c_bkg[int(np.round(par[1])), int(np.round(par[0]))]
-        else:
-            # Set the parameters based on the image center
-            par[0] = self.x[self.shape[0]//2, self.shape[1]//2]
-            par[1] = self.y[self.shape[0]//2, self.shape[1]//2]
-            par[2] = self.c[self.shape[0]//2, self.shape[1]//2]
+        # Use moments to calculate the center, peak value, and width
+        par[0] = np.ma.sum(self.x * c_bkg)/np.ma.sum(c_bkg)
+        par[1] = np.ma.sum(self.y * c_bkg)/np.ma.sum(c_bkg)
+        # Set the amplitude to be the value at the image center (the image is
+        # indexed by row, y, then column, x)
+        par[2] = c_bkg[int(np.round(par[1])), int(np.round(par[0]))]
+# NOTE: The following code is viable, but it is not currently used by the
+# pipnick pipelines.
+# It sets the center and amplitude using the center of the image instead of the
+# image moments (formerly selected by image_moments=False).
+#        # Set the parameters based on the image center
+#        par[0] = self.x[self.shape[0]//2, self.shape[1]//2]
+#        par[1] = self.y[self.shape[0]//2, self.shape[1]//2]
+#        par[2] = self.c[self.shape[0]//2, self.shape[1]//2]
         # Always set alpha explicitly
         par[6] = alpha
         # Set the width based on the first moment of the radius
@@ -435,67 +438,69 @@ class FitEllipticalMoffat2D:
         D = 1 + A*dx**2 + B*dy**2 + C*dx*dy
         return par[2] / D**par[6]
 
-    @staticmethod
-    def _eval_moffat_deriv(par, x, y):
-        """
-        Calculate the derivatives of the Moffat function with respect to a
-        set of given parameters at a set of x, y coordinates.
-
-        Parameters
-        ----------
-        par : :class:`numpy.ndarray`
-            Model parameters: (x0, y0, amplitude, gamma1, gamma2, phi, alpha,
-            background).
-        x : array-like
-            x-coordinate values.
-        y : array-like
-            y-coordinate values.
-
-        Returns
-        -------
-        list
-            Derivatives of the Moffat function with respect to each parameter.
-        """
-        cosr = np.cos(par[5])
-        sinr = np.sin(par[5])
-
-        a1 = (cosr/par[3])**2
-        a2 = (sinr/par[4])**2
-        A = a1 + a2
-        dA_dg1 = -2*a1/par[3]
-        dA_dg2 = -2*a2/par[4]
-
-        b1 = (sinr/par[3])**2
-        b2 = (cosr/par[4])**2
-        B = b1 + b2
-        dB_dg1 = -2*b1/par[3]
-        dB_dg2 = -2*b2/par[4]
-
-        C = 2 * sinr * cosr * (par[3]**-2 - par[4]**-2)
-        dC_dg1 = -4 * sinr * cosr / par[3]**3
-        dC_dg2 = 4 * sinr * cosr / par[4]**3
-
-        dA_dphi = -C
-        dB_dphi = C
-        dC_dphi = C * (cosr / sinr - sinr / cosr)  # = 2 * C / tan(2 * phi)
-
-        dx = (x.ravel() - par[0])
-        dy = (y.ravel() - par[1])
-
-        D = 1 + A*dx**2 + B*dy**2 + C*dx*dy
-        dD_dx0 = -2*A*dx - C
-        dD_dy0 = -2*B*dy - C
-        dD_dg1 = dA_dg1*dx**2 + dB_dg1*dy**2 + dC_dg1*dx*dy
-        dD_dg2 = dA_dg2*dx**2 + dB_dg2*dy**2 + dC_dg2*dx*dy
-        dD_dphi = dA_dphi*dx**2 + dB_dphi*dy**2 + dC_dphi*dx*dy
-
-        I = par[2] / D**par[6]
-        f = -par[6] / D
-
-        return [
-            f * I * dD_dx0, f * I * dD_dy0, I/par[2], f * I * dD_dg1, f * I * dD_dg2,
-            f * I * dD_dphi, -I * np.log(D)
-        ]
+# NOTE: The following code is viable, but it is not currently used by the
+# pipnick pipelines.
+#    @staticmethod
+#    def _eval_moffat_deriv(par, x, y):
+#        """
+#        Calculate the derivatives of the Moffat function with respect to a
+#        set of given parameters at a set of x, y coordinates.
+#
+#        Parameters
+#        ----------
+#        par : :class:`numpy.ndarray`
+#            Model parameters: (x0, y0, amplitude, gamma1, gamma2, phi, alpha,
+#            background).
+#        x : array-like
+#            x-coordinate values.
+#        y : array-like
+#            y-coordinate values.
+#
+#        Returns
+#        -------
+#        list
+#            Derivatives of the Moffat function with respect to each parameter.
+#        """
+#        cosr = np.cos(par[5])
+#        sinr = np.sin(par[5])
+#
+#        a1 = (cosr/par[3])**2
+#        a2 = (sinr/par[4])**2
+#        A = a1 + a2
+#        dA_dg1 = -2*a1/par[3]
+#        dA_dg2 = -2*a2/par[4]
+#
+#        b1 = (sinr/par[3])**2
+#        b2 = (cosr/par[4])**2
+#        B = b1 + b2
+#        dB_dg1 = -2*b1/par[3]
+#        dB_dg2 = -2*b2/par[4]
+#
+#        C = 2 * sinr * cosr * (par[3]**-2 - par[4]**-2)
+#        dC_dg1 = -4 * sinr * cosr / par[3]**3
+#        dC_dg2 = 4 * sinr * cosr / par[4]**3
+#
+#        dA_dphi = -C
+#        dB_dphi = C
+#        dC_dphi = C * (cosr / sinr - sinr / cosr)  # = 2 * C / tan(2 * phi)
+#
+#        dx = (x.ravel() - par[0])
+#        dy = (y.ravel() - par[1])
+#
+#        D = 1 + A*dx**2 + B*dy**2 + C*dx*dy
+#        dD_dx0 = -2*A*dx - C
+#        dD_dy0 = -2*B*dy - C
+#        dD_dg1 = dA_dg1*dx**2 + dB_dg1*dy**2 + dC_dg1*dx*dy
+#        dD_dg2 = dA_dg2*dx**2 + dB_dg2*dy**2 + dC_dg2*dx*dy
+#        dD_dphi = dA_dphi*dx**2 + dB_dphi*dy**2 + dC_dphi*dx*dy
+#
+#        I = par[2] / D**par[6]
+#        f = -par[6] / D
+#
+#        return [
+#            f * I * dD_dx0, f * I * dD_dy0, I/par[2], f * I * dD_dg1, f * I * dD_dg2,
+#            f * I * dD_dphi, -I * np.log(D)
+#        ]
 
     def model(self, par=None, x=None, y=None):
         """
@@ -530,15 +535,17 @@ class FitEllipticalMoffat2D:
         """
         return self.c.ravel() - self.model(par).ravel()
 
-    def deriv_resid(self, par):
-        """
-        Calculate the derivatives of the residuals with respect to the Moffat fit parameters.
-        """
-        self._set_par(par)
-        dmoff = self._eval_moffat_deriv(self.par, self.x, self.y)
-        return np.array(
-            [-d for d in dmoff] + [np.full(np.prod(self.shape), -1., dtype=float)]
-        ).T
+# NOTE: The following code is viable, but it is not currently used by the
+# pipnick pipelines.
+#    def deriv_resid(self, par):
+#        """
+#        Calculate the derivatives of the residuals with respect to the Moffat fit parameters.
+#        """
+#        self._set_par(par)
+#        dmoff = self._eval_moffat_deriv(self.par, self.x, self.y)
+#        return np.array(
+#            [-d for d in dmoff] + [np.full(np.prod(self.shape), -1., dtype=float)]
+#        ).T
 
     def fit(self, p0=None, fix=None, lb=None, ub=None):
         """
@@ -592,30 +599,32 @@ class FitEllipticalMoffat2D:
             new_par[5] = 0
         self._set_par(new_par)
 
-    @staticmethod
-    def get_nice_phi(par):
-        """
-        Convert phi to angle between semi-major axis and +x-axis in degrees.
-
-        Parameters
-        ----------
-        par : array-like
-            Fit parameters: (x0, y0, amplitude, gamma1, gamma2, phi, alpha,
-            background).
-
-        Returns
-        -------
-        float
-            Nice phi in degrees.
-        """
-        nice_phi = np.rad2deg(par[5]) + 0.000000000001
-        if par[3] < par[4]:
-            if nice_phi > 0.001:
-                return nice_phi - 90
-            else:
-                return nice_phi + 90
-        else:
-            return nice_phi
+# NOTE: The following code is viable, but it is not currently used by the
+# pipnick pipelines.
+#    @staticmethod
+#    def get_nice_phi(par):
+#        """
+#        Convert phi to angle between semi-major axis and +x-axis in degrees.
+#
+#        Parameters
+#        ----------
+#        par : array-like
+#            Fit parameters: (x0, y0, amplitude, gamma1, gamma2, phi, alpha,
+#            background).
+#
+#        Returns
+#        -------
+#        float
+#            Nice phi in degrees.
+#        """
+#        nice_phi = np.rad2deg(par[5]) + 0.000000000001
+#        if par[3] < par[4]:
+#            if nice_phi > 0.001:
+#                return nice_phi - 90
+#            else:
+#                return nice_phi + 90
+#        else:
+#            return nice_phi
 
 
 def make_ellipse(a, b, phi, n=500):
@@ -751,68 +760,73 @@ class EllipticalMoffat2DModel(Fittable2DModel):
         D = 1 + A*dx**2 + B*dy**2 + C*dx*dy
         return amplitude / D**alpha
 
-    @staticmethod
-    def fit_deriv(x, y, amplitude, x_0, y_0, gamma1, gamma2, phi, alpha):
-        """Two dimensional Moffat model derivative with respect to parameters."""
-        cosr = np.cos(phi)
-        sinr = np.sin(phi)
+# NOTE: The following code is viable, but it is not currently used by the
+# pipnick pipelines.
+#    @staticmethod
+#    def fit_deriv(x, y, amplitude, x_0, y_0, gamma1, gamma2, phi, alpha):
+#        """Two dimensional Moffat model derivative with respect to parameters."""
+#        cosr = np.cos(phi)
+#        sinr = np.sin(phi)
+#
+#        a1 = (cosr/gamma1)**2
+#        a2 = (sinr/gamma2)**2
+#        A = a1 + a2
+#        dA_dg1 = -2*a1/gamma1
+#        dA_dg2 = -2*a2/gamma2
+#
+#        b1 = (sinr/gamma1)**2
+#        b2 = (cosr/gamma2)**2
+#        B = b1 + b2
+#        dB_dg1 = -2*b1/gamma1
+#        dB_dg2 = -2*b2/gamma2
+#
+#        C = 2 * sinr * cosr * (gamma1**-2 - gamma2**-2)
+#        dC_dg1 = -4 * sinr * cosr / gamma1**3
+#        dC_dg2 = 4 * sinr * cosr / gamma2**3
+#
+#        dA_dphi = -C
+#        dB_dphi = C
+#        dC_dphi = C * (cosr / sinr - sinr / cosr)  # = 2 * C / tan(2 * phi)
+#
+#        dx = (x.ravel() - x_0)
+#        dy = (y.ravel() - y_0)
+#
+#        D = 1 + A*dx**2 + B*dy**2 + C*dx*dy
+#        dD_dx0 = -2*A*dx - C
+#        dD_dy0 = -2*B*dy - C
+#        dD_dg1 = dA_dg1*dx**2 + dB_dg1*dy**2 + dC_dg1*dx*dy
+#        dD_dg2 = dA_dg2*dx**2 + dB_dg2*dy**2 + dC_dg2*dx*dy
+#        dD_dphi = dA_dphi*dx**2 + dB_dphi*dy**2 + dC_dphi*dx*dy
+#
+#        I = amplitude / D**alpha
+#        f = -alpha / D
+#
+#        return [
+#            f * I * dD_dx0, f * I * dD_dy0, I/amplitude, f * I * dD_dg1, f * I * dD_dg2,
+#            f * I * dD_dphi, -I * np.log(D)
+#        ]
 
-        a1 = (cosr/gamma1)**2
-        a2 = (sinr/gamma2)**2
-        A = a1 + a2
-        dA_dg1 = -2*a1/gamma1
-        dA_dg2 = -2*a2/gamma2
-
-        b1 = (sinr/gamma1)**2
-        b2 = (cosr/gamma2)**2
-        B = b1 + b2
-        dB_dg1 = -2*b1/gamma1
-        dB_dg2 = -2*b2/gamma2
-
-        C = 2 * sinr * cosr * (gamma1**-2 - gamma2**-2)
-        dC_dg1 = -4 * sinr * cosr / gamma1**3
-        dC_dg2 = 4 * sinr * cosr / gamma2**3
-
-        dA_dphi = -C
-        dB_dphi = C
-        dC_dphi = C * (cosr / sinr - sinr / cosr)  # = 2 * C / tan(2 * phi)
-
-        dx = (x.ravel() - x_0)
-        dy = (y.ravel() - y_0)
-
-        D = 1 + A*dx**2 + B*dy**2 + C*dx*dy
-        dD_dx0 = -2*A*dx - C
-        dD_dy0 = -2*B*dy - C
-        dD_dg1 = dA_dg1*dx**2 + dB_dg1*dy**2 + dC_dg1*dx*dy
-        dD_dg2 = dA_dg2*dx**2 + dB_dg2*dy**2 + dC_dg2*dx*dy
-        dD_dphi = dA_dphi*dx**2 + dB_dphi*dy**2 + dC_dphi*dx*dy
-
-        I = amplitude / D**alpha
-        f = -alpha / D
-
-        return [
-            f * I * dD_dx0, f * I * dD_dy0, I/amplitude, f * I * dD_dg1, f * I * dD_dg2,
-            f * I * dD_dphi, -I * np.log(D)
-        ]
-
-    @property
-    def input_units(self):
-        if self.x_0.input_unit is None:
-            return None
-        else:
-            return {self.inputs[0]: self.x_0.input_unit, self.inputs[1]: self.y_0.input_unit}
-
-    def _parameter_units_for_data_units(self, inputs_unit, outputs_unit):
-        # Note that here we need to make sure that x and y are in the same
-        # units otherwise this can lead to issues since rotation is not well
-        # defined.
-        if inputs_unit[self.inputs[0]] != inputs_unit[self.inputs[1]]:
-            raise UnitsError("Units of 'x' and 'y' inputs should match")
-        return {
-            "x_0": inputs_unit[self.inputs[0]], "y_0": inputs_unit[self.inputs[0]],
-            "gamma1": inputs_unit[self.inputs[0]], "gamma2": inputs_unit[self.inputs[0]],
-            "amplitude": outputs_unit[self.outputs[0]]
-        }
+# NOTE: The following code is viable, but it is not currently used by the
+# pipnick pipelines.
+# It requires: from astropy.units import UnitsError
+#    @property
+#    def input_units(self):
+#        if self.x_0.input_unit is None:
+#            return None
+#        else:
+#            return {self.inputs[0]: self.x_0.input_unit, self.inputs[1]: self.y_0.input_unit}
+#
+#    def _parameter_units_for_data_units(self, inputs_unit, outputs_unit):
+#        # Note that here we need to make sure that x and y are in the same
+#        # units otherwise this can lead to issues since rotation is not well
+#        # defined.
+#        if inputs_unit[self.inputs[0]] != inputs_unit[self.inputs[1]]:
+#            raise UnitsError("Units of 'x' and 'y' inputs should match")
+#        return {
+#            "x_0": inputs_unit[self.inputs[0]], "y_0": inputs_unit[self.inputs[0]],
+#            "gamma1": inputs_unit[self.inputs[0]], "gamma2": inputs_unit[self.inputs[0]],
+#            "amplitude": outputs_unit[self.outputs[0]]
+#        }
 
 
 class EllipticalMoffatPSF(Fittable2DModel):

@@ -77,6 +77,20 @@ Breaking Changes
   ``FitEllipticalMoffat2D.get_orig_phi``, ``pipnick.pkg.logger.clear_text_color``,
   and ``PipnickCodingError``.
 
+- Removed the unused ``pipnick.photometry.starfind.plot_stamps``, the
+  ``pdf_file`` option of ``pipnick.photometry.psf_photometry.build_moffat_psf_model``
+  that called it, and the file and ``CCDData`` inputs of
+  ``starfind.as_masked_array``, which now takes an array, masked or not.  The
+  unused code in ``pipnick.photometry.moffat`` is commented out, and marked as
+  viable but not used by the pipelines: the derivatives (both ``deriv_resid``
+  methods, ``FitEllipticalMoffat2D._eval_moffat_deriv``, and
+  ``EllipticalMoffat2DModel.fit_deriv``),
+  ``FitEllipticalMoffat2D.get_nice_phi``, the unit hooks of
+  ``EllipticalMoffat2DModel`` (``input_units`` and
+  ``_parameter_units_for_data_units``), and the guess of the center and
+  amplitude from the center of the image: the ``image_moments`` option of both
+  ``guess_par`` methods is removed, and they always use the image moments.
+
 Dependency Changes
 ------------------
 
