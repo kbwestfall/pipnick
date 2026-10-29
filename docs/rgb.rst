@@ -3,7 +3,7 @@
 Three-color Image Construction
 ==============================
 
-``pipnick_rgb`` makes a three-colour image from three images of the same
+``pipnick_rgb`` makes a three-color image from three images of the same
 area of sky, e.g., the mosaics of one object in three filters.
 
 The algorithm
@@ -16,7 +16,7 @@ The algorithm
    (99.5) percentile, so that the channels have comparable brightness.  With
    ``--common``, all of the images are instead divided by the largest of these
    percentiles, which keeps their relative fluxes.  ``--scales`` multiplies the
-   three normalized images, to adjust the colour balance.
+   three normalized images, to adjust the color balance.
 3. **Stretch.**  The image is made with the scheme of Lupton et al. (2004;
    ``--method lupton``, the default, with ``--stretch`` and ``--Q``; see
    :func:`astropy.visualization.make_lupton_rgb`), or a linear or logarithmic
@@ -61,7 +61,7 @@ The options are (the logging options are common to every script; see
 Outputs
 -------
 
-- **The colour image** (``--ofile``), with north up for the mosaics of
+- **The color image** (``--ofile``), with north up for the mosaics of
   ``pipnick_mosaic``.
 - **The log**, in the ``log`` subdirectory of the directory of the output
   image; see :doc:`common`.
@@ -72,13 +72,13 @@ Troubleshooting
 - **The images do not have the same WCS and shape**: ``pipnick_rgb`` stops
   with an error.  Construct them with ``pipnick_mosaic``, with all of them in
   the same WCS group (a mosaic can have a single image; see :doc:`mosaic`).
-- **Coloured halos around stars**: the images have different seeing.  Match
+- **Colored halos around stars**: the images have different seeing.  Match
   their PSFs to the worst seeing of the group with ``pipnick_mosaic
   --psf_match group``.
-- **Black cores with coloured rims in bright stars**: their saturated
+- **Black cores with colored rims in bright stars**: their saturated
   pixels are masked, and masked pixels are black.  The rims are where the
   masks of the three images differ.
-- **One colour dominates**: adjust ``--scales``, or use ``--common`` to keep
+- **One color dominates**: adjust ``--scales``, or use ``--common`` to keep
   the relative fluxes of the images (e.g., if they are calibrated).
 
 Using the function in Python

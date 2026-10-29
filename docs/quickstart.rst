@@ -15,7 +15,7 @@ Each step discussed below is one command, typically run on the table of the
 frames collected into a metadata table by the first step.  Every step ends with
 an assessment of the success of the processing (``OK``, ``NEEDS ATTENTION``, or
 ``FAILED``) and suggests the next command to run.  Although there is an optimal
-order, each step can be run at anytime.  The code will raise an error if it does
+order, each step can be run at any time.  The code will raise an error if it does
 not have all the required data to complete the step.  And when re-run on a given
 dataset, it will only redo processing if something has changed in the results
 from one of the previous steps (unless you force it to redo the step).  For more
@@ -303,7 +303,7 @@ matching:
 
 See :doc:`mosaic`.
 
-7. Make a colour image
+7. Make a color image
 ----------------------
 
 .. code-block:: console

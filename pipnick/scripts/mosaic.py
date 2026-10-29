@@ -34,7 +34,7 @@ class Mosaic(scriptbase.ScriptBase):
         parser.add_argument(
             '--psf_match', default='mosaic', choices=['mosaic', 'group', 'none'],
             help='Convolve the images to the worst seeing of their mosaic, of their WCS group '
-                 '(e.g., for colour images), or not at all.'
+                 '(e.g., for color images), or not at all.'
         )
         parser.add_argument(
             '--kernel', default='moffat', choices=['moffat', 'gaussian'],

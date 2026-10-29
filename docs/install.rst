@@ -29,8 +29,8 @@ e.g.:
 
 .. code-block:: console
 
-    conda create -n pypeit python=3.13
-    conda activate pypeit
+    conda create -n pipnick python=3.13
+    conda activate pipnick
 
 Install using pip
 -----------------

@@ -298,7 +298,7 @@ Functionality/Performance Improvements and Additions
   identical output WCS and shape, and a mosaic can combine the images of
   several setups.  Added ``pipnick.mosaic``.
 
-- Added ``pipnick_rgb``, which makes a three-colour image from three images
+- Added ``pipnick_rgb``, which makes a three-color image from three images
   with the same WCS (e.g., the mosaics of one WCS group), with the Lupton et
   al. (2004) scheme or a linear or logarithmic stretch.  A mosaic can have a
   single image, which is then only reprojected onto the WCS of its group.
@@ -408,7 +408,7 @@ Under-the-hood Improvements
 
 - Added ``pipnick.image.io.read_reduced``, which reads the images, masks,
   and errors written by pipnick, replacing the separate readers of the
-  photometry, astrometry, mosaic, and colour-image steps.
+  photometry, astrometry, mosaic, and color-image steps.
 
 - Added ``pipnick.pkg.summary.Summary``, which writes and logs the summary
   table of every step, with missing values masked.
@@ -483,7 +483,7 @@ Documentation Updates
 - Reorganized the documentation around the scripts: a page for each
   processing script (purpose, algorithm, inputs, outputs, and
   troubleshooting), a quick-start tutorial, installation instructions, a page
-  on checking the results, a page on the behaviour common to all scripts, and
+  on checking the results, a page on the behavior common to all scripts, and
   an updated list of known issues.  Removed the outdated usage and example
   pages.
 

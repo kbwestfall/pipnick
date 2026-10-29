@@ -1,5 +1,5 @@
 """
-Construct a three-colour image from three images with the same WCS
+Construct a three-color image from three images with the same WCS
 """
 
 from pipnick.scripts import scriptbase
@@ -10,7 +10,7 @@ class RGB(scriptbase.ScriptBase):
     @classmethod
     def get_parser(cls, width=None):
         parser = super().get_parser(
-            description='Construct a three-colour (RGB) image from three images, e.g., the '
+            description='Construct a three-color (RGB) image from three images, e.g., the '
                         'mosaics of one WCS group made by pipnick_mosaic.  The images must have '
                         'the same WCS and shape; if they do not, run pipnick_mosaic with the '
                         'images in the same WCS group (a mosaic can have a single image).',
@@ -55,7 +55,7 @@ class RGB(scriptbase.ScriptBase):
         parser.add_argument(
             '--scales', nargs=3, default=[1., 1., 1.], type=float,
             help='Factors applied to the normalized red, green, and blue images, to adjust the '
-                 'colour balance.'
+                 'color balance.'
         )
         return parser
 

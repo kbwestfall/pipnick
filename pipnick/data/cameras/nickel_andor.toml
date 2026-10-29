@@ -141,7 +141,7 @@ frametype = "dark"
 obstype = '^DARK$'
 
 [[frametypes.rule]]
-# Labelled as a calibration, but the shutter was open
+# Labeled as a calibration, but the shutter was open
 frametype = "unknown"
 object = 'bias|dark'
 

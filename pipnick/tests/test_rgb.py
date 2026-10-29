@@ -1,5 +1,5 @@
 """
-Tests for the three-colour images.
+Tests for the three-color images.
 """
 
 import matplotlib.image
@@ -61,7 +61,7 @@ def test_color_image(tmp_path):
         with np.errstate(all='raise'):
             color = rgb.color_image(*[i[:2] for i in images], method=method)
         assert color.shape == SHAPE + (3,) and color.dtype == np.uint8, (
-            'The colour image should be an 8-bit RGB array with the shape of the images'
+            'The color image should be an 8-bit RGB array with the shape of the images'
         )
         assert np.all(color[10,20] > 0), 'The star should be visible in all channels'
         assert color[52,65,0] == 0, 'Masked pixels should be black in their channel'

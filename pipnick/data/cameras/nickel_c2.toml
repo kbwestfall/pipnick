@@ -129,7 +129,7 @@ frametype = "dark"
 obstype = '^DARK$'
 
 [[frametypes.rule]]
-# Labelled as a calibration, but exposed: e.g., OBJECT = 'Bias' at 10 s
+# Labeled as a calibration, but exposed: e.g., OBJECT = 'Bias' at 10 s
 frametype = "unknown"
 object = 'bias|dark'
 

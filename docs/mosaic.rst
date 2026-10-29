@@ -7,7 +7,7 @@ Image Mosaicking
 into mosaics: dithered pointings of an extended object, or repeated exposures
 of one field (which registers them).  The mosaics of one object in different
 filters can share an identical output WCS and shape, so that they can be
-combined into colour images (see :doc:`rgb`).
+combined into color images (see :doc:`rgb`).
 
 The images are combined using their astrometric solutions, and the PSF models
 and source tables of the photometry, so run ``pipnick_astrometry`` (see
@@ -69,7 +69,7 @@ the tables, or assign the mosaics automatically with ``pipnick_metadata
   ``--append``, the labels are assigned even if there are no new frames.
 
 A mosaic can have a single image.  To sample several images on the same pixel
-grid, e.g., one image of an object in each of three filters for a colour
+grid, e.g., one image of an object in each of three filters for a color
 image, give each image its own ``mosaic`` label and all of them the same
 ``wcs_group``; each is then only reprojected onto the WCS of the group (it is
 not convolved, unless ``--psf_match group`` is used).
@@ -117,7 +117,7 @@ Each mosaic is then constructed as follows.
    Each image is convolved with the kernel that matches its PSF model (from
    the photometry) to the target,
    computed with :func:`photutils.psf_matching.make_kernel` and tapered to a
-   circle; if that fails, a Gaussian kernel is used.  For colour images, use
+   circle; if that fails, a Gaussian kernel is used.  For color images, use
    ``--psf_match group`` to match all of the mosaics of a WCS group to the
    worst seeing of the group.  ``--psf_match none`` turns the matching off.
    A warning is issued if one image has much worse seeing than the others,

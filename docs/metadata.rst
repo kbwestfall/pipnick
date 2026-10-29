@@ -43,11 +43,11 @@ The algorithm used by ``pipnick_metadata`` is summarized as follows:
    detector is too warm or with an undefined readout setting are rejected.  If
    the ``--classify stats`` option is set, the image data are also read and an
    image is rejected if it is empty, has too many saturated pixels, indicates
-   that the closed-shutter frames but the counts are significantly above the
-   bias level, or was identified as a flats but has too few counts.  Frames
-   labeled as calibrations are reclassified as biases if their level is that
-   expected for a bias.  **Rejected frames are commented out of the table, with
-   the reason in the** ``note`` **column.**
+   that the shutter is closed but the counts are significantly above the bias
+   level, or was identified as a flat but has too few counts.  Frames labeled as
+   calibrations are reclassified as biases if their level is that expected for a
+   bias.  **Rejected frames are commented out of the table, with the reason in
+   the** ``note`` **column.**
 
 #. **Assign the setups.**  Frames with the same camera, binning, readout mode,
    and readout window share a *setup*, labeled ``A``, ``B``, etc. in order of
@@ -63,7 +63,7 @@ The algorithm used by ``pipnick_metadata`` is summarized as follows:
 Inputs
 ------
 
-The only inputs required for this step is a directory with a set of raw frames.
+The only input required for this step is a directory with a set of raw frames.
 
 .. important::
 

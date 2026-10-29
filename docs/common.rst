@@ -1,6 +1,6 @@
 .. _common:
 
-Common behaviour of the scripts
+Common behavior of the scripts
 ===============================
 
 The processing scripts share their layout of the outputs, their logs and

@@ -55,7 +55,7 @@ Landolt standard stars
     ``pipnick/data/catalogs/landolt.ecsv`` is derived from the VizieR catalogs
     ``J/AJ/137/4186`` (Landolt 2009) and ``J/AJ/146/131`` (Landolt 2013),
     retrieved from the CDS.  The papers and VizieR are cited in the file's
-    metadata and in ``pipnick.photometry.landolt``, with the acknowledgement
+    metadata and in ``pipnick.photometry.landolt``, with the acknowledgment
     requested by the CDS.
 
 

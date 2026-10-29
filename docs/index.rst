@@ -8,8 +8,8 @@ The Photometric Imaging Pipeline for the Nickel Telescope
 
 Welcome!  pipnick is open-source Python software that processes images taken by
 the science cameras mounted on the 1-meter Nickel telescope at Lick Observatory
-on Mt. Hamilton, CA.  The code should successfully reduce and analyze taken with
-the previous C2 camera and the new Andor camera.
+on Mt. Hamilton, CA.  The code should successfully reduce and analyze data taken
+with the previous C2 camera and the new Andor camera.
 
 Starting with the raw data obtained at the telescope, pipnick enables you to
 perform:

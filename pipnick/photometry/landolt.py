@@ -224,7 +224,7 @@ def build_catalog(ofile=None, match_radius=1.):
             'Landolt (2009, AJ, 137, 4186); VizieR J/AJ/137/4186',
             'Landolt (2013, AJ, 146, 131); VizieR J/AJ/146/131'
         ],
-        'acknowledgement': 'This research has made use of the VizieR catalogue access tool, '
+        'acknowledgment': 'This research has made use of the VizieR catalogue access tool, '
                            'CDS, Strasbourg, France (Ochsenbein et al. 2000, A&AS, 143, 23).',
         'duplicates_removed': int(np.sum(duplicate))
     }

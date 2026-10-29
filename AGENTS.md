@@ -16,7 +16,7 @@
   falsiness of a non-boolean object: write `if x is None`, `if len(x) == 0`,
   `if x != 0`, not `if not x` or `if x`. Truthiness on an actual `bool` is fine.
 - **Every `assert` in a test carries a message describing the expected
-  behaviour.** A bare assertion reports only that a comparison failed; the
+  behavior.** A bare assertion reports only that a comparison failed; the
   message is what tells the next reader what was supposed to happen.
 - **Anything that wraps onto multiple lines** — a signature, a call, an `if`
   condition, a collection literal — puts its contents on the line *below* the
@@ -87,6 +87,11 @@
   in other packages take an **explicit role** so that intersphinx resolves them
   — `` :class:`numpy.ndarray` ``, `` :func:`astropy.stats.sigma_clip` `` — not
   the default role. Bare package names in prose are literals: ``` ``photutils`` ```.
+- **Write in American English** — in names, comments, docstrings, messages, and
+  the documentation: `color`, `behavior`, `labeled`, `normalize`, `center`,
+  `catalog`. The exception is quoted text, which keeps its original spelling
+  (e.g., the acknowledgment requested by the CDS, "VizieR catalogue access
+  tool").
 - **The user makes every commit.** Leave changes in the working tree for
   review; never run `git commit` (or `git commit --amend`). The one exception
   is a rebase, when one is needed and agreed.
