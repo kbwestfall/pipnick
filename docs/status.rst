@@ -112,4 +112,7 @@ The ``attention`` column flags images reduced by another pipnick version
 (``version``), without a bias or flat (``no bias``, ``no flat``), or with an
 FWHM or astrometric RMS outside its expected range (``fwhm``, ``wcs rms``).
 The status ends with the next command to run.  It changes nothing; use
-``--ofile`` to also write the table to an ECSV file.
+``--ofile`` to also write the table to an ECSV file, and ``--mosaic_dir`` for
+mosaics written outside the ``mosaic`` subdirectory of the reduction
+directory.  See :doc:`report` for a browsable report of the same information,
+and for the inspection of one image.

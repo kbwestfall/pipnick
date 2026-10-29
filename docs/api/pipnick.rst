@@ -18,6 +18,7 @@ Subpackages
    pipnick.pkg
    pipnick.qa
    pipnick.reduction
+   pipnick.report
    pipnick.scripts
    pipnick.utils
 

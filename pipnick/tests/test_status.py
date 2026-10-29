@@ -6,7 +6,7 @@ from astropy.io import fits
 
 from pipnick.metadata.build import build_metadata
 from pipnick.pipelines.reduction import reduce_all
-from pipnick.pipelines.status import night_status
+from pipnick.report.status import night_status
 from pipnick.tests.test_reduction import comb_id, set_column, set_comb_id, write_night
 
 

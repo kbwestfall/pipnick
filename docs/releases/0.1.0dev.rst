@@ -331,6 +331,19 @@ Functionality/Performance Improvements and Additions
 - Missing values in the ``INPUTS`` table of a mosaic are masked instead of
   being set to -1.
 
+- Added ``pipnick_report``, which writes a static HTML report of a data set to
+  ``<rdxdir>/report``: the status of every step for every science image, the
+  provenance and QA figures of each image, and the summary tables, QA
+  figures, and logs of every step.
+
+- Added ``pipnick_inspect``, which prints the provenance of one image, traces
+  one of its sources through the source, removed-source, calibrated, and
+  standard-star tables (``--id`` or ``--source``), and shows the image with
+  its sources (``--display`` or ``--ofile``).
+
+- ``pipnick_status`` has a ``--mosaic_dir`` option for mosaics written outside
+  the reduction directory.
+
 Under-the-hood Improvements
 ---------------------------
 
@@ -381,6 +394,10 @@ Under-the-hood Improvements
 
 - Added ``pipnick.pkg.summary.Summary``, which writes and logs the summary
   table of every step, with missing values masked.
+
+- Added ``pipnick.report``, with the status of a data set (moved from
+  ``pipnick.pipelines.status``, which now only logs it), the provenance of
+  its images and sources, and the rendering of the report.
 
 - Added ``pipnick.qa``, which holds the QA figures of every step
   (``display``, ``sources``, ``psf``, ``calibration``, and ``mosaic``);

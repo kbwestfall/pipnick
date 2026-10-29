@@ -22,6 +22,7 @@ an issue on our GitHub page, if you have any problems.
    calibrate
    mosaic
    status
+   report
    example
    issues
 

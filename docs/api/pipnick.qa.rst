@@ -9,6 +9,7 @@ Submodules
 
    pipnick.qa.calibration
    pipnick.qa.display
+   pipnick.qa.inspect
    pipnick.qa.mosaic
    pipnick.qa.psf
    pipnick.qa.reduction

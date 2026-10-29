@@ -81,6 +81,8 @@ pipnick_calibrate = "pipnick.scripts.calibrate:Calibrate.entry_point"
 pipnick_mosaic = "pipnick.scripts.mosaic:Mosaic.entry_point"
 pipnick_rgb = "pipnick.scripts.rgb:RGB.entry_point"
 pipnick_status = "pipnick.scripts.status:Status.entry_point"
+pipnick_report = "pipnick.scripts.report:Report.entry_point"
+pipnick_inspect = "pipnick.scripts.inspect:Inspect.entry_point"
 
 [build-system]
 requires = [
