@@ -402,6 +402,13 @@ Under-the-hood Improvements
   ``pipnick.photometry.starfind.detect_sources`` is replaced by
   ``select_psf_stars``.
 
+- The settings of the astrometry, photometry, calibration, and mosaics are
+  frozen dataclasses (``pipnick.pkg.settings``), checked when they are
+  constructed, so invalid settings are rejected before anything is
+  processed.  Their hashes, recorded with the products, are unchanged.
+  ``default_colors`` moved from ``pipnick.pipelines.calibrate`` to
+  ``pipnick.photometry.landolt``.
+
 - Added ``pipnick.image.background``, with the global, 2D, and source-masked
   backgrounds of an image (``subtract_background`` moved from
   ``pipnick.photometry.psf_photometry``).

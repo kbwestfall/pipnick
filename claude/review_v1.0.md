@@ -1953,3 +1953,62 @@ synthetic image, pinned to the value computed by main's detection.
 
 **Docs:** the release notes and the API pages; the user docs describe the
 detection by its behaviour, which is unchanged.
+
+#### Step 6, Phase B: settings dataclasses (complete, 2026-10-29, branch `detection`)
+
+Decisions made with the author:
+
+- All four dataclasses are in one module, `pipnick/pkg/settings.py`.
+- The `*_all` functions keep their keyword arguments and build the settings
+  inside, so the scripts and the tests are unchanged.
+
+Checks after the work:
+
+- `tox -r -e 3.13-test,codestyle` passes in a fresh environment: 217 tests
+  passed, 1 skipped.
+- The docs build without warnings.
+- **Real data:** on a scratch copy of n3 (fast), main built every product
+  (the photometry remeasured, the calibration and the mosaics).  This branch,
+  rerun on them, reported every reduction product, source table, calibration
+  and mosaic as up to date, and remeasuring one image recorded the same
+  settings and settings hash as main.
+
+**`pipnick/pkg/settings.py` (§5.6).**
+
+- `AstrometrySettings`, `PhotometrySettings`, `CalibrationSettings` and
+  `MosaicSettings`: frozen dataclasses whose values are normalized and
+  checked (`validate`) when they are constructed, including by
+  `dataclasses.replace`.
+- `as_dict()` and `hash()` (the `json_hash` of the fields) are shared through
+  a base class.  The field names, values and types are those of the old
+  dictionaries, so the recorded hashes are unchanged; `test_settings.py`
+  pins the default hash of each.
+- The camera's default FWHM (photometry, astrometry) is set by
+  `resolve(camera)`; the photometry's `hash()` refuses an unresolved FWHM.
+- The mosaic's `reference` and `pixel_scale` are hashed as given, as
+  before.
+
+**Callers.**
+
+- The photometry records `settings.as_dict()` and `settings.hash()` in the
+  source tables, as before.
+- The calibration's per-night `input_hash` is no longer written into the
+  settings: `calibrate_night` takes it as an argument, and
+  `_leave_one_out` uses `dataclasses.replace(settings, maxiter=0)`.  The
+  warning for a color that does not include its band stays in
+  `calibrate_all`, so that it is not repeated by `replace`.
+- `Session` (astrometry) takes an `AstrometrySettings` instead of seven
+  values, and `_load_images` the settings instead of four.
+- `mosaic_all` reads its settings from the dataclass throughout.
+- `nightfit`, `standards`, `apply` and `mosaic/prepare` use attribute
+  access.
+- `default_colors` moved from `pipelines/calibrate.py` to
+  `photometry/landolt.py`, so that the settings module does not import a
+  pipeline.
+
+**Behaviour changes (minor):** invalid settings are rejected before anything
+is read, e.g., an unknown photometry `fittype` or `stack` (formerly found in
+the PSF fit), or a non-positive threshold or radius.
+
+**Tests:** new `test_settings.py`; the leave-one-out test uses
+`CalibrationSettings`.

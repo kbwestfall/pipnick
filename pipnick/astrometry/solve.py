@@ -170,24 +170,30 @@ def _fail(image, code, message):
 class Session:
     """
     The settings and the remote services for one run of
-    :func:`~pipnick.pipelines.astrometry.astrometry_all`, including the count of astrometry.net
-    submissions.
+    :func:`~pipnick.pipelines.astrometry.astrometry_all`, including the count of
+    astrometry.net submissions.
+
+    Parameters
+    ----------
+    solver : object
+        The astrometry.net solver, or None to construct the default solver
+        when it is first needed; see :meth:`solver`.
+    catalog : object
+        The source catalog, e.g., a
+        :class:`~pipnick.astrometry.services.GaiaCatalog`.
+    api_key : str
+        The astrometry.net API key, for the default solver.
+    astro_dir : :class:`pathlib.Path`
+        The ``astrometry`` directory.
+    settings : :class:`~pipnick.pkg.settings.AstrometrySettings`
+        The settings.
     """
-    def __init__(
-        self, solver, catalog, api_key, astro_dir, upload_image, max_submissions, min_matches,
-        max_rms, search, wide_search, wide_min_matches
-    ):
+    def __init__(self, solver, catalog, api_key, astro_dir, settings):
         self._solver = solver
         self._api_key = api_key
         self.catalog = catalog
         self.astro_dir = astro_dir
-        self.upload_image = upload_image
-        self.max_submissions = max_submissions
-        self.min_matches = min_matches
-        self.max_rms = max_rms
-        self.search = search
-        self.wide_search = wide_search
-        self.wide_min_matches = wide_min_matches
+        self.settings = settings
         self.nsubmitted = 0
         # The images with pending submissions
         self.pending = set()
@@ -222,11 +228,12 @@ class Session:
                 'submissions.'
             )
             return False
-        if self.max_submissions is not None and self.nsubmitted >= self.max_submissions:
+        limit = self.settings.max_submissions
+        if limit is not None and self.nsubmitted >= limit:
             _fail(
                 image, 'limit',
-                f'Not submitting {image.name}: the limit of {self.max_submissions} astrometry.net '
-                'submissions has been reached.'
+                f'Not submitting {image.name}: the limit of {limit} astrometry.net submissions '
+                'has been reached.'
             )
             return False
         return True
@@ -326,7 +333,7 @@ def _pointing_error(image, wcs, session):
     """
     center = image_center(wcs, image.shape)
     offset = center.separation(image.pointing).arcsec
-    if offset <= session.search:
+    if offset <= session.settings.search:
         return None
     log.warning(
         f'{image.name} is centered at {center.to_string("hmsdms", sep=":", precision=1)}, '
@@ -348,15 +355,17 @@ def _accept(image, wcs, stats, ref_wcs, session, min_matches=None):
     reference in pixel scale (within 2%), rotation (within 1 degree), and
     parity.
     """
-    _min_matches = session.min_matches if min_matches is None else min_matches
+    _min_matches = session.settings.min_matches if min_matches is None else min_matches
     scale, rotation, parity = scale_and_rotation(wcs)
     ref_scale, ref_rotation, ref_parity = scale_and_rotation(ref_wcs)
     drot = (rotation - ref_rotation + 180.) % 360. - 180.
     reasons = []
     if stats['npts'] < _min_matches:
         reasons.append(f'{stats["npts"]} matched sources (minimum is {_min_matches})')
-    if stats['rms'] > session.max_rms:
-        reasons.append(f'RMS residual is {stats["rms"]:.2f} arcsec (maximum is {session.max_rms})')
+    if stats['rms'] > session.settings.max_rms:
+        reasons.append(
+            f'RMS residual is {stats["rms"]:.2f} arcsec (maximum is {session.settings.max_rms})'
+        )
     if abs(scale / ref_scale - 1) > 0.02 or abs(drot) > 1. or parity != ref_parity:
         reasons.append('the pixel scale or rotation differs from the reference')
     if len(reasons) > 0:
@@ -462,15 +471,16 @@ def _bootstrap_frame(image, ref, images, session):
     match = match_frames(
         np.asarray(image.sources['x']), np.asarray(image.sources['y']),
         np.asarray(ref.sources['x']), np.asarray(ref.sources['y']), expected=expected,
-        search=session.search / image.scale, tol=max(2., image.fwhm)
+        search=session.settings.search / image.scale, tol=max(2., image.fwhm)
     )
     _log_match(image, ref.name, match)
     nmatch = 0 if match is None else len(match['indx'])
-    if nmatch < session.min_matches:
+    if nmatch < session.settings.min_matches:
         _fail(
             image, 'few_matches',
             f'{nmatch} of the {len(image.sources)} sources in {image.name} matched the '
-            f'{len(ref.sources)} sources in {ref.name} (minimum is {session.min_matches}).'
+            f'{len(ref.sources)} sources in {ref.name} (minimum is '
+            f'{session.settings.min_matches}).'
         )
         return False
     # In the ICRS, even if the reference solution is in another frame
@@ -521,9 +531,10 @@ def _bootstrap_gaia(image, ref, images, session, wide=False):
     """
     if session.catalog is None:
         return False
-    search = (session.wide_search * 60. if wide else session.search) / image.scale
+    settings = session.settings
+    search = (settings.wide_search * 60. if wide else settings.search) / image.scale
     min_matches = (
-        max(session.min_matches, session.wide_min_matches) if wide else session.min_matches
+        max(settings.min_matches, settings.wide_min_matches) if wide else settings.min_matches
     )
     predicted = predict_wcs(ref.wcs, _predicted_center(image, images), image.shape)
     radius = 0.5 * np.hypot(*image.shape) * image.scale / 3600. + search * image.scale / 3600.
@@ -650,7 +661,7 @@ def _submit(image, session):
     """
     solver = session.solver()
     session.nsubmitted += 1
-    if session.upload_image:
+    if session.settings.upload_image:
         log.info(f'Uploading {image.name} to astrometry.net.')
         data, _, hdr = read_image(image.path)
         with tempfile.TemporaryDirectory() as tmp:
@@ -716,7 +727,7 @@ def _solve_without_reference(image, images, session):
             return True
     if _bootstrap_gaia(image, ref, images, session):
         return True
-    if session.wide_search > 0:
+    if session.settings.wide_search > 0:
         return _bootstrap_gaia(image, ref, images, session, wide=True)
     return False
 

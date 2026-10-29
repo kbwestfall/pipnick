@@ -55,6 +55,7 @@ from pipnick.pkg.exceptions import (
 from pipnick.pkg.paths import qa_figure, step_dir
 from pipnick.pkg.provenance import image_hash, json_hash, solution_hash
 from pipnick.pkg.report import StepReport
+from pipnick.pkg.settings import MosaicSettings
 from pipnick.pkg.summary import Summary
 from pipnick.pkg.version import version
 from pipnick.qa.mosaic import plot_mosaic
@@ -277,8 +278,8 @@ def build_mosaic(images, wcs_out, shape_out, target, settings):
     target : tuple
         The target FWHM (arcsec) and power index of the PSF matching, or None
         if the PSFs are not matched.
-    settings : dict
-        The mosaic settings; see :func:`mosaic_all`.
+    settings : :class:`~pipnick.pkg.settings.MosaicSettings`
+        The mosaic settings.
 
     Returns
     -------
@@ -292,12 +293,12 @@ def build_mosaic(images, wcs_out, shape_out, target, settings):
     kernels = []
     ee_ratios = []
     for image in images:
-        data, var, good = prepare_image(image, background=settings['background'])
+        data, var, good = prepare_image(image, background=settings.background)
         if target is not None:
             psf, _, _ = _psf(image)
             target_pix = target[0] / image.pixel_scale
             kernel, used, ee_ratio = image_kernel(
-                psf, target_pix, target[1], method=settings['kernel'], name=image.name
+                psf, target_pix, target[1], method=settings.kernel, name=image.name
             )
             data, var, good = normalized_convolve(data, var, good, kernel)
             kernels.append(used)
@@ -329,12 +330,12 @@ def build_mosaic(images, wcs_out, shape_out, target, settings):
         sub = wcs_out[bbox]
         shape = (bbox[0].stop - bbox[0].start, bbox[1].stop - bbox[1].start)
         d, v, g = reproject_image(
-            data, var, good, image.wcs, sub, shape, method=settings['reproject']
+            data, var, good, image.wcs, sub, shape, method=settings.reproject
         )
         reprojected.append((bbox, d, v, g))
     _check_overlap(images, reprojected)
     levels = np.zeros(len(images), dtype=float)
-    if settings['match_background'] and len(images) > 1:
+    if settings.match_background and len(images) > 1:
         levels, _, matched, _ = solve_offsets(
             len(images), overlap_differences(reprojected), reference=ref, floor=0.,
             min_common=1
@@ -349,7 +350,7 @@ def build_mosaic(images, wcs_out, shape_out, target, settings):
         )
 
     mean, var, coverage, used, nrej = combine(
-        reprojected, shape_out, weights, rej=settings['rej'], rej_frac=settings['rej_frac']
+        reprojected, shape_out, weights, rej=settings.rej, rej_frac=settings.rej_frac
     )
     expmap = np.zeros(shape_out, dtype=float)
     nreject = np.zeros(shape_out, dtype=int)
@@ -479,20 +480,20 @@ def _product(
     hdr['PNWCSGRP'] = (wcs_group(images[0]), 'WCS group label')
     hdr['PNNIGHT'] = (images[0].night, 'UT date of the observations')
     hdr['PNPSFMAT'] = (
-        settings['psf_match'] if target is not None else 'none', 'PSF matching: mosaic/group/none'
+        settings.psf_match if target is not None else 'none', 'PSF matching: mosaic/group/none'
     )
     if target is not None:
         hdr['PNTGFWHM'] = (target[0], 'Target PSF FWHM (arcsec)')
         hdr['PNTGBETA'] = (target[1], 'Target PSF Moffat power index')
-        hdr['PNKERNEL'] = (settings['kernel'], 'PSF matching kernel')
-    hdr['PNSCALE'] = (settings['scale'], 'Flux scaling: sources, calib, or none')
+        hdr['PNKERNEL'] = (settings.kernel, 'PSF matching kernel')
+    hdr['PNSCALE'] = (settings.scale, 'Flux scaling: sources, calib, or none')
     hdr['PNREFIMG'] = (images[ref].name, 'Reference image of the flux scale')
     hdr['PNNSCALE'] = (int(np.sum(inputs['scaled'])), 'Number of images on the flux scale')
-    hdr['PNBKG'] = (settings['background'], 'Background subtraction')
-    hdr['PNBKGMAT'] = (settings['match_background'], 'Background levels matched in overlaps')
-    hdr['PNREPROJ'] = (settings['reproject'], 'Reprojection method')
-    hdr['PNREJ'] = (-1. if settings['rej'] is None else settings['rej'], 'Rejection threshold')
-    hdr['PNREJFRC'] = (settings['rej_frac'], 'Fractional error in the rejection')
+    hdr['PNBKG'] = (settings.background, 'Background subtraction')
+    hdr['PNBKGMAT'] = (settings.match_background, 'Background levels matched in overlaps')
+    hdr['PNREPROJ'] = (settings.reproject, 'Reprojection method')
+    hdr['PNREJ'] = (-1. if settings.rej is None else settings.rej, 'Rejection threshold')
+    hdr['PNREJFRC'] = (settings.rej_frac, 'Fractional error in the rejection')
     hdr['PNNREJ'] = (nrej, 'Number of rejected pixels')
     hdr['PNUNCTYP'] = ('density', 'UNCERT is a noise density; see pipnick docs')
     zp = images[ref].header.get('PNCALZP')
@@ -501,7 +502,7 @@ def _product(
     if len(filters) > 1:
         hdr['PNWARN'] = 'Images with different filters were combined'
     nunscaled = len(images) - int(np.sum(inputs['scaled']))
-    if settings['scale'] != 'none' and nunscaled > 0:
+    if settings.scale != 'none' and nunscaled > 0:
         hdr['PNWARN2'] = f'{nunscaled} images could not be scaled'
     covered = coverage > 0
     primary = fits.PrimaryHDU(data=np.where(covered, mean, 0.).astype(np.float32), header=hdr)
@@ -638,34 +639,25 @@ def mosaic_all(
     Raises
     ------
     :exc:`~pipnick.pkg.exceptions.PipnickParameterError`
-        Raised if an option is invalid, or several tables are given without an
-        output directory.
+        Raised if a setting is invalid (see
+        :class:`~pipnick.pkg.settings.MosaicSettings`), or several tables are
+        given without an output directory.
     :exc:`~pipnick.pkg.exceptions.PipnickDataModelError`
         Raised if the mosaics are invalid; see :func:`collect_images`.
     """
     _tables = [tables] if isinstance(tables, (str, Path)) else list(tables)
-    for name, value, options in [
-        ('psf_match', psf_match, ['mosaic', 'group', 'none']),
-        ('kernel', kernel, ['moffat', 'gaussian']),
-        ('scale', scale, ['sources', 'calib', 'none']),
-        ('background', background, ['constant', '2d', 'none']),
-        ('reproject', reproject, ['adaptive', 'interp', 'exact'])
-    ]:
-        if value not in options:
-            raise PipnickParameterError(f'Invalid {name} {value}; options are {options}.')
+    settings = MosaicSettings(
+        psf_match=psf_match, kernel=kernel, psf_margin=psf_margin, scale=scale,
+        reference=reference, match_radius=match_radius, min_common=min_common, min_snr=min_snr,
+        background=background, match_background=match_background, reproject=reproject,
+        pixel_scale=pixel_scale, rej=rej, rej_frac=rej_frac
+    )
     if outdir is None and len(_tables) > 1:
         raise PipnickParameterError('An output directory is required to combine several tables.')
-    settings = {
-        'psf_match': psf_match, 'kernel': kernel, 'psf_margin': float(psf_margin),
-        'scale': scale, 'reference': reference, 'match_radius': float(match_radius),
-        'min_common': int(min_common), 'min_snr': float(min_snr), 'background': background,
-        'match_background': bool(match_background),
-        'reproject': reproject, 'pixel_scale': pixel_scale,
-        'rej': None if rej is None else float(rej), 'rej_frac': float(rej_frac)
-    }
     _report = StepReport('MOSAICS') if report is None else report
     images = collect_images(
-        _tables, require_photometry=psf_match != 'none' or scale == 'sources', report=_report
+        _tables, require_photometry=settings.psf_match != 'none' or settings.scale == 'sources',
+        report=_report
     )
     if len(images) == 0:
         _report.attention('No mosaics are defined; see pipnick_metadata --assign_mosaics.')
@@ -678,10 +670,12 @@ def mosaic_all(
     if not _outdir.parent.is_dir():
         raise PipnickPathError(f'{_outdir.parent} does not exist.')
     mosaic_images = _validate(images)
-    if reference is not None and not any(
-        reference in [image.name, image.path.stem] for image in images
+    if settings.reference is not None and not any(
+        settings.reference in [image.name, image.path.stem] for image in images
     ):
-        raise PipnickParameterError(f'The reference image {reference} is not in any mosaic.')
+        raise PipnickParameterError(
+            f'The reference image {settings.reference} is not in any mosaic.'
+        )
     if mosaics is not None:
         unknown = sorted(set(mosaics) - set(mosaic_images))
         if len(unknown) > 0:
@@ -709,10 +703,11 @@ def mosaic_all(
             continue
         try:
             wcs_out, shape_out, ghash = group_wcs(
-                members, _outdir / f'{group}_wcs.fits', pixel_scale=pixel_scale
+                members, _outdir / f'{group}_wcs.fits', pixel_scale=settings.pixel_scale
             )
             group_target = (
-                psf_target(members, margin=psf_margin) if psf_match == 'group' else None
+                psf_target(members, margin=settings.psf_margin) if settings.psf_match == 'group'
+                else None
             )
         except Exception as e:
             log.debug(f'Traceback of the failure of WCS group {group}:', exc_info=True)
@@ -737,17 +732,17 @@ def mosaic_all(
                 status='failed', file=ofile.name, reason='-'
             )
             try:
-                if psf_match == 'group':
+                if settings.psf_match == 'group':
                     target = group_target
-                elif psf_match == 'mosaic' and len(these) > 1:
-                    target = psf_target(these, margin=psf_margin)
+                elif settings.psf_match == 'mosaic' and len(these) > 1:
+                    target = psf_target(these, margin=settings.psf_margin)
                 else:
                     # A single image is not convolved to match itself; it is
                     # only reprojected
                     target = None
                 mhash = json_hash(
                     {
-                        'settings': settings, 'group': ghash, 'target': target,
+                        'settings': settings.as_dict(), 'group': ghash, 'target': target,
                         'images': sorted(_image_key(image) for image in these)
                     }
                 )

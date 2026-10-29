@@ -27,6 +27,7 @@ from pipnick.photometry.calibrate import (
 from pipnick.pipelines import calibrate
 from pipnick.pkg.exceptions import PipnickDataModelError, PipnickParameterError
 from pipnick.pkg.provenance import image_hash
+from pipnick.pkg.settings import CalibrationSettings
 from pipnick.pkg.version import version
 from pipnick.tests.test_metadata import write_andor
 
@@ -160,7 +161,7 @@ def write_night(tmp_path, design, seed=1, science=False, outlier=None):
             coo = propagate_proper_motion(stars, epoch)
             # Filters other than UBVRI are given the V calibration
             band = filt if filt in TRUE else 'V'
-            color, _ = landolt.catalog_color(stars, calibrate.default_colors()[band])
+            color, _ = landolt.catalog_color(stars, landolt.default_colors()[band])
             mag = instrumental(np.asarray(stars[band]), np.asarray(color), airmass, band, rng)
             if outlier is not None:
                 mag[STARS.index(outlier)] += 0.3
@@ -767,10 +768,7 @@ def test_leave_one_out_no_dof(tmp_path):
             'reason': ['-'] * 3
         }
     )
-    settings = {
-        'maxiter': 0, 'min_stars': 3, 'force': False, 'min_airmass_span': 0.2,
-        'fallback': True, 'min_color_span': 0.3, 'rej': 3.
-    }
+    settings = CalibrationSettings(terms=['zp', 'airmass'])
     resid = loo(meas, 'V', ['zp', 'airmass'], {}, 0.17, settings, np.ones(3, dtype=bool))
     assert np.all(np.ma.getmaskarray(resid)), (
         'The leave-one-out residuals should be masked when the reduced fit has no degrees of '

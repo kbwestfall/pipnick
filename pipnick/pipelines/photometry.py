@@ -31,8 +31,9 @@ from pipnick.photometry.psf_photometry import (
 )
 from pipnick.pkg.exceptions import PipnickPathError
 from pipnick.pkg.paths import qa_figure
-from pipnick.pkg.provenance import image_hash, json_hash, solution_hash
+from pipnick.pkg.provenance import image_hash, solution_hash
 from pipnick.pkg.report import StepReport
+from pipnick.pkg.settings import PhotometrySettings
 from pipnick.pkg.summary import Summary
 from pipnick.pkg.version import version
 from pipnick.qa.psf import plot_psf
@@ -62,8 +63,8 @@ def measure_image(image, settings):
     ----------
     image : :class:`~pipnick.datamodel.image.ReducedImage`
         The reduced image.
-    settings : dict
-        The photometry settings; see :func:`photometry_all`.
+    settings : :class:`~pipnick.pkg.settings.PhotometrySettings`
+        The photometry settings, with the FWHM resolved.
 
     Returns
     -------
@@ -87,12 +88,12 @@ def measure_image(image, settings):
     mask = np.ma.getmaskarray(data)
 
     fit, nstack, fwhm, phot, sub = psf_analysis(
-        data, error=error, thresh=settings['thresh'], guess_fwhm=settings['fwhm'] / scale,
-        mode=settings['mode'], fittype=settings['fittype'], stack=settings['stack'],
-        min_sep=settings['min_sep'], group_sep=settings['group_sep'],
-        psf_thresh=settings['psf_thresh']
+        data, error=error, thresh=settings.thresh, guess_fwhm=settings.fwhm / scale,
+        mode=settings.mode, fittype=settings.fittype, stack=settings.stack,
+        min_sep=settings.min_sep, group_sep=settings.group_sep,
+        psf_thresh=settings.psf_thresh
     )
-    if settings['group']:
+    if settings.group:
         phot = consolidate_groups(phot)
 
     phot, removed, rejected = vet_sources(phot, data.shape, fwhm)
@@ -104,7 +105,7 @@ def measure_image(image, settings):
     y = np.asarray(phot['y_fit'], dtype=float)
 
     flux_aper, flux_aper_err = aperture_analysis(
-        sub, x, y, settings['aper_radius'] * fwhm, local_bkg=np.asarray(phot['local_bkg']),
+        sub, x, y, settings.aper_radius * fwhm, local_bkg=np.asarray(phot['local_bkg']),
         error=error, mask=mask
     )
     flux_psf = _masked(phot['flux_fit'])
@@ -149,8 +150,8 @@ def measure_image(image, settings):
         'object': values.get('object'), 'filter': values.get('filter'), 'exptime': exptime,
         'airmass': values.get('airmass'), 'mjd': mjd,
         'psf': PSFModel.from_fit(fit).to_meta(scale, nstack),
-        'aper_radius_pix': float(settings['aper_radius'] * fwhm), 'removed': removed,
-        'settings': settings, 'settings_hash': json_hash(settings),
+        'aper_radius_pix': float(settings.aper_radius * fwhm), 'removed': removed,
+        'settings': settings.as_dict(), 'settings_hash': settings.hash(),
         'image_hash': image_hash(hdr), 'wcs_method': hdr.get('PNASTMTH', 'none'),
         'wcs_hash': solution_hash(hdr), 'pipnick_version': version
     }
@@ -387,22 +388,23 @@ def photometry_all(
     ------
     :exc:`~pipnick.pkg.exceptions.PipnickPathError`
         Raised if the reduction directory does not exist.
+    :exc:`~pipnick.pkg.exceptions.PipnickParameterError`
+        Raised if a setting is invalid; see
+        :class:`~pipnick.pkg.settings.PhotometrySettings`.
     """
     _report = StepReport('PHOTOMETRY') if report is None else report
+    settings = PhotometrySettings(
+        thresh=thresh, fwhm=fwhm, fittype=fittype, mode=mode, stack=stack, group=group,
+        min_sep=min_sep, group_sep=group_sep, aper_radius=aper_radius, psf_thresh=psf_thresh
+    )
     dataset = DataSet.from_file(table, rdxdir=rdxdir)
     if not dataset.rdxdir.is_dir():
         raise PipnickPathError(f'{dataset.rdxdir} does not exist; reduce the data first.')
     _report.check_version(dataset.metafile.name, dataset.table.meta.get('pipnick_version'))
+    settings = settings.resolve(dataset.camera)
     phot_dir = dataset.outdir('photometry')
     reduced = dataset.science_images(selection=images, include_missing=True)
     log.info(f'Photometry of {len(reduced)} images in {dataset.rdxdir}')
-    settings = {
-        'thresh': float(thresh),
-        'fwhm': float(dataset.camera.fwhm_guess if fwhm is None else fwhm),
-        'fittype': fittype, 'mode': mode, 'stack': stack, 'group': bool(group),
-        'min_sep': float(min_sep), 'group_sep': float(group_sep),
-        'aper_radius': float(aper_radius), 'psf_thresh': float(psf_thresh)
-    }
 
     outputs = []
     summary = _summary()
@@ -425,7 +427,7 @@ def photometry_all(
             existing = SourceCatalog.read(ofile)
             if (
                 existing.meta.get('image_hash') == image_hash(hdr)
-                and existing.meta.get('settings_hash') == json_hash(settings)
+                and existing.meta.get('settings_hash') == settings.hash()
             ):
                 row.update(_summary_values(existing))
                 _report.check_version(ofile.name, existing.meta.get('pipnick_version'))
@@ -543,9 +545,9 @@ def _write_qa(image, tbl, settings, phot_dir, report, fit=None, data=None, mask=
             masked, _, _ = _read_image(image)
             mask = np.ma.getmaskarray(masked)
             fit, _ = build_moffat_psf_model(
-                masked, thresh=settings['psf_thresh'],
-                fwhm=settings['fwhm'] / image.nominal_scale, fittype=settings['fittype'],
-                stack=settings['stack']
+                masked, thresh=settings.psf_thresh,
+                fwhm=settings.fwhm / image.nominal_scale, fittype=settings.fittype,
+                stack=settings.stack
             )
             data = subtract_background(masked.filled(0.), mask=mask)
         psf = tbl.meta['psf']

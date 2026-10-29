@@ -35,6 +35,14 @@ from pipnick.pkg.exceptions import PipnickParameterError
 from pipnick.utils.crossmatch import match_sky
 
 
+def default_colors():
+    """
+    Return the default color used to calibrate each band: U-B for U, B-V for
+    B and V, V-R for R, and V-I for I.
+    """
+    return {'U': 'U-B', 'B': 'B-V', 'V': 'B-V', 'R': 'V-R', 'I': 'V-I'}
+
+
 def landolt_band(filtername):
     """
     Return the Landolt band of a filter.

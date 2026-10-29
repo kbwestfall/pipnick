@@ -147,8 +147,8 @@ def apply_to_catalogs(images, content, cfile, settings, default_color):
         The calibration; see :meth:`~pipnick.datamodel.calibration.Calibration.write`.
     cfile : :class:`pathlib.Path`
         The calibration file.
-    settings : dict
-        The calibration settings; see :func:`~pipnick.pipelines.calibrate.calibrate_all`.
+    settings : :class:`~pipnick.pkg.settings.CalibrationSettings`
+        The calibration settings.
     default_color : dict
         The default colors, keyed by the color, e.g., ``{'B-V': 0.6}``.
 
@@ -183,7 +183,7 @@ def apply_to_catalogs(images, content, cfile, settings, default_color):
             np.ma.asarray(i.photometry()['dec'], dtype=float) if i.photometry().has_coordinates
             else np.ma.masked_all(len(i.photometry())) for i in group
         ]
-        ids = link_sources(ra, dec, settings['match_radius'])
+        ids = link_sources(ra, dec, settings.match_radius)
         mags = []
         errs = []
         for image in group:
