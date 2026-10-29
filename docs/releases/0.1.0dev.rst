@@ -395,6 +395,17 @@ Under-the-hood Improvements
 - Added ``pipnick.pkg.summary.Summary``, which writes and logs the summary
   table of every step, with missing values masked.
 
+- Every step detects sources with ``pipnick.image.detect.find_sources``
+  (with ``SourceFinder`` for the PSF photometry, and the ``brightest`` and
+  ``isolated`` selections), with its own settings; the detections are
+  unchanged.  ``pipnick.astrometry.detect`` is removed, and
+  ``pipnick.photometry.starfind.detect_sources`` is replaced by
+  ``select_psf_stars``.
+
+- Added ``pipnick.image.background``, with the global, 2D, and source-masked
+  backgrounds of an image (``subtract_background`` moved from
+  ``pipnick.photometry.psf_photometry``).
+
 - Added ``pipnick.report``, with the status of a data set (moved from
   ``pipnick.pipelines.status``, which now only logs it), the provenance of
   its images and sources, and the rendering of the report.

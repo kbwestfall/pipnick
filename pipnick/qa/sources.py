@@ -24,7 +24,7 @@ def plot_sources(data, mask, sources, ofile, matched=None, title=None, vector_sc
         Boolean array selecting the masked pixels, which are not shown.
     sources : :class:`astropy.table.Table`
         The detected sources, with 0-based pixel coordinates ``x`` and ``y``;
-        e.g., see :func:`~pipnick.astrometry.detect.detect_sources`.  They are
+        e.g., see :func:`~pipnick.image.detect.find_sources`.  They are
         marked by open circles and numbered in order.
     ofile : str, :class:`pathlib.Path`
         The output file.

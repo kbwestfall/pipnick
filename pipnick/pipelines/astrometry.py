@@ -40,18 +40,55 @@ from astropy.table import Table
 
 from pipnick import log
 from pipnick.astrometry.cache import anet_input_hash, invalidate_chains, restore_solution
-from pipnick.astrometry.detect import detect_sources
 from pipnick.astrometry.services import GaiaCatalog, astrometry_net_hints
 from pipnick.astrometry.solve import (
     AstrometryImage, Session, group_by_pointing, group_order, group_reference, handle_result,
     log_pointing_offset, nsources, read_image, solve_group
 )
 from pipnick.datamodel.dataset import DataSet
+from pipnick.image.detect import brightest, find_sources
 from pipnick.pkg.exceptions import PipnickPathError
 from pipnick.pkg.paths import qa_figure
 from pipnick.pkg.report import StepReport
 from pipnick.pkg.summary import Summary
 from pipnick.qa.sources import plot_sources
+
+
+def _detect(data, mask, fwhm, thresh, max_sources):
+    """
+    Detect the brightest point sources in an image, excluding those at the
+    border; see :func:`~pipnick.image.detect.find_sources`.
+
+    The masked pixels are set to 0 before the global background is
+    subtracted.  The detected sources are part of the key of the cached
+    astrometry.net results (see
+    :func:`~pipnick.astrometry.cache.anet_input_hash`), so this detection
+    must not change.
+
+    Parameters
+    ----------
+    data : :class:`numpy.ndarray`
+        The image data.
+    mask : :class:`numpy.ndarray`
+        Boolean array selecting the pixels to ignore.
+    fwhm : float
+        The expected FWHM of the sources in pixels.
+    thresh : float
+        The detection threshold, as a multiple of the standard deviation of
+        the background.
+    max_sources : int
+        The maximum number of sources to return.
+
+    Returns
+    -------
+    :class:`astropy.table.Table`
+        The 0-based pixel coordinates (``x`` and ``y``) and the flux (``flux``)
+        of the detected sources, ordered by decreasing flux.
+    """
+    sources = find_sources(
+        data, mask=mask, fwhm=fwhm, thresh=thresh, masked='zero', exclude_border=True
+    )
+    return brightest(sources, max_sources)['x', 'y', 'flux']
 
 
 def _load_images(dataset, upload_image, max_sources=100, detect_thresh=5., fwhm=None):
@@ -100,9 +137,7 @@ def _load_images(dataset, upload_image, max_sources=100, detect_thresh=5., fwhm=
             continue
         scale = image.nominal_scale
         fwhm_pix = (dataset.camera.fwhm_guess if fwhm is None else fwhm) / scale
-        sources = detect_sources(
-            data, mask=mask, fwhm=fwhm_pix, thresh=detect_thresh, nmax=max_sources
-        )
+        sources = _detect(data, mask, fwhm_pix, detect_thresh, max_sources)
         # Allow for a pointing error of up to the image width
         radius = max(data.shape) * scale / 3600.
         hints = astrometry_net_hints(pointing, radius, scale)

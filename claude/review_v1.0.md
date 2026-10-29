@@ -1870,3 +1870,86 @@ the API pages.
 - Some sources removed as `failed` were detected (`x_init`, `y_init`) far
   outside the image by the second iteration of the PSF photometry (4 of 39
   in SA 111 1965 V C021).
+
+#### Step 6, Phase A: detection and backgrounds (complete, 2026-10-29, branch `detection`)
+
+Decisions made with the author before starting:
+
+- Step 6 is done in three phases on one branch, with a check-in after each:
+  A, the detection and backgrounds; B, the settings dataclasses; C,
+  `PipelineStep`.
+- The astrometry's detections must stay identical, so that no
+  astrometry.net cache key changes.
+- Only the image backgrounds are consolidated; the four local backgrounds
+  around sources stay as they are, since unifying them would change the
+  measured fluxes.
+- `find_sources` returns a plain `Table`, with the selections as functions;
+  `SourceCatalog` stays the wrapper of the measured `_phot.ecsv` tables.
+
+Checks after the work:
+
+- `tox -r -e 3.13-test,codestyle` passes in a fresh environment: 213 tests
+  passed, 1 skipped.
+- The docs build without warnings.
+- **Detections, on all 19 n3 (fast) science images, main against this
+  branch in separate processes:** 627 arrays compared, and all are
+  bit-for-bit identical except the mosaic's 2D background (see below): the
+  astrometry sources and their astrometry.net cache keys, the PSF-star tables
+  and the PSF fits, the census finder's positions, and the mosaic's constant
+  background.
+- **End to end:** on scratch copies of n3 (fast), with every step run (the
+  astrometry only as a dry run) by main and by this branch:
+  - the reduced images are identical, as are the 19 astrometry source lists
+    and the PSF models of all 19 source tables;
+  - the source tables differ by the known run-to-run nondeterminism of the
+    PSF photometry (the same size as between two runs of main; see Step 5,
+    Phase A), and the calibration and mosaics differ through them;
+  - run on main's outputs without `--overwrite`, this branch reports every
+    product as up to date.
+
+**`pipnick/image/detect.py` (§4.1).**
+
+- `find_sources`: the background (`'global'`, or `'none'` for an image whose
+  background is subtracted), the threshold (a multiple of the noise, or
+  absolute), `DAOStarFinder`, and the treatment of the masked pixels
+  (`masked`): `'zero'` (0 before the background is subtracted, the
+  astrometry's convention), `'background'` (the PSF stars), or `'keep'` (the
+  census, whose residual images come from photutils).  It returns a `Table`
+  (`x`, `y`, `flux`, `peak`, `sharpness`, `roundness1`, `roundness2`), with
+  the background, noise and threshold in its metadata.
+- `SourceFinder`: the finder of `IterativePSFPhotometry`, at a fixed
+  threshold, so that the residual images are searched with the threshold of
+  the original image.
+- Selections: `brightest(sources, n)` and `isolated(x, y, flux, min_dist)`.
+  The review's `inside` and `above_snr` were not added, since nothing needs
+  them (the astrometry's border cut is `DAOStarFinder`'s `exclude_border`).
+
+**`pipnick/image/background.py` (§4.2, image backgrounds only).**
+
+- `global_background`, `subtract_background` (moved from
+  `photometry/psf_photometry.py`), `masked_median` (the segmentation-masked
+  median of the mosaics), and `estimate_background` (the mosaic's choice of
+  `'constant'`, `'2d'` or `'none'`).
+
+**Callers.**
+
+- Astrometry: `pipelines/astrometry._detect` (`find_sources` with
+  `masked='zero'` and `exclude_border=True`, then `brightest`).
+  `astrometry/detect.py` is removed.  `read_image` still sets the masked
+  pixels to 0, for the uploaded image.
+- PSF stars: `starfind.detect_sources` is replaced by `select_psf_stars`,
+  which applies the Kron, isolation and flux cuts to the output of
+  `find_sources`; `build_moffat_psf_model` uses both.
+- Census: `psf_analysis` uses `SourceFinder`.
+- Mosaics: `mosaic/prepare.py` uses `estimate_background`.
+
+**Behaviour change (minor):** the mosaic's `--background 2d` now subtracts
+the 2D background itself, where it subtracted `data - (data - background)`;
+the background differs by at most 4e-13 e-/s.  The default (`constant`) is
+unchanged.
+
+**Tests:** new `test_detect.py`, including the astrometry.net cache key of a
+synthetic image, pinned to the value computed by main's detection.
+
+**Docs:** the release notes and the API pages; the user docs describe the
+detection by its behaviour, which is unchanged.

@@ -33,9 +33,9 @@ def read_image(path):
     Read the data of a reduced image, with masked pixels set to 0, and its mask
     and primary header; see :func:`~pipnick.image.io.read_reduced`.
 
-    The masked pixels are set to 0 because the detected sources (see
-    :func:`~pipnick.astrometry.detect.detect_sources`) are part of the key of
-    the cached astrometry.net results (see
+    The masked pixels are set to 0 because the image uploaded to
+    astrometry.net (with ``upload_image``), and the sources detected in it,
+    are part of the key of the cached astrometry.net results (see
     :func:`~pipnick.astrometry.cache.anet_input_hash`), so they must not
     change.
     """
@@ -68,7 +68,7 @@ class AstrometryImage:
         The nominal FWHM of the point sources in pixels.
     sources : :class:`astropy.table.Table`
         The detected sources; see
-        :func:`~pipnick.astrometry.detect.detect_sources`.
+        :func:`~pipnick.image.detect.find_sources`.
     hints : dict
         The astrometry.net settings; see
         :func:`~pipnick.astrometry.services.astrometry_net_hints`.

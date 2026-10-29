@@ -11,44 +11,23 @@ their photometric calibrations (see :func:`measure_offsets` and
 import numpy as np
 
 from astropy.coordinates import SkyCoord
-from astropy.stats import sigma_clipped_stats
 from photutils.aperture import ApertureStats, CircularAnnulus
-from photutils.segmentation import detect_sources, detect_threshold
 
 from pipnick import log
+from pipnick.image.background import estimate_background
 from pipnick.image.io import invalid_error, read_reduced
 from pipnick.mosaic.scaling import solve_offsets
 from pipnick.photometry.aperture_photometry import aperture_analysis
-from pipnick.photometry.psf_photometry import subtract_background
 from pipnick.pkg.exceptions import PipnickDataModelError
 from pipnick.utils.crossmatch import match_sky
-
-
-def _background(data, good, method):
-    """
-    Return the background of an image: ``'constant'`` (the sigma-clipped
-    median of the pixels without sources, which are found by image
-    segmentation and dilated), ``'2d'`` (see
-    :func:`~pipnick.photometry.psf_photometry.subtract_background`, with
-    256-pixel boxes), or ``'none'`` (0).
-    """
-    if method == 'none':
-        return 0.
-    mask = np.logical_not(good)
-    if method == '2d':
-        return data - subtract_background(data, mask=mask, box_size=256)
-    threshold = detect_threshold(data, 2., mask=mask)
-    segm = detect_sources(data, threshold, 10, mask=mask)
-    sources = np.zeros(data.shape, dtype=bool) if segm is None else segm.make_source_mask(size=11)
-    _, median, _ = sigma_clipped_stats(data, mask=mask | sources, sigma=3.)
-    return median
-
 
 
 def prepare_image(image, background='constant'):
     """
     Read an image, convert it to electrons per second, and subtract its
-    background.
+    background: ``'constant'``, the median of the pixels without sources;
+    ``'2d'``, a smooth background in 256-pixel boxes; or ``'none'``.  See
+    :func:`~pipnick.image.background.estimate_background`.
 
     Returns
     -------
@@ -65,7 +44,8 @@ def prepare_image(image, background='constant'):
     t = image.exptime
     data = np.where(good, data, 0.) / t
     var = np.where(good, err, 0.)**2 / t**2
-    data = np.where(good, data - _background(data, good, background), 0.)
+    bkg = estimate_background(data, mask=np.logical_not(good), method=background, box_size=256)
+    data = np.where(good, data - bkg, 0.)
     return data, var, good
 
 

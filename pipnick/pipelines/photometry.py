@@ -23,10 +23,11 @@ from pipnick import log
 from pipnick.datamodel.catalog import SourceCatalog, celestial_coordinates
 from pipnick.datamodel.dataset import DataSet
 from pipnick.datamodel.psf import PSFModel
+from pipnick.image.background import subtract_background
 from pipnick.image.io import invalid_error
 from pipnick.photometry.aperture_photometry import aperture_analysis
 from pipnick.photometry.psf_photometry import (
-    build_moffat_psf_model, consolidate_groups, psf_analysis, subtract_background
+    build_moffat_psf_model, consolidate_groups, psf_analysis
 )
 from pipnick.pkg.exceptions import PipnickPathError
 from pipnick.pkg.paths import qa_figure
