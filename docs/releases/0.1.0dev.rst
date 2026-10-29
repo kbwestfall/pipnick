@@ -402,6 +402,18 @@ Under-the-hood Improvements
   ``pipnick.photometry.starfind.detect_sources`` is replaced by
   ``select_psf_stars``.
 
+- The steps share the bookkeeping of their loops (``pipnick.pkg.step``):
+  progress labels, the reuse of up-to-date products, failures recorded
+  without stopping the step, the QA rule, and the counts in the verdict.  The
+  reduction, photometry, and header calibration decide whether a product is
+  up to date with the same checks as ``pipnick_status``
+  (``DataSet.reduction_state``, ``ReducedImage.photometry_state``, and
+  ``header_calibration_state``); ``ReducedImage.reduction_status`` is renamed
+  ``reduction_state``.
+
+- A night whose calibration fails is recorded as failed in the summary and
+  the verdict, and the other nights are still calibrated.
+
 - The settings of the astrometry, photometry, calibration, and mosaics are
   frozen dataclasses (``pipnick.pkg.settings``), checked when they are
   constructed, so invalid settings are rejected before anything is

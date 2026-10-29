@@ -197,8 +197,12 @@ Proposals:
    [progress log](#progress-log)).
 5. Split the large modules, and add `SourceCatalog`, `Summary` and the `qa/`
    package.
+   **Complete** (2026-10-28, branch `qa`; see the
+   [progress log](#progress-log)).
 6. Move every step to the common detection function, then add
    `PipelineStep`.
+   **Complete** (2026-10-29, branch `detection`; see the
+   [progress log](#progress-log)).
 
 ---
 
@@ -1228,7 +1232,7 @@ camera lives in one place.
 | 3 | `DataSet`, `Product`, `ReducedImage`, `read_reduced`; `PSFModel` with one FWHM definition (§5) | removes the coupling between pipelines and the FWHM inconsistency | medium (some mosaics are rebuilt) | **complete** |
 | 4 | Logging (run header, progress, verdicts, next steps, default log files, version); a reduction summary; `pipnick_status` (§6, §7 P1–P3) | the most direct benefit to new observers | low | **complete** |
 | 5 | Split the large modules; `SourceCatalog`, `Summary`, `qa/`; QA on by default; `pipnick_report`, `pipnick_inspect` (§3, §5, §7) | maintainability and interrogation | medium | **complete** |
-| 6 | The common detection function and catalogue selections (§4.1); `PipelineStep` (§5.7) | one detection implementation, used with different settings by every step; a common step loop | higher (the astrometry.net cache, unless the astrometry's detections are reproduced exactly) | |
+| 6 | The common detection function and catalogue selections (§4.1); `PipelineStep` (§5.7) | one detection implementation, used with different settings by every step; a common step loop | higher (the astrometry.net cache, unless the astrometry's detections are reproduced exactly) | **complete** |
 
 ### Progress log
 
@@ -2012,3 +2016,92 @@ the PSF fit), or a non-positive threshold or radius.
 
 **Tests:** new `test_settings.py`; the leave-one-out test uses
 `CalibrationSettings`.
+
+#### Step 6, Phase C: shared step bookkeeping and up-to-date checks (complete, 2026-10-29, branch `detection`)
+
+The reassessment before starting found that Steps 4 and 5 had already
+shared most of what `PipelineStep` (§5.7) was for (`StepReport`, `Summary`,
+`qa_figure` and the QA rules), and that the five loops differ more than §5.7
+assumed (the reduction's dependent stages, the mosaics' two levels, the
+calibration's apply phase and edited files, the astrometry's global solve).
+Decisions made with the author:
+
+- **Shared helpers instead of a base class:** each pipeline keeps its own
+  loop, using helpers for the common bookkeeping.
+- **One up-to-date check per product**, used by the pipelines and by
+  `pipnick_status` and the report (the deferred half of §4.4).
+- **The calibration catches the failure of a night** and continues, like the
+  other steps.
+
+Checks after the work:
+
+- `tox -r -e 3.13-test,codestyle` passes in a fresh environment: 223 tests
+  passed, 1 skipped.
+- The docs build without warnings.
+- **Real data:** on a scratch copy of n3 (fast), main built every product;
+  main and this branch then reran every step without `--overwrite` (the
+  astrometry only as a dry run).
+  - This branch reported every product up to date and rebuilt nothing: the
+    24 reduction products, the 19 source tables, the calibration file, the
+    13 calibrated headers and the 4 mosaics.
+  - The logs of the two reruns are identical, line for line (apart from the
+    version and the paths).
+  - `pipnick_status` agrees with the pipelines: every image is `ok` in every
+    step, except the six I-band images, whose band cannot be calibrated
+    (`calibrated: missing`; see the issue found in Step 5, Phase C).
+
+**`pipnick/pkg/step.py`.**
+
+- `progress(k, n)`: the `[k/N]` label.
+- `reuse(report, name, version, label)`: the "is up to date" line and the
+  version check.
+- `Attempt`: a context manager that records an exception as a failure (or,
+  for a QA figure, a problem), with the traceback at the debug level and the
+  reason in the summary row, and lets the loop continue.  Exceptions that are
+  not `Exception` (e.g., `KeyboardInterrupt`) still stop the step.
+- `needs_qa(qa, rebuilt, figures)`: the QA rule.
+- `count_statuses(rows, statuses, keep_zero)`: the counts in the verdicts.
+
+**Up-to-date checks (§4.4).**
+
+- `DataSet.reduction_state(product, calib_hashes=None)`, with
+  `DataSet.calibration_hashes`: used by the reduction (with the hashes of the
+  calibrations it built) and by `ReducedImage.reduction_state` (renamed from
+  `reduction_status`).  `_needs_update` is removed.
+- `ReducedImage.photometry_state(phot=None, settings_hash=None)`: `ok`,
+  `coordinates` (only the solution changed), `stale` or `missing`; used by the
+  photometry (with its settings), by `ReducedImage.photometry`, and by the
+  status.
+- `datamodel.calibration.header_calibration_state(header, cfile)`: used by
+  `apply_to_headers` and the status.
+- The mosaics keep their own check (`PNMOSHSH`), which covers the settings
+  and the WCS group; the status can only check the input images, since a
+  mosaic does not record all of its settings.  This difference is now
+  documented in `report.status.mosaic_status`.
+
+**Pipelines.**
+
+- Reduction, photometry, mosaics: their failures, reuse, QA rule and
+  verdict counts use the helpers; the reduction's `_attempt` uses `Attempt`.
+- Calibration: each night is processed inside an `Attempt`; a failed night
+  is one summary row (`band` `-`, `status` and `action` `failed`, with the
+  reason), and the step fails.  "No band could be calibrated" still stops it.
+- Astrometry: its QA figures and progress labels use the helpers.
+- Every QA function uses `Attempt` for a failed figure.
+
+**Behaviour changes (minor):**
+
+- The failure messages share one format, `<what> failed: <error>.
+  Continuing with <the other items>.`  (e.g., the reduction's `Building
+  Dark_120s.fits failed: ...`, formerly `Failed to build ...`).
+- A failed WCS group is reported once (`The WCS group ... failed`), with the
+  reason in the summary row of each of its mosaics, instead of once per
+  mosaic.
+- A product without provenance keywords, rebuilt with `--overwrite`, is
+  logged as rebuilt because `overwrite is set`.
+
+**Tests:** new `test_step.py`; new cases for the reduction and photometry
+states, `header_calibration_state`, and a calibration with a failed night.
+
+**Docs:** the calibration page (failed nights), the release notes, and the
+API pages.

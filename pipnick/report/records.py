@@ -100,7 +100,7 @@ def image_record(image, by_name=None, mosaic_dir=None):
     dataset = image.dataset
     rdxdir = dataset.rdxdir
     values = image.values
-    status, reason = image.reduction_status()
+    status, reason = image.reduction_state()
     reduction = [
         ('status', status if status == 'ok' else f'{status} ({reason})'),
         ('object', _fmt(values['object'])), ('filter', _fmt(values['filter'])),

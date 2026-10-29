@@ -56,6 +56,7 @@ from pipnick.pkg.paths import qa_figure, step_dir
 from pipnick.pkg.provenance import image_hash, json_hash, solution_hash
 from pipnick.pkg.report import StepReport
 from pipnick.pkg.settings import MosaicSettings
+from pipnick.pkg.step import Attempt, count_statuses, needs_qa, progress, reuse
 from pipnick.pkg.summary import Summary
 from pipnick.pkg.version import version
 from pipnick.qa.mosaic import plot_mosaic
@@ -701,7 +702,12 @@ def mosaic_all(
             labels = [label for label in labels if label in mosaics]
         if len(labels) == 0:
             continue
-        try:
+        failed = {}
+        attempt = Attempt(
+            _report, f'The WCS group {group} (mosaics {", ".join(labels)})', row=failed,
+            then='the other WCS groups'
+        )
+        with attempt:
             wcs_out, shape_out, ghash = group_wcs(
                 members, _outdir / f'{group}_wcs.fits', pixel_scale=settings.pixel_scale
             )
@@ -709,29 +715,25 @@ def mosaic_all(
                 psf_target(members, margin=settings.psf_margin) if settings.psf_match == 'group'
                 else None
             )
-        except Exception as e:
-            log.debug(f'Traceback of the failure of WCS group {group}:', exc_info=True)
+        if attempt.failed:
             for label in labels:
                 k += 1
-                _report.fail(
-                    f'[{k}/{ntotal}] Mosaic {label} failed: the WCS group {group} failed: '
-                    f'{type(e).__name__}: {e}'
-                )
                 summary.add(
                     mosaic=label, wcs_group=group, filter='-', status='failed',
-                    file=f'{label}.fits', reason=f'{type(e).__name__}: {e}'
+                    file=f'{label}.fits', reason=f'the WCS group failed: {failed["reason"]}'
                 )
             continue
         for label in labels:
+            progress_label = progress(k, ntotal)
             k += 1
-            progress = f'[{k}/{ntotal}]'
             ofile = _outdir / f'{label}.fits'
             these = [image for image in members if mosaic_label(image) == label]
             row = summary.add(
                 mosaic=label, wcs_group=group, filter=str(these[0].filter), nimages=len(these),
                 status='failed', file=ofile.name, reason='-'
             )
-            try:
+            attempt = Attempt(_report, f'Mosaic {label}', row=row, then='the other mosaics')
+            with attempt:
                 if settings.psf_match == 'group':
                     target = group_target
                 elif settings.psf_match == 'mosaic' and len(these) > 1:
@@ -749,23 +751,16 @@ def mosaic_all(
                 if ofile.is_file() and not overwrite:
                     hdr = fits.getheader(ofile)
                     if hdr.get('PNMOSHSH') == mhash:
-                        log.info(f'{progress} {ofile.name} is up to date.')
-                        _report.check_version(ofile.name, hdr.get('PNVERS'))
+                        reuse(_report, ofile.name, hdr.get('PNVERS'), label=progress_label)
                         row.update(_summary_values(ofile))
                         row['status'] = 'up to date'
                         outputs.append(ofile)
-                        if qa and not qa_figure(_outdir, label).is_file():
+                        if needs_qa(qa, False, [qa_figure(_outdir, label)]):
                             _write_qa(ofile, _outdir, label, _report)
                         continue
-                log.info(f'{progress} Constructing mosaic {label} from {len(these)} images.')
+                log.info(f'{progress_label} Constructing mosaic {label} from {len(these)} images.')
                 hdus, _ = build_mosaic(these, wcs_out, shape_out, target, settings)
-            except Exception as e:
-                log.debug(f'Traceback of the failure of mosaic {label}:', exc_info=True)
-                _report.fail(
-                    f'Mosaic {label} failed: {type(e).__name__}: {e}.  Continuing with the other '
-                    'mosaics.'
-                )
-                row['reason'] = f'{type(e).__name__}: {e}'
+            if attempt.failed:
                 continue
             hdus[0].header['PNMOSHSH'] = (mhash, 'Hash of the mosaic inputs and settings')
             hdus[0].header['PNGRPHSH'] = (ghash, 'Hash of the WCS group membership')
@@ -775,15 +770,12 @@ def mosaic_all(
             row.update(_summary_values(ofile))
             row['status'] = 'constructed'
             outputs.append(ofile)
-            if qa:
+            if needs_qa(qa, True, [qa_figure(_outdir, label)]):
                 _write_qa(ofile, _outdir, label, _report)
     summary.write(_outdir)
-    nbuilt = sum(row['status'] == 'constructed' for row in summary.rows)
-    nup = sum(row['status'] == 'up to date' for row in summary.rows)
-    nfail = sum(row['status'] == 'failed' for row in summary.rows)
+    counts = count_statuses(summary.rows, ['constructed', 'up to date', 'failed'], keep_zero=True)
     _report.finish(
-        f'{len(summary)} mosaics ({nbuilt} constructed, {nup} up to date, {nfail} failed); '
-        f'summary in {_outdir.name}/summary.ecsv.',
+        f'{len(summary)} mosaics ({counts}); summary in {_outdir.name}/summary.ecsv.',
         next_step='pipnick_rgb, to combine the mosaics of a WCS group into a colour image'
     )
     return outputs
@@ -796,12 +788,11 @@ def _write_qa(ofile, outdir, label, report):
     report, and does not stop the construction of the other mosaics.
     """
     qa_file = qa_figure(outdir, label)
-    try:
+    attempt = Attempt(report, f'The QA figure of mosaic {label}', problem=True)
+    with attempt:
         with fits.open(ofile) as hdus:
             plot_mosaic(hdus, Table.read(hdus['INPUTS']), qa_file)
-    except Exception as e:
-        log.debug(f'Traceback of the failure of {qa_file.name}:', exc_info=True)
-        report.attention(f'The QA figure of mosaic {label} failed: {type(e).__name__}: {e}')
+    if attempt.failed:
         return
     log.info(f'Wrote {outdir.name}/qa/{qa_file.name}')
 

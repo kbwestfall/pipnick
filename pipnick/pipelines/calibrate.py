@@ -46,6 +46,7 @@ from pipnick.pkg.paths import calibration_file, qa_figure, residuals_file, step_
 from pipnick.pkg.provenance import file_hash, json_hash
 from pipnick.pkg.report import StepReport
 from pipnick.pkg.settings import CalibrationSettings
+from pipnick.pkg.step import Attempt, needs_qa
 from pipnick.pkg.summary import Summary
 from pipnick.pkg.version import version
 from pipnick.qa.calibration import plot_residuals
@@ -317,82 +318,90 @@ def calibrate_all(
     summary = []
     nights = sorted({image.night for image in all_images})
     for night in nights:
-        night_images = [image for image in all_images if image.night == night]
-        standards = [
-            image for image in night_images
-            if image.photometry().has_coordinates and landolt_band(image.filter) is not None
-            and image.airmass is not None and image.product.comb_id in selected
-        ]
-        input_hash = json_hash(
-            {
-                'settings': settings.as_dict(),
-                'fix': _fix, 'nominal': nominal, 'catalog': file_hash(catalog_path()),
-                'tables': [
-                    [
-                        image.phot_file.name, image.photometry().meta.get('settings_hash'),
-                        image.photometry().meta.get('image_hash'),
-                        image.photometry().meta.get('wcs_hash')
-                    ]
-                    for image in standards
-                ],
-                'bands': sorted({str(landolt_band(i.filter)) for i in night_images})
-            }
+        failed = {'night': night, 'band': '-', 'status': 'failed', 'action': 'failed'}
+        attempt = Attempt(
+            _report, f'The calibration of {night}', row=failed, then='the other nights'
         )
-        ofile = calibration_file(_rdxdir, tag, night)
-        rfile = residuals_file(_rdxdir, tag, night)
-        qa_file = qa_figure(cal_dir, rfile.stem)
-        content = None
-        if ofile.is_file() and not overwrite:
-            calibration = Calibration.read(ofile)
-            existing, edited = calibration.content, calibration.edited
-            same_inputs = existing['calibration'].get('input_hash') == input_hash
-            if edited:
-                log.warning(
-                    f'{ofile.name} has been edited; keeping it (use --overwrite to refit).'
-                )
-                if not same_inputs:
-                    log.warning(
-                        f'The inputs of {ofile.name} have changed since it was fit; the edited '
-                        'calibration may hide changes in the photometry or settings.'
-                    )
-                content = existing
-                action = 'edited (kept)'
-                _report.note(f'{ofile.name} has been edited, and was kept.')
-            elif same_inputs:
-                log.info(f'{ofile.name} is up to date.')
-                content = existing
-                action = 'up to date'
-            if content is not None:
-                _report.check_version(
-                    ofile.name, content['calibration'].get('pipnick_version')
-                )
-        if content is None:
-            if len(standards) == 0:
-                log.warning(
-                    f'{night}: no images with celestial coordinates (and an airmass) to search '
-                    'for standards.'
-                )
-            content, meas = calibrate_night(
-                night, night_images, standards, catalog, camera, tag, settings, nominal, _fix,
-                input_hash
+        with attempt:
+            night_images = [image for image in all_images if image.night == night]
+            standards = [
+                image for image in night_images
+                if image.photometry().has_coordinates and landolt_band(image.filter) is not None
+                and image.airmass is not None and image.product.comb_id in selected
+            ]
+            input_hash = json_hash(
+                {
+                    'settings': settings.as_dict(),
+                    'fix': _fix, 'nominal': nominal, 'catalog': file_hash(catalog_path()),
+                    'tables': [
+                        [
+                            image.phot_file.name, image.photometry().meta.get('settings_hash'),
+                            image.photometry().meta.get('image_hash'),
+                            image.photometry().meta.get('wcs_hash')
+                        ]
+                        for image in standards
+                    ],
+                    'bands': sorted({str(landolt_band(i.filter)) for i in night_images})
+                }
             )
-            Calibration(content).write(ofile)
-            log.info(f'Wrote calibrate/{ofile.name}')
-            meas.meta['pipnick_version'] = version
-            meas.write(rfile, format='ascii.ecsv', overwrite=True)
-            log.info(f'Wrote calibrate/{rfile.name}')
-            if qa:
-                _write_qa(meas, content, qa_file, _report)
-            action = 'fit'
-        elif qa and not qa_file.is_file() and rfile.is_file():
-            _write_qa(Table.read(rfile), content, qa_file, _report)
-        outputs.append(ofile)
-        summary += Calibration(content).summary_rows(night, action)
+            ofile = calibration_file(_rdxdir, tag, night)
+            rfile = residuals_file(_rdxdir, tag, night)
+            qa_file = qa_figure(cal_dir, rfile.stem)
+            content = None
+            if ofile.is_file() and not overwrite:
+                calibration = Calibration.read(ofile)
+                existing, edited = calibration.content, calibration.edited
+                same_inputs = existing['calibration'].get('input_hash') == input_hash
+                if edited:
+                    log.warning(
+                        f'{ofile.name} has been edited; keeping it (use --overwrite to refit).'
+                    )
+                    if not same_inputs:
+                        log.warning(
+                            f'The inputs of {ofile.name} have changed since it was fit; the '
+                            'edited calibration may hide changes in the photometry or '
+                            'settings.'
+                        )
+                    content = existing
+                    action = 'edited (kept)'
+                    _report.note(f'{ofile.name} has been edited, and was kept.')
+                elif same_inputs:
+                    log.info(f'{ofile.name} is up to date.')
+                    content = existing
+                    action = 'up to date'
+                if content is not None:
+                    _report.check_version(
+                        ofile.name, content['calibration'].get('pipnick_version')
+                    )
+            if content is None:
+                if len(standards) == 0:
+                    log.warning(
+                        f'{night}: no images with celestial coordinates (and an airmass) to '
+                        'search for standards.'
+                    )
+                content, meas = calibrate_night(
+                    night, night_images, standards, catalog, camera, tag, settings, nominal, _fix,
+                    input_hash
+                )
+                Calibration(content).write(ofile)
+                log.info(f'Wrote calibrate/{ofile.name}')
+                meas.meta['pipnick_version'] = version
+                meas.write(rfile, format='ascii.ecsv', overwrite=True)
+                log.info(f'Wrote calibrate/{rfile.name}')
+                if qa:
+                    _write_qa(meas, content, qa_file, _report)
+                action = 'fit'
+            elif needs_qa(qa, False, [qa_file]) and rfile.is_file():
+                _write_qa(Table.read(rfile), content, qa_file, _report)
+            outputs.append(ofile)
+            summary += Calibration(content).summary_rows(night, action)
 
-        if apply in ['image', 'both']:
-            apply_to_headers(night_images, content, ofile, report=_report)
-        if apply in ['catalog', 'both']:
-            apply_to_catalogs(night_images, content, ofile, settings, _default_color)
+            if apply in ['image', 'both']:
+                apply_to_headers(night_images, content, ofile, report=_report)
+            if apply in ['catalog', 'both']:
+                apply_to_catalogs(night_images, content, ofile, settings, _default_color)
+        if attempt.failed:
+            summary.append(failed)
 
     _summarize(summary, cal_dir)
     for row in summary:
@@ -425,11 +434,10 @@ def _write_qa(meas, content, ofile, report):
     :func:`~pipnick.qa.calibration.plot_residuals`.  A failure is recorded in
     the report, and does not stop the calibration.
     """
-    try:
+    attempt = Attempt(report, f'The QA figure {ofile.name}', problem=True)
+    with attempt:
         plot_residuals(meas, content, ofile)
-    except Exception as e:
-        log.debug(f'Traceback of the failure of {ofile.name}:', exc_info=True)
-        report.attention(f'The QA figure {ofile.name} failed: {type(e).__name__}: {e}')
+    if attempt.failed:
         return
     if ofile.is_file():
         log.info(f'Wrote calibrate/qa/{ofile.name}')

@@ -13,7 +13,7 @@ from pipnick.datamodel.catalog import SourceCatalog
 from pipnick.image.io import read_reduced
 from pipnick.pkg.exceptions import PipnickDataModelError
 from pipnick.pkg.paths import photometry_table, removed_table
-from pipnick.pkg.provenance import image_hash, names_hash, solution_hash, values_hash
+from pipnick.pkg.provenance import image_hash, solution_hash
 
 
 class ReducedImage:
@@ -74,38 +74,21 @@ class ReducedImage:
         self._header = header
         return data, mask, error, header
 
-    def reduction_status(self):
+    def reduction_state(self):
         """
         Determine if the image is up to date with its raw frames, metadata
-        table values, and calibrations, as the reduction does (see
-        :func:`~pipnick.pipelines.reduction.reduce_all`).
-
-        A calibration that has not been reduced is expected to be absent
-        (``'none'``) from the provenance of the image.
+        table values, and calibrations; see
+        :meth:`~pipnick.datamodel.dataset.DataSet.reduction_state`.
 
         Returns
         -------
-        status : str
+        state : str
             ``'ok'``, ``'stale'`` (the image must be reduced again), or
             ``'missing'`` (the image has not been reduced).
         reason : str
             The reason for a stale or missing image.
         """
-        if not self.exists:
-            return 'missing', 'not reduced'
-        hdr = self.header
-        if hdr.get('PNRAWHSH') != names_hash(self.dataset.raw_files(self.product)):
-            return 'stale', 'the raw frames changed'
-        if hdr.get('PNTABH') != values_hash(self.values):
-            return 'stale', 'the metadata table values changed'
-        for name, calib in self.dataset.calibrations(self.product).items():
-            expected = (
-                'none' if calib is None or not calib.file.is_file()
-                else names_hash(self.dataset.raw_files(calib))
-            )
-            if hdr.get(f'PN{name.upper()}H') != expected:
-                return 'stale', f'the {name} changed'
-        return 'ok', '-'
+        return self.dataset.reduction_state(self.product)
 
     def check_setup(self):
         """
@@ -225,6 +208,47 @@ class ReducedImage:
         """
         return removed_table(self.path)
 
+    def photometry_state(self, phot=None, settings_hash=None):
+        """
+        Determine if the source table of the image is up to date.
+
+        This is the check of the photometry (see
+        :func:`~pipnick.pipelines.photometry.photometry_all`), of the steps
+        that use the source table (see :meth:`photometry`), and of the status
+        of the data set (see :mod:`pipnick.report.status`).
+
+        Parameters
+        ----------
+        phot : :class:`~pipnick.datamodel.catalog.SourceCatalog`, optional
+            The source table (or its :class:`astropy.table.Table`), if it has
+            been read.  If None, it is read.
+        settings_hash : str, optional
+            The hash of the photometry settings to compare to the table (see
+            :class:`~pipnick.pkg.settings.PhotometrySettings`).  If None, the
+            settings are not checked.
+
+        Returns
+        -------
+        state : str
+            ``'ok'``; ``'coordinates'``, if only the astrometric solution has
+            changed, so that only the celestial coordinates are out of date;
+            ``'stale'``, if the image (or the settings) have changed; or
+            ``'missing'``.
+        reason : str
+            The reason for a state other than ``'ok'``.
+        """
+        if phot is None:
+            if not self.phot_file.is_file():
+                return 'missing', 'no source table'
+            phot = SourceCatalog.read(self.phot_file)
+        if phot.meta.get('image_hash') != self.image_hash:
+            return 'stale', 'the image changed'
+        if settings_hash is not None and phot.meta.get('settings_hash') != settings_hash:
+            return 'stale', 'the settings changed'
+        if phot.meta.get('wcs_hash') != self.solution_hash:
+            return 'coordinates', 'the astrometric solution changed'
+        return 'ok', '-'
+
     def photometry(self, require=True):
         """
         Return the source table of the image, after checking that it is up to
@@ -259,12 +283,13 @@ class ReducedImage:
                 )
             return None
         phot = SourceCatalog.read(pfile)
-        if phot.meta.get('image_hash') != self.image_hash:
+        state, _ = self.photometry_state(phot)
+        if state == 'stale':
             raise PipnickDataModelError(
                 f'The source table {pfile.name} is out of date: {self.name} has changed since '
                 'it was measured.  Rerun pipnick_photometry.'
             )
-        if phot.meta.get('wcs_hash') != self.solution_hash:
+        if state == 'coordinates':
             raise PipnickDataModelError(
                 f'The celestial coordinates in {pfile.name} are out of date: the astrometric '
                 f'solution of {self.name} has changed.  Rerun pipnick_photometry to update '

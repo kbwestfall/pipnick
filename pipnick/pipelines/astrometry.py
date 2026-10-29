@@ -51,6 +51,7 @@ from pipnick.pkg.exceptions import PipnickPathError
 from pipnick.pkg.paths import qa_figure
 from pipnick.pkg.report import StepReport
 from pipnick.pkg.settings import AstrometrySettings
+from pipnick.pkg.step import Attempt, needs_qa, progress
 from pipnick.pkg.summary import Summary
 from pipnick.qa.sources import plot_sources
 
@@ -124,7 +125,7 @@ def _load_images(dataset, settings):
     images = []
     reduced = dataset.science_images()
     for k, image in enumerate(reduced):
-        progress = f'[{k + 1}/{len(reduced)}]'
+        label = progress(k, len(reduced))
         path = image.path
         data, mask, hdr = read_image(path)
         pointing = image.pointing
@@ -145,7 +146,7 @@ def _load_images(dataset, settings):
                 image=image
             )
         )
-        log.info(f'{progress} {path.name}: detected {len(sources)} sources.')
+        log.info(f'{label} {path.name}: detected {len(sources)} sources.')
         if len(sources) < 10:
             log.warning(
                 f'Only {len(sources)} sources were detected in {path.name}, which may be hard to '
@@ -264,19 +265,17 @@ def _write_qa(images, astro_dir, report, solved=None):
     nwritten = 0
     for image in images:
         ofile = qa_figure(astro_dir, image.path.stem)
-        if image.name not in _solved and ofile.is_file():
+        if not needs_qa(True, image.name in _solved, [ofile]):
             continue
         title = f'{image.name}: {len(image.sources)} detected sources'
         if image.status == 'solved':
             title += f'; {image.method} solution'
-        try:
+        attempt = Attempt(report, f'The QA figure of {image.name}', problem=True)
+        with attempt:
             data, mask, _ = read_image(image.path)
             plot_sources(data, mask, image.sources, ofile, matched=image.matched, title=title)
-        except Exception as e:
-            log.debug(f'Traceback of the failure of the QA of {image.name}:', exc_info=True)
-            report.attention(f'The QA figure of {image.name} failed: {type(e).__name__}: {e}')
-            continue
-        nwritten += 1
+        if not attempt.failed:
+            nwritten += 1
     if nwritten > 0:
         log.info(f'Wrote {nwritten} QA figures to astrometry/qa.')
 

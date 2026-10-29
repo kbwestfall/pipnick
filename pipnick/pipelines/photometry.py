@@ -34,6 +34,7 @@ from pipnick.pkg.paths import qa_figure
 from pipnick.pkg.provenance import image_hash, solution_hash
 from pipnick.pkg.report import StepReport
 from pipnick.pkg.settings import PhotometrySettings
+from pipnick.pkg.step import Attempt, count_statuses, needs_qa, progress, reuse
 from pipnick.pkg.summary import Summary
 from pipnick.pkg.version import version
 from pipnick.qa.psf import plot_psf
@@ -409,13 +410,13 @@ def photometry_all(
     outputs = []
     summary = _summary()
     for k, image in enumerate(reduced):
-        progress = f'[{k + 1}/{len(reduced)}]'
+        label = progress(k, len(reduced))
         path = image.path
         ofile = image.phot_file
         row = summary.add(image=path.name, status='failed', wcs='none', reason='-')
         if not image.exists:
             _report.attention(
-                f'{progress} {path.name} does not exist; reduce the data first.  Skipping.'
+                f'{label} {path.name} does not exist; reduce the data first.  Skipping.'
             )
             row['status'] = 'missing'
             continue
@@ -425,35 +426,31 @@ def photometry_all(
         # Check if the existing table is up to date
         if ofile.is_file() and not overwrite:
             existing = SourceCatalog.read(ofile)
-            if (
-                existing.meta.get('image_hash') == image_hash(hdr)
-                and existing.meta.get('settings_hash') == settings.hash()
-            ):
+            state, _ = image.photometry_state(existing, settings_hash=settings.hash())
+            if state in ['ok', 'coordinates']:
                 row.update(_summary_values(existing))
-                _report.check_version(ofile.name, existing.meta.get('pipnick_version'))
-                if existing.meta.get('wcs_hash') == solution_hash(hdr):
-                    log.info(f'{progress} {ofile.name} is up to date.')
+                if state == 'ok':
+                    reuse(_report, ofile.name, existing.meta.get('pipnick_version'), label=label)
                     row['status'] = 'up to date'
                 else:
+                    _report.check_version(ofile.name, existing.meta.get('pipnick_version'))
                     existing.update_coordinates(hdr, solution_hash(hdr))
                     existing.write()
                     log.info(
-                        f'{progress} The astrometric solution of {path.name} changed; updated '
+                        f'{label} The astrometric solution of {path.name} changed; updated '
                         f'the celestial coordinates in {ofile.name}.'
                     )
                     row['status'] = 'coordinates updated'
                 outputs.append(ofile)
-                if qa and not all(f.is_file() for f in _qa_files(phot_dir, path)):
+                if needs_qa(qa, False, _qa_files(phot_dir, path)):
                     _write_qa(image, existing, settings, phot_dir, _report)
                 continue
 
-        log.info(f'{progress} Measuring {path.name}.')
-        try:
+        log.info(f'{label} Measuring {path.name}.')
+        attempt = Attempt(_report, f'Photometry of {path.name}', row=row)
+        with attempt:
             tbl, rejected, fit, sub, mask = measure_image(image, settings)
-        except Exception as e:
-            log.debug(f'Traceback of the failure of {path.name}:', exc_info=True)
-            _report.fail(f'Photometry of {path.name} failed: {type(e).__name__}: {e}')
-            row['reason'] = f'{type(e).__name__}: {e}'
+        if attempt.failed:
             continue
         phot_dir.mkdir(parents=True, exist_ok=True)
         tbl.write(ofile, format='ascii.ecsv', overwrite=True)
@@ -463,7 +460,7 @@ def photometry_all(
         row['status'] = 'measured'
         row.update(_summary_values(tbl))
         outputs.append(ofile)
-        if qa:
+        if needs_qa(qa, True, _qa_files(phot_dir, path)):
             _write_qa(image, tbl, settings, phot_dir, _report, fit=fit, data=sub, mask=mask)
 
     expected = dataset.camera.expected_range('fwhm')
@@ -476,10 +473,8 @@ def photometry_all(
     if summary.write(phot_dir) is None:
         log.warning('No reduced science images to measure.')
     measured = [row for row in summary.rows if row['fwhm_arcsec'] is not None]
-    counts = ', '.join(
-        f'{sum(row["status"] == s for row in summary.rows)} {s}'
-        for s in ['measured', 'up to date', 'coordinates updated', 'missing', 'failed']
-        if any(row['status'] == s for row in summary.rows)
+    counts = count_statuses(
+        summary.rows, ['measured', 'up to date', 'coordinates updated', 'missing', 'failed']
     )
     text = f'{len(summary)} images ({counts})'
     if len(measured) > 0:
@@ -540,7 +535,8 @@ def _write_qa(image, tbl, settings, phot_dir, report, fit=None, data=None, mask=
     """
     path = image.path
     psf_file, sources_file = _qa_files(phot_dir, path)
-    try:
+    attempt = Attempt(report, f'The QA figures of {path.name}', problem=True)
+    with attempt:
         if fit is None:
             masked, _, _ = _read_image(image)
             mask = np.ma.getmaskarray(masked)
@@ -561,8 +557,6 @@ def _write_qa(image, tbl, settings, phot_dir, report, fit=None, data=None, mask=
             data, mask, tbl[order], sources_file,
             title=f'{path.name}: {len(tbl)} sources, numbered by decreasing PSF flux'
         )
-    except Exception as e:
-        log.debug(f'Traceback of the failure of the QA of {path.name}:', exc_info=True)
-        report.attention(f'The QA figures of {path.name} failed: {type(e).__name__}: {e}')
+    if attempt.failed:
         return
     log.info(f'Wrote photometry/qa/{psf_file.name} and {sources_file.name}')

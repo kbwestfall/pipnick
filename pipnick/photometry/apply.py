@@ -9,7 +9,7 @@ from astropy.io import fits
 from astropy.table import MaskedColumn, Table
 
 from pipnick import log
-from pipnick.datamodel.calibration import Calibration
+from pipnick.datamodel.calibration import Calibration, header_calibration_state
 from pipnick.photometry.calibrate import iterate_colors, zero_point
 from pipnick.photometry.landolt import landolt_band, parse_color
 from pipnick.pkg.paths import calibrated_table
@@ -88,7 +88,7 @@ def apply_to_headers(images, content, cfile, report=None):
                 log.warning(f'{path.name}: removed the out-of-date calibration keywords.')
             continue
         hdr = fits.getheader(path)
-        if hdr.get('PNCALHSH') == chash:
+        if header_calibration_state(hdr, cfile) == 'ok':
             log.info(f'{path.name}: header calibration is up to date.')
             if report is not None:
                 report.check_version(f'{path.name} (calibration)', hdr.get('PNCALVER'))

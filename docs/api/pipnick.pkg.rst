@@ -13,6 +13,7 @@ Submodules
    pipnick.pkg.provenance
    pipnick.pkg.report
    pipnick.pkg.settings
+   pipnick.pkg.step
    pipnick.pkg.summary
 
 Module contents
