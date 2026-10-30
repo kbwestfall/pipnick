@@ -76,6 +76,8 @@ The options are:
 - ``-o``, ``--overwrite``: Rebuild every product, even if it is up to date.
 - ``--no_qa``: Do not write the QA figures.
 
+.. _reduce_outputs:
+
 Outputs
 -------
 

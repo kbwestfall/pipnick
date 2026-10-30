@@ -222,7 +222,8 @@ Functionality/Performance Improvements and Additions
 
 - ``pipnick_metadata`` identifies the instrument setup (camera, binning, read
   mode, and readout window) of each frame, checks the frame quality, and
-  comments out frames that fail the checks.  ``--classify stats`` adds checks
+  comments out frames that fail the checks, or whose camera cannot be
+  identified.  ``--classify stats`` adds checks
   based on the image data.  ``--append`` adds new frames to an existing table,
   preserving user edits and commented-out rows.  A summary of each night is
   logged.

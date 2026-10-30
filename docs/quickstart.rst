@@ -27,24 +27,28 @@ astrometry.net API key; see :doc:`install`.
 1. Build the tables of raw frames
 ---------------------------------
 
-First, you must parse relevant metadata from all the raw data.  This data is the
-primary information that pipnick needs to plan out how to process your data.  To
-build the data table, run:
+First, you must collect relevant metadata from all the raw data.  This data is
+the primary information that pipnick needs to plan out how to process your data.
+To build the data table, run:
 
 .. code-block:: console
 
     pipnick_metadata raw n3 --split --assign_mosaics
 
-The first argument (``raw``) is the directory that contains the raw frames, and
-the second (``n3``) is the name of the table.  ``pipnick_metadata`` reads the
+The first argument (``raw``) is the directory (relative to the current path)
+that contains the raw frames, and the second (``n3``) is the root name for the
+file that will contain the metadata table.  ``pipnick_metadata`` reads the
 header of each file, classifies it, and, with ``--split``, writes one table per
-instrument setup, named for the setup (e.g., ``n3_2x2_fast_full.ecsv``).  The instrument setup is determined by unique
-combinations of the binning, readout mode, and readout window used to obtain the
-observations.  With ``--assign_mosaics``, the science frames are grouped into
-mosaics by pointing and filter.
+instrument setup, named for the setup (e.g., ``n3_2x2_fast_full.ecsv``).  The
+instrument setup is determined by unique combinations of the binning, readout
+mode, and readout window used to obtain the observations.  Calibration frames
+are grouped as expected for applying corrections to the science data; e.g., all
+biases are expected to be combined and used for a single bias correction.  With
+``--assign_mosaics``, the science frames are grouped into mosaics by pointing
+and filter.
 
 The script will print many messages to the screen as it works, which will look
-like this:
+similar to this:
 
 .. code-block:: text
 
@@ -82,14 +86,14 @@ its own reduction directory.
 
 The output file is in `ECSV
 <https://docs.astropy.org/en/stable/io/ascii/ecsv.html>`__ format, a plain text
-file that you will likely need to directly edit.  The most important edits to
-make are: comment out bad frames (place a ``#`` character at the beginning of
-the line), correct object names, filters, and frame types (``bias``,
-``domeflat``, etc), and change which frames are combined (``comb_id``) or
-mosaicked (``mosaic``, ``wcs_group``).  Frames identified as either focus or
-pointing observations should automatically be commented out.  For additional
-information, including the meaning for the different combination columns
-(``comb_id``, ``mosaic``, ``wcs_group``), see :doc:`metadata`.
+file that you will almost always need to directly edit.  The most important
+edits to make are: comment out bad frames (place a ``#`` character at the
+beginning of the line), correct object names, filters, and frame types
+(``bias``, ``domeflat``, etc), and change which frames are combined
+(``comb_id``) or mosaicked (``mosaic``, ``wcs_group``).  Frames identified as
+either focus or pointing observations should automatically be commented out.
+For additional information, including the meaning for the different combination
+columns (``comb_id``, ``mosaic``, ``wcs_group``), see :doc:`metadata`.
 
 2. Reduce the images
 --------------------

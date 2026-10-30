@@ -1,7 +1,7 @@
 .. _using:
 
-Checking and Inspecting Results
-===============================
+Inspecting Results
+==================
 
 pipnick produces a number of quality-assessment plots during execution of each
 processing script (which can be toggled off), as well as additional scripts used

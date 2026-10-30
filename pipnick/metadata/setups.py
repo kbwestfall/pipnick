@@ -7,7 +7,7 @@ import operator
 from pathlib import Path
 
 import numpy as np
-from astropy.table import Table
+from astropy.table import MaskedColumn, Table
 
 from pipnick.pkg.exceptions import PipnickDataModelError
 
@@ -54,7 +54,9 @@ def assign_setups(tbl, camera_name, setups=None):
     to the ``setups`` entry of the table ``meta`` dictionary.  Each definition
     includes a ``window_name``: ``'full'`` for the full readout, or ``win00``,
     ``win01``, etc. for each distinct readout window, in order of first
-    appearance.  Setups with the same window share its name.
+    appearance.  Setups with the same window share its name.  A frame missing
+    any of the :data:`setup_keys` values (e.g., one whose camera could not be
+    identified) has no setup, and its label is masked.
 
     Parameters
     ----------
@@ -78,6 +80,9 @@ def assign_setups(tbl, camera_name, setups=None):
                 window_names[definition['window']] = definition['window_name']
     assigned = []
     for row in tbl:
+        if any(row[k] is np.ma.masked for k in setup_keys):
+            assigned.append(None)
+            continue
         key = tuple(row[k].item() if hasattr(row[k], 'item') else row[k] for k in setup_keys)
         if key not in labels:
             labels[key] = _setup_label(len(labels))
@@ -85,7 +90,9 @@ def assign_setups(tbl, camera_name, setups=None):
         if window not in window_names:
             window_names[window] = _window_name(len(window_names) - 1)
         assigned.append(labels[key])
-    tbl['setup'] = assigned
+    nosetup = np.array([a is None for a in assigned], dtype=bool)
+    data = np.array(['' if a is None else a for a in assigned], dtype=str)
+    tbl['setup'] = MaskedColumn(data, mask=nosetup) if np.any(nosetup) else data
     tbl.meta['setups'] = {}
     for key, label in sorted(labels.items(), key=operator.itemgetter(1)):
         definition = {'camera': camera_name, **dict(zip(setup_keys, key))}
@@ -147,7 +154,9 @@ def split_by_setup(tbl, commented):
     The values that are identical for all frames in a setup (see
     :data:`setup_file_keys`) and the ``setup`` column are removed from each
     table and stored in the ``setup`` entry of its ``meta`` dictionary, with the
-    setup label and definition.
+    setup label and definition.  The image size is set by the frames that are
+    not commented out, if there are any.  Frames without a setup (see
+    :func:`assign_setups`) are included in every table.
 
     Parameters
     ----------
@@ -170,15 +179,20 @@ def split_by_setup(tbl, commented):
         Raised if the image size is not the same for all frames in a setup.
     """
     meta = {k: v for k, v in tbl.meta.items() if k != 'setups'}
+    nosetup = np.ma.getmaskarray(tbl['setup'])
     split = []
     for label, setup in tbl.meta['setups'].items():
-        indx = tbl['setup'] == label
-        if not np.any(indx):
+        in_setup = np.logical_not(nosetup) & (np.ma.getdata(tbl['setup']) == label)
+        if not np.any(in_setup):
             continue
+        indx = in_setup | nosetup
         sub = tbl[indx]
         definition = {'label': label, **setup}
+        size = in_setup & np.logical_not(commented)
+        if not np.any(size):
+            size = in_setup
         for key in ['naxis1', 'naxis2']:
-            values = np.unique(sub[key])
+            values = np.unique(tbl[key][size])
             if len(values) != 1:
                 raise PipnickDataModelError(
                     f'Frames in setup {label} have different {key} values: {list(values)}.'
