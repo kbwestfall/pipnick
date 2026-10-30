@@ -4,12 +4,12 @@ Quick start
 ===========
 
 This tutorial walks through all of the functionality available through pipnick
-as applied to one night of Nickel data.
+as applied to one night of Nickel imaging data.
 
 The excerpts and figures are from commissioning data obtained for the new Andor
 camera on UT 2026-08-20, night 3 of a 4-night run.  The data set includes bias
 and dome-flat frames, but no sky-flat frames.  Science images include BVRI
-images of the open cluster M11 and of the standard-star field SA 111 1965.
+images of the open cluster M11 and of the standard-star field SA 111.
 
 Each step discussed below is one command, typically run on the table of the
 frames collected into a metadata table by the first step.  Every step ends with

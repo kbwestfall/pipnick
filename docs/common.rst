@@ -1,7 +1,7 @@
 .. _common:
 
-Common behavior of the scripts
-===============================
+Common script behavior
+======================
 
 The processing scripts share their layout of the outputs, their logs and
 verdicts, their rules for rerunning, and their QA figures.  These are

@@ -13,6 +13,6 @@ code to see if these changes affect you.
 .. toctree::
    :maxdepth: 1
 
-   whatsnew
    install
    quickstart
+   whatsnew

@@ -52,7 +52,7 @@ check that the installation was successful, you can run
 
     pipnick_version --dependencies
 
-This will print the versions of pipnick and all its dependencies.
+This will print the installed versions of pipnick and all its dependencies.
 
 
 .. _install-api-key:
@@ -60,10 +60,10 @@ This will print the versions of pipnick and all its dependencies.
 The astrometry.net API key
 --------------------------
 
-The astrometric calibration (:doc:`astrometry`) submits some images to the
-astrometry.net web service.  To use this service, you must register for a free
-account at https://nova.astrometry.net.  Then copy your API key from your
-profile.
+:doc:`astrometry` will submit some images to the astrometry.net web service.  To
+use this service, you must register for a free account at
+https://nova.astrometry.net and copy your API key from your profile to a
+location pipnick can find it.
 
 You should treat these API keys as secret, meaning that you should avoid having
 them anywhere that is publicly visible.  We recommend adding the key as an
@@ -84,9 +84,11 @@ your ``astroquery`` configuration file (``~/.astropy/config/astroquery.cfg``):
     [astrometry_net]
     api_key = <your key>
 
-The key is never a command-line argument, and it is never logged.  Only the
-astrometric calibration script needs the key, and the code tries to minimize the
-number of astrometry.net submissions.
+In pipnick, this API key is never a command-line argument and it is never
+logged; only the astrometric calibration script needs the key.  pipnick tries to
+minimize the number of astrometry.net submissions by leveraging existing
+astrometric solutions for a few frames to bootstrap solutions to other frames
+observed in the same night.
 
 
 Developer Installation
