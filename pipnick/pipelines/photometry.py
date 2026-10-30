@@ -479,9 +479,9 @@ def photometry_all(
     text = f'{len(summary)} images ({counts})'
     if len(measured) > 0:
         text += f'; median FWHM {np.median([r["fwhm_arcsec"] for r in measured]):.2f} arcsec'
-    following = f'pipnick_calibrate -t {dataset.metafile} (for standards)'
+    following = f'pipnick_calibrate {dataset.metafile} (for standards)'
     if 'mosaic' in dataset.table.colnames and np.any(dataset.table['mosaic'] != ''):
-        following += f', or pipnick_mosaic -t {dataset.metafile}'
+        following += f', or pipnick_mosaic {dataset.metafile}'
     _report.finish(f'{text}; summary in photometry/summary.ecsv.', next_step=following)
     return outputs
 

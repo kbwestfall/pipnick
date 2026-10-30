@@ -20,7 +20,7 @@ class Photometry(scriptbase.ScriptBase):
             width=width
         )
         parser.add_argument(
-            '-t', '--raw_table', required=True,
+            'raw_table',
             help='Per-setup metadata file used to reduce the images (see pipnick_reduce).'
         )
         parser.add_argument(

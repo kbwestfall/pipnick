@@ -489,7 +489,7 @@ def astrometry_all(
     _images = _load_images(dataset, settings)
     if len(_images) == 0:
         _report.attention('There are no reduced science images to calibrate.')
-        _report.finish('no images.', next_step=f'pipnick_reduce -t {dataset.metafile}')
+        _report.finish('no images.', next_step=f'pipnick_reduce {dataset.metafile}')
         return []
     if images is not None:
         _select(_images, images)
@@ -514,7 +514,7 @@ def astrometry_all(
         _report.note('This was a dry run: nothing was submitted to astrometry.net.')
         _report.finish(
             f'dry run of {len(_images)} images.',
-            next_step=f'pipnick_astrometry -t {dataset.metafile}'
+            next_step=f'pipnick_astrometry {dataset.metafile}'
         )
         return [image.path for image in _images if image.status == 'solved']
 
@@ -573,6 +573,6 @@ def astrometry_all(
         + ', '.join(f'{n} {m}' for m, n in sorted(methods.items()))
         + f'), with {session.nsubmitted} astrometry.net submissions; summary in '
         'astrometry/summary.ecsv.',
-        next_step=f'pipnick_photometry -t {dataset.metafile}'
+        next_step=f'pipnick_photometry {dataset.metafile}'
     )
     return [image.path for image in solved]

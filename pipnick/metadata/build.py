@@ -13,7 +13,7 @@ from astropy.time import Time
 from pipnick import cameras
 from pipnick import log
 from pipnick.metadata.groups import add_mosaic_columns, assign_comb_ids, assign_mosaics
-from pipnick.metadata.names import default_table_name
+from pipnick.metadata.names import default_table_name, table_file_name
 from pipnick.metadata.setups import (
     assign_setups, find_setup_files, setup_file_name, setup_keys, split_by_setup
 )
@@ -354,7 +354,9 @@ def build_metadata(
     filename : str, optional
         The full path (if needed) and file name to either write or load with
         metadata used during the data processing, or the base name of the
-        per-setup files if ``split`` is True.
+        per-setup files if ``split`` is True.  The ``.ecsv`` extension is
+        appended if the name does not end with it; see
+        :func:`~pipnick.metadata.names.table_file_name`.
     ext : str, optional
         Extension of the files to include in the search string used to find
         files.
@@ -398,7 +400,7 @@ def build_metadata(
     if overwrite and append:
         raise ValueError('Cannot both overwrite and append to the metadata table.')
     _rdxdir = None if rdxdir is None else str(Path(rdxdir).absolute())
-    _filename = None if filename is None else Path(filename).absolute()
+    _filename = None if filename is None else table_file_name(filename).absolute()
     if split:
         setup_files = [] if _filename is None else find_setup_files(_filename)
         exists = len(setup_files) > 0

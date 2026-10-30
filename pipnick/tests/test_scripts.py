@@ -34,21 +34,21 @@ def run(script, options):
 def test_metadata_reduce_status_report(tmp_path):
     rawdir = tmp_path / 'raw'
     test_reduction.write_night(rawdir)
-    table = tmp_path / 'n5.ecsv'
-    assert run(MetaData, ['-d', rawdir, '-t', table, '--split']) == 0, (
+    assert run(MetaData, [rawdir, tmp_path / 'n5', '--split']) == 0, (
         'pipnick_metadata should succeed'
     )
     tables = sorted(tmp_path.glob('n5_*.ecsv'))
     assert len(tables) == 1, 'pipnick_metadata --split should write one table per setup'
-    assert run(MetaData, ['-d', rawdir, '-t', table, '--split']) == 1, (
-        'pipnick_metadata should refuse to overwrite existing tables without --overwrite'
+    assert run(MetaData, [rawdir, tmp_path / 'n5.ecsv', '--split']) == 1, (
+        'pipnick_metadata should refuse to overwrite existing tables without --overwrite, '
+        'whether or not the base name has the .ecsv extension'
     )
-    assert run(MetaData, ['-d', rawdir, '--assign_mosaics']) == 1, (
+    assert run(MetaData, [rawdir, tmp_path / 'n6', '--assign_mosaics']) == 1, (
         'pipnick_metadata should refuse --assign_mosaics without --split'
     )
 
     rdxdir = tmp_path / 'rdx'
-    assert run(Reduce, ['-t', tables[0], '-r', rdxdir, '--no_qa']) == 0, (
+    assert run(Reduce, [tables[0], '-r', rdxdir, '--no_qa']) == 0, (
         'pipnick_reduce should succeed'
     )
     assert len(sorted(rdxdir.glob('*.fits'))) > 0, 'pipnick_reduce should write the products'
@@ -58,12 +58,12 @@ def test_metadata_reduce_status_report(tmp_path):
     )
 
     ofile = tmp_path / 'status.ecsv'
-    run(Status, ['-t', tables[0], '-r', rdxdir, '--ofile', ofile])
+    run(Status, [tables[0], '-r', rdxdir, '--ofile', ofile])
     status = Table.read(ofile)
     assert list(status['reduced']) == ['ok'] * len(status), (
         'pipnick_status should report the reduced images'
     )
-    assert run(Report, ['-t', tables[0], '-r', rdxdir]) == 0, 'pipnick_report should succeed'
+    assert run(Report, [tables[0], '-r', rdxdir]) == 0, 'pipnick_report should succeed'
     assert (rdxdir / 'report' / 'index.html').is_file(), 'pipnick_report should write the report'
 
 
@@ -71,7 +71,7 @@ def test_astrometry_dry_run(tmp_path):
     table, rdxdir, _, _, _ = test_astrometry.write_field(tmp_path)
     # A dry run never submits anything to astrometry.net
     assert run(
-        Astrometry, ['-t', table, '-r', rdxdir, '--dry_run', '--no_qa', '--max_sources', 20]
+        Astrometry, [table, '-r', rdxdir, '--dry_run', '--no_qa', '--max_sources', 20]
     ) == 0, 'pipnick_astrometry --dry_run should succeed'
     lists = sorted((rdxdir / 'astrometry' / 'dry_run').glob('*_sources.ecsv'))
     assert len(lists) == len(test_astrometry.IMAGES), (
@@ -83,7 +83,7 @@ def test_astrometry_dry_run(tmp_path):
 
 def test_photometry_script(tmp_path):
     table, rdxdir, _ = test_photometry.write_field(tmp_path)
-    assert run(Photometry, ['-t', table, '-r', rdxdir, '--no_qa', '--thresh', 10]) == 0, (
+    assert run(Photometry, [table, '-r', rdxdir, '--no_qa', '--thresh', 10]) == 0, (
         'pipnick_photometry should succeed'
     )
     tables = sorted((rdxdir / 'photometry').glob('*_phot.ecsv'))
@@ -97,7 +97,7 @@ def test_photometry_script(tmp_path):
 def test_calibrate_script(tmp_path):
     table, rdxdir, _ = test_calibrate.write_night(tmp_path, test_calibrate.wide_design())
     assert run(
-        Calibrate, ['-t', table, '-r', rdxdir, '--apply', 'both', '--no_qa', '--fix', 'color=0.']
+        Calibrate, [table, '-r', rdxdir, '--apply', 'both', '--no_qa', '--fix', 'color=0.']
     ) == 0, 'pipnick_calibrate should succeed'
     content, _ = test_calibrate.read_calibration(test_calibrate.calibration_file(rdxdir))
     assert content['band']['V']['source'][2] == 'fixed', 'The options should reach the fit'
@@ -109,7 +109,7 @@ def test_calibrate_script(tmp_path):
 
 def test_mosaic_and_inspect(tmp_path):
     table, rdxdir, _ = write_dithers(tmp_path, three_dithers())
-    assert run(Mosaic, ['-t', table, '--no_qa', '--scale', 'none']) == 0, (
+    assert run(Mosaic, [table, '--no_qa', '--scale', 'none']) == 0, (
         'pipnick_mosaic should succeed'
     )
     mosaics = sorted((rdxdir / 'mosaic').glob('*.fits'))
@@ -123,7 +123,7 @@ def test_mosaic_and_inspect(tmp_path):
 
     image = DataSet.from_file(table).science_images()[0]
     ofile = tmp_path / 'inspect.png'
-    run(Inspect, ['-t', table, image.path.stem, '--id', 1, '--ofile', ofile])
+    run(Inspect, [table, image.path.stem, '--id', 1, '--ofile', ofile])
     assert matplotlib.image.imread(ofile).ndim == 3, (
         'pipnick_inspect --ofile should write the image of the sources'
     )

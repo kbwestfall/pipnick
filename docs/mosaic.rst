@@ -16,16 +16,16 @@ The workflow is:
 
 .. code-block:: console
 
-   pipnick_metadata -d raw --split --assign_mosaics
-   pipnick_reduce -t n3_2x2_fast_full.ecsv
-   pipnick_astrometry -t n3_2x2_fast_full.ecsv
-   pipnick_photometry -t n3_2x2_fast_full.ecsv
-   pipnick_mosaic -t n3_2x2_fast_full.ecsv
+   pipnick_metadata raw n3 --split --assign_mosaics
+   pipnick_reduce n3_2x2_fast_full.ecsv
+   pipnick_astrometry n3_2x2_fast_full.ecsv
+   pipnick_photometry n3_2x2_fast_full.ecsv
+   pipnick_mosaic n3_2x2_fast_full.ecsv
 
 Inputs
 ------
 
-- **One or more per-setup metadata tables** (``-t``), with the mosaics
+- **One or more per-setup metadata tables** (``raw_table``), with the mosaics
   defined in their ``mosaic`` and ``wcs_group`` columns (see below).
 - **The reduced science images** (see :doc:`reduce`), with their
   **astrometric solutions** from ``pipnick_astrometry`` (see
@@ -167,12 +167,12 @@ Running it
 
 .. code-block:: console
 
-   pipnick_mosaic -t n3_2x2_fast_full.ecsv n3_2x2_slow_full.ecsv --outdir mosaics
+   pipnick_mosaic n3_2x2_fast_full.ecsv n3_2x2_slow_full.ecsv --outdir mosaics
 
 The options are (the logging options are common to every script; see
 :doc:`common`):
 
-- ``-t``, ``--raw_table``: One or more per-setup metadata files (required).
+- ``raw_table``: One or more per-setup metadata files (required).
 - ``--outdir``: The output directory.  If not provided, the ``mosaic``
   subdirectory of the reduction directory, which requires a single table.
 - ``--mosaics``: Only construct these mosaics (labels).

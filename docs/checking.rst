@@ -24,14 +24,14 @@ pipnick_status
 
 .. code-block:: console
 
-    pipnick_status -t n3_2x2_fast_full.ecsv
+    pipnick_status n3_2x2_fast_full.ecsv
 
 **Inputs.**  A per-setup metadata table and its reduction directory, at any
 stage of the processing.
 
 **Options.**
 
-- ``-t``, ``--raw_table``: The per-setup metadata table (required).
+- ``raw_table``: The per-setup metadata table (required).
 - ``-r``, ``--rdxdir``: The reduction directory.  If not provided, the
   directory saved in the table is used.
 - ``--mosaic_dir``: The directory with the mosaics, if they were written
@@ -67,13 +67,13 @@ pipnick_report
 
 .. code-block:: console
 
-    pipnick_report -t n3_2x2_fast_full.ecsv
+    pipnick_report n3_2x2_fast_full.ecsv
 
 **Inputs.**  A per-setup metadata table and its reduction directory.
 
 **Options.**
 
-- ``-t``, ``--raw_table``: The per-setup metadata table (required).
+- ``raw_table``: The per-setup metadata table (required).
 - ``-r``, ``--rdxdir``: The reduction directory.  If not provided, the
   directory saved in the table is used.
 - ``--mosaic_dir``: As for ``pipnick_status``.
@@ -132,10 +132,10 @@ pipnick_inspect
 
 .. code-block:: console
 
-    pipnick_inspect -t n3_2x2_fast_full.ecsv M11_V_C096_2026-08-20
-    pipnick_inspect -t n3_2x2_fast_full.ecsv 96 --id 12 --display
-    pipnick_inspect -t n3_2x2_fast_full.ecsv 96 --source 282.77,-6.27
-    pipnick_inspect -t n3_2x2_fast_full.ecsv 96 --source 18:51:04.8,-06:16:12 --ofile c96.png
+    pipnick_inspect n3_2x2_fast_full.ecsv M11_V_C096_2026-08-20
+    pipnick_inspect n3_2x2_fast_full.ecsv 96 --id 12 --display
+    pipnick_inspect n3_2x2_fast_full.ecsv 96 --source 282.77,-6.27
+    pipnick_inspect n3_2x2_fast_full.ecsv 96 --source 18:51:04.8,-06:16:12 --ofile c96.png
 
 **Inputs.**  A per-setup metadata table, its reduction directory, and one of
 its science images, given by its file name (with or without the extension) or
@@ -143,7 +143,7 @@ its combination group.
 
 **Options.**
 
-- ``-t``, ``--raw_table``, ``-r``, ``--rdxdir``, ``--mosaic_dir``: As for
+- ``raw_table``, ``-r``, ``--rdxdir``, ``--mosaic_dir``: As for
   ``pipnick_status``.
 - ``--id``: Trace the source with this ``id`` in the source table of the
   image.

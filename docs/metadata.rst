@@ -76,15 +76,18 @@ An example call looks like this:
 
 .. code-block:: console
 
-    pipnick_metadata -d raw -t n3.ecsv --split --assign_mosaics
+    pipnick_metadata raw n3 --split --assign_mosaics
+
+The two arguments are required:
+
+- ``rawdir``: The directory with the raw frames of one night.
+- ``raw_table``: The name of the table, with or without the ``.ecsv``
+  extension: ``n3`` and ``n3.ecsv`` are both written to ``n3.ecsv``.  With
+  ``--split``, it is the base name of the per-setup tables: e.g., ``n3`` (or
+  ``n3.ecsv``) gives ``n3_2x2_fast_full.ecsv``.
 
 The options are:
 
-- ``-d``, ``--rawdir``: The directory with the raw frames of one night
-  (required to build a table).
-- ``-t``, ``--raw_table``: The table, or, with ``--split``, the base name of
-  the per-setup tables.  If not provided, a name is made from the camera and
-  the time.
 - ``--split``: Write one table per setup (see below).  The reduction requires
   per-setup tables.
 - ``--assign_mosaics`` (requires ``--split``): Label the science frames with
@@ -112,8 +115,9 @@ Outputs
 
 - **The table**, or, with ``--split``, **one table per setup**, named
   ``<base>_<xbin>x<ybin>_<readmode>_<window>.ecsv``: e.g.,
-  ``n3_2x2_fast_full.ecsv``, where the window is ``full`` for the full readout
-  or ``win00``, ``win01``, etc. for custom readout windows.  Each is an ECSV
+  ``n3_2x2_fast_full.ecsv``.  ``<base>`` is ``raw_table`` without the
+  ``.ecsv`` extension, and the window is ``full`` for the full readout or
+  ``win00``, ``win01``, etc. for custom readout windows.  Each is an ECSV
   file (a text file with a YAML header), with one row per frame and the
   columns:
 

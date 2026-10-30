@@ -19,7 +19,7 @@ class Inspect(scriptbase.ScriptBase):
             width=width
         )
         parser.add_argument(
-            '-t', '--raw_table', required=True, help='Per-setup metadata file.'
+            'raw_table', help='Per-setup metadata file.'
         )
         parser.add_argument(
             'image',

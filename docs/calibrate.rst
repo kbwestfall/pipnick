@@ -167,7 +167,7 @@ model is an area for improvement.
 Inputs
 ------
 
-- **A per-setup metadata table** (``-t``), used to reduce the images (see
+- **A per-setup metadata table** (``raw_table``), used to reduce the images (see
   :doc:`metadata` and :doc:`reduce`); it sets the airmass and observation
   time of each image.
 - **The source tables** of the science images, with celestial coordinates
@@ -182,12 +182,12 @@ Running it
 
 .. code-block:: console
 
-   pipnick_calibrate -t n1_2x2_slow_full.ecsv --apply both
+   pipnick_calibrate n1_2x2_slow_full.ecsv --apply both
 
 The options are (the logging options are common to every script; see
 :doc:`common`):
 
-- ``-t``, ``--raw_table``: The per-setup metadata file used to reduce the
+- ``raw_table``: The per-setup metadata file used to reduce the
   images (required).
 - ``-r``, ``--rdxdir``: The reduction directory.  If not provided, the
   directory saved in the metadata file is used.

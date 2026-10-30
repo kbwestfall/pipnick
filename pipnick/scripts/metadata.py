@@ -18,21 +18,24 @@ class MetaData(scriptbase.ScriptBase):
             width=width
         )
         parser.add_argument(
-            '-d', '--rawdir', type=str, default=None,
+            'rawdir', type=str,
             help='Path to the directory with the raw data from a single night.'
         )
         parser.add_argument(
-            '-t', '--raw_table', default=None,
-            help='File for the metadata, or the base name for the per-setup files if --split '
-                 'is set.  If not provided, a default name is used.'
+            'raw_table', type=str,
+            help='Name of the metadata file, with or without the .ecsv extension (e.g., n3 or '
+                 'n3.ecsv, both written to n3.ecsv), or the base name for the per-setup files '
+                 'if --split is set.'
         )
         parser.add_argument(
             '--split', default=False, action='store_true',
             help='Write one metadata file per instrument setup (read speed, binning, and '
-                 'readout window), named <base>_<xbin>x<ybin>_<readmode>_<window>, where the '
-                 'window is "full" for the full readout or win00, win01, etc. for custom '
-                 'windows.  Per-setup files also have a comb_id column that groups the frames '
-                 'to combine, and pointing and focus frames are commented out by default.'
+                 'readout window), named <base>_<xbin>x<ybin>_<readmode>_<window>.ecsv, where '
+                 '<base> is raw_table without the .ecsv extension (e.g., '
+                 'n3_2x2_fast_full.ecsv for n3), and the window is "full" for the full readout '
+                 'or win00, win01, etc. for custom windows.  Per-setup files also have a '
+                 'comb_id column that groups the frames to combine, and pointing and focus '
+                 'frames are commented out by default.'
         )
         parser.add_argument(
             '--assign_mosaics', default=False, action='store_true',
@@ -84,19 +87,16 @@ class MetaData(scriptbase.ScriptBase):
         from pipnick import log
         from pipnick.cameras import available_cameras
         from pipnick.metadata.build import build_metadata
+        from pipnick.metadata.names import table_file_name
         from pipnick.metadata.setups import find_setup_files
         from pipnick.pkg.report import StepReport
 
         # Initialize logger, in the default reduction directory (the parent of
         # the raw directory)
-        root = None if args.rawdir is None else Path(args.rawdir).absolute().parent
-        cls.init_log(args, log_dir=cls.log_dir(root))
+        cls.init_log(args, log_dir=cls.log_dir(Path(args.rawdir).absolute().parent))
 
         if args.assign_mosaics and not args.split:
             log.error('--assign_mosaics requires --split.')
-            return 1
-        if args.rawdir is None:
-            log.error('Must provide the directory with the raw data (--rawdir).')
             return 1
         if args.camera is not None and args.camera not in available_cameras():
             log.error(
@@ -104,23 +104,24 @@ class MetaData(scriptbase.ScriptBase):
                 f'{", ".join(available_cameras())}.'
             )
             return 1
-        if args.raw_table is not None and not args.overwrite and not args.append:
-            if args.split and len(find_setup_files(args.raw_table)) > 0:
+        table = table_file_name(args.raw_table)
+        if not args.overwrite and not args.append:
+            if args.split and len(find_setup_files(table)) > 0:
                 log.error(
-                    f'Per-setup files for {args.raw_table} already exist.  Use --append to add '
-                    'new files to them, or --overwrite to rebuild them.'
+                    f'Per-setup files for {table} already exist.  Use --append to add new files '
+                    'to them, or --overwrite to rebuild them.'
                 )
                 return 1
-            if not args.split and Path(args.raw_table).is_file():
+            if not args.split and table.is_file():
                 log.error(
-                    f'{args.raw_table} already exists.  Use --append to add new files to it, '
-                    'or --overwrite to rebuild it.'
+                    f'{table} already exists.  Use --append to add new files to it, or '
+                    '--overwrite to rebuild it.'
                 )
                 return 1
 
         report = StepReport('METADATA')
         files, tbl = build_metadata(
-            rawdir=args.rawdir, filename=args.raw_table, ext=args.ext, overwrite=args.overwrite,
+            rawdir=args.rawdir, filename=table, ext=args.ext, overwrite=args.overwrite,
             append=args.append, camera=args.camera, classify=args.classify, split=args.split,
             assign=args.assign_mosaics, mosaic_radius=args.mosaic_radius, report=report
         )
@@ -136,8 +137,11 @@ class MetaData(scriptbase.ScriptBase):
             'comb_id groups), then run: '
         )
         if args.split:
-            following += ' or '.join(f'pipnick_reduce -t {f}' for f in files)
+            following += ' or '.join(f'pipnick_reduce {f}' for f in files)
         else:
-            following += 'pipnick_metadata --split to write a table for each setup'
+            following += (
+                f'pipnick_metadata {args.rawdir} {args.raw_table} --split to write a table for '
+                'each setup'
+            )
         report.finish(f'{len(tbl)} frames in {len(files)} table(s).', next_step=following)
         return report.exit_status

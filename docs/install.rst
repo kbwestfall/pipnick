@@ -99,7 +99,7 @@ and then clone and install it as follows:
 
 .. code-block:: console
 
-    git clone https://github.com/{your_github_handle}/pipnick.git
+    git clone https://github.com/<your_github_handle>/pipnick.git
     cd pipnick
     pip install -e ".[dev]"
 

@@ -55,7 +55,7 @@ table is edited, simply rerun the reduction.
 Inputs
 ------
 
-- **A per-setup metadata table** (``-t``), written by ``pipnick_metadata
+- **A per-setup metadata table** (``raw_table``), written by ``pipnick_metadata
   --split``; see :doc:`metadata`.  Commented-out rows are ignored.
 - **The raw frames** it lists, in the raw directory recorded in the table.
 
@@ -64,11 +64,11 @@ Running it
 
 .. code-block:: console
 
-    pipnick_reduce -t n3_2x2_fast_full.ecsv
+    pipnick_reduce n3_2x2_fast_full.ecsv
 
 The options are:
 
-- ``-t``, ``--raw_table``: The per-setup metadata table (required).
+- ``raw_table``: The per-setup metadata table (required).
 - ``-r``, ``--rdxdir``: The reduction directory.  By default, the directory
   saved in the table or, the first time, the parent of the raw directory.
   The directory is saved to the table, so the later steps find it.  A

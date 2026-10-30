@@ -8,6 +8,15 @@ log below indicates changes made since that initial development.
 Breaking Changes
 ----------------
 
+- The scripts take their required inputs as positional arguments: the
+  metadata table, instead of ``-t``/``--raw_table``, for every script that
+  reads it (e.g., ``pipnick_reduce n3_2x2_fast_full.ecsv``), and the raw
+  directory and table name, instead of ``-d``/``--rawdir`` and
+  ``-t``/``--raw_table``, for ``pipnick_metadata`` (e.g., ``pipnick_metadata
+  raw n3 --split``).  The table name of ``pipnick_metadata`` is required, and
+  can be given with or without the ``.ecsv`` extension
+  (``pipnick.metadata.names.table_file_name``).
+
 - The command-line scripts have been reorganized.  ``pipnick_reduction`` is
   replaced by ``pipnick_metadata`` (builds the raw-data metadata table) and
   ``pipnick_reduce``.  All scripts now share the logging options ``-v

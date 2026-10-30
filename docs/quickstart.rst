@@ -33,11 +33,12 @@ build the data table, run:
 
 .. code-block:: console
 
-    pipnick_metadata -d raw -t n3.ecsv --split --assign_mosaics
+    pipnick_metadata raw n3 --split --assign_mosaics
 
-``-d`` is the directory that contains the raw frames.  ``pipnick_metadata``
-reads the header of each file, classifies it, and, with ``--split``, writes one
-table per instrument setup.  The instrument setup is determined by unique
+The first argument (``raw``) is the directory that contains the raw frames, and
+the second (``n3``) is the name of the table.  ``pipnick_metadata`` reads the
+header of each file, classifies it, and, with ``--split``, writes one table per
+instrument setup, named for the setup (e.g., ``n3_2x2_fast_full.ecsv``).  The instrument setup is determined by unique
 combinations of the binning, readout mode, and readout window used to obtain the
 observations.  With ``--assign_mosaics``, the science frames are grouped into
 mosaics by pointing and filter.
@@ -95,12 +96,13 @@ information, including the meaning for the different combination columns
 
 .. code-block:: console
 
-    pipnick_reduce -t n3_2x2_fast_full.ecsv -r rdx
+    pipnick_reduce n3_2x2_fast_full.ecsv -r rdx
 
 The bias and the dome flats of each filter are combined, and each science
-frame is bias-subtracted, flat-fielded, and cleaned of cosmic rays.  ``-r``
-sets the reduction directory, which is saved to the table, so the later steps
-need only ``-t``.
+frame is bias-subtracted, flat-fielded, and cleaned of cosmic rays.  The
+metadata table is the only required argument of this and every later step.
+``-r`` sets the reduction directory, which is saved to the table, so the later
+steps need only the table.
 
 .. code-block:: text
 
@@ -137,7 +139,7 @@ First, check what would be done, without submitting anything:
 
 .. code-block:: console
 
-    pipnick_astrometry -t n3_2x2_fast_full.ecsv --dry_run
+    pipnick_astrometry n3_2x2_fast_full.ecsv --dry_run
 
 .. code-block:: text
 
@@ -151,7 +153,7 @@ Then solve the images:
 
 .. code-block:: console
 
-    pipnick_astrometry -t n3_2x2_fast_full.ecsv
+    pipnick_astrometry n3_2x2_fast_full.ecsv
 
 pipnick submits as few images as possible to astrometry.net (by default, only
 the positions of the brightest sources are sent, not the image).  The other
@@ -188,7 +190,7 @@ See :doc:`astrometry`.
 
 .. code-block:: console
 
-    pipnick_photometry -t n3_2x2_fast_full.ecsv
+    pipnick_photometry n3_2x2_fast_full.ecsv
 
 Each image gets a PSF model and a source table with PSF and aperture
 photometry, ``rdx/photometry/<image>_phot.ecsv``.
@@ -217,7 +219,7 @@ See :doc:`photometry`.
 
 .. code-block:: console
 
-    pipnick_calibrate -t n3_2x2_fast_full.ecsv --terms zp --min_stars 1 --apply both
+    pipnick_calibrate n3_2x2_fast_full.ecsv --terms zp --min_stars 1 --apply both
 
 The standard stars observed during the night are identified, and the
 calibration of each band is fit to their measurements and applied to every
@@ -265,7 +267,7 @@ Then:
 
 .. code-block:: console
 
-    pipnick_mosaic -t n3_2x2_fast_full.ecsv
+    pipnick_mosaic n3_2x2_fast_full.ecsv
 
 The images of each mosaic are matched to a common PSF, scaled to a common
 flux level, reprojected, and combined.  All of the mosaics of a WCS group (here,
@@ -323,8 +325,8 @@ See :doc:`rgb`.
 
 .. code-block:: console
 
-    pipnick_status -t n3_2x2_fast_full.ecsv
-    pipnick_report -t n3_2x2_fast_full.ecsv
+    pipnick_status n3_2x2_fast_full.ecsv
+    pipnick_report n3_2x2_fast_full.ecsv
 
 ``pipnick_status`` prints the state of every step for every image, and the
 images that need attention:

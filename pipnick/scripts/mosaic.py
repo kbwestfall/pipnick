@@ -19,7 +19,7 @@ class Mosaic(scriptbase.ScriptBase):
             width=width
         )
         parser.add_argument(
-            '-t', '--raw_table', nargs='+', required=True,
+            'raw_table', nargs='+',
             help='Per-setup metadata files used to reduce the images (see pipnick_reduce).  '
                  'The images in all of the tables with the same labels are combined.'
         )

@@ -423,7 +423,7 @@ def calibrate_all(
         raise PipnickDataModelError('No band could be calibrated; see the summary above.')
     following = None
     if 'mosaic' in dataset.table.colnames and np.any(dataset.table['mosaic'] != ''):
-        following = f'pipnick_mosaic -t {dataset.metafile}'
+        following = f'pipnick_mosaic {dataset.metafile}'
     _report.finish(text, next_step=following)
     return outputs
 

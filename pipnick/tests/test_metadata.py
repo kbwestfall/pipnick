@@ -2,6 +2,8 @@
 Tests for the metadata table, using synthetic FITS files.
 """
 
+from pathlib import Path
+
 import numpy as np
 import pytest
 from astropy.coordinates import EarthLocation
@@ -14,6 +16,7 @@ from pipnick import cameras
 from pipnick.metadata import build, setups
 from pipnick.metadata.build import build_camera_datatable, build_metadata, summarize
 from pipnick.metadata.groups import mosaic_columns
+from pipnick.metadata.names import table_file_name
 from pipnick.metadata.setups import find_setup_files, setup_file_keys
 from pipnick.metadata.table import (
     metadata_columns, read_metadata, update_metadata_meta, write_metadata
@@ -209,6 +212,32 @@ def test_round_trip(tmp_path):
     # Reloading reads the file instead of rebuilding the table
     _, reloaded = build_metadata(filename=ofile)
     assert list(reloaded['setup']) == ['A', 'B'], 'Reloading should read the existing table'
+
+
+def test_table_file_name(tmp_path):
+    assert table_file_name('n3') == Path('n3.ecsv'), (
+        'The .ecsv extension should be appended to a name without it'
+    )
+    assert table_file_name('rdx/n3.ecsv') == Path('rdx/n3.ecsv'), (
+        'A name with the .ecsv extension should be unchanged'
+    )
+    assert table_file_name('n3.night') == Path('n3.night.ecsv'), (
+        '.ecsv should be appended to a name with any other extension'
+    )
+
+    rawdir = tmp_path / 'raw'
+    rawdir.mkdir()
+    write_andor(rawdir / 'n4001.fits', OBSTYPE='DARK', OBJECT='bias', XPOSURE=0.207)
+    write_andor(rawdir / 'n4002.fits', AMPCONF='0.05MHz')
+    ofile, _ = build_metadata(rawdir=rawdir, filename=tmp_path / 'n4')
+    assert ofile == tmp_path / 'n4.ecsv' and ofile.is_file(), (
+        'A table named without the extension should be written to <name>.ecsv'
+    )
+    files, _ = build_metadata(rawdir=rawdir, filename=tmp_path / 'n4', split=True)
+    assert [f.name for f in files] == ['n4_2x2_fast_full.ecsv', 'n4_2x2_slow_full.ecsv'], (
+        'Per-setup tables of a base name without the extension should be named as for '
+        '<name>.ecsv'
+    )
 
 
 def test_mixed_cameras(tmp_path):

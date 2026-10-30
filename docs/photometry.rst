@@ -51,7 +51,7 @@ filter, exposure time, and airmass are taken from the metadata table.
 Inputs
 ------
 
-- **A per-setup metadata table** (``-t``), used to reduce the images (see
+- **A per-setup metadata table** (``raw_table``), used to reduce the images (see
   :doc:`metadata` and :doc:`reduce`).
 - **The reduced science images**, with their uncertainties (``UNCERT``) and
   masks (``MASK``).
@@ -65,12 +65,12 @@ Running it
 
 .. code-block:: console
 
-   pipnick_photometry -t n1_2x2_slow_full.ecsv
+   pipnick_photometry n1_2x2_slow_full.ecsv
 
 The options are (the logging options are common to every script; see
 :doc:`common`):
 
-- ``-t``, ``--raw_table``: The per-setup metadata file used to reduce the
+- ``raw_table``: The per-setup metadata file used to reduce the
   images (required).
 - ``-r``, ``--rdxdir``: The reduction directory.  If not provided, the
   directory saved in the metadata file is used.

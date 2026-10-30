@@ -58,7 +58,7 @@ the flux used to rank the sources, which is why pipnick requires it.)
 Inputs
 ------
 
-- **A per-setup metadata table** (``-t``), used to reduce the images (see
+- **A per-setup metadata table** (``raw_table``), used to reduce the images (see
   :doc:`metadata` and :doc:`reduce`).  The pointing of each image (``ra``,
   ``dec``) is taken from it.
 - **The reduced science images**, in the reduction directory.
@@ -75,12 +75,12 @@ Running it
 
 .. code-block:: console
 
-   pipnick_astrometry -t n1_2x2_slow_full.ecsv
+   pipnick_astrometry n1_2x2_slow_full.ecsv
 
 The options are (the logging options are common to every script; see
 :doc:`common`):
 
-- ``-t``, ``--raw_table``: The per-setup metadata file used to reduce the
+- ``raw_table``: The per-setup metadata file used to reduce the
   images (required).
 - ``-r``, ``--rdxdir``: The reduction directory.  If not provided, the
   directory saved in the metadata file is used.
@@ -123,8 +123,8 @@ one submission:
 
 .. code-block:: console
 
-   pipnick_astrometry -t n1_2x2_slow_full.ecsv --dry_run
-   pipnick_astrometry -t n1_2x2_slow_full.ecsv --max_submissions 1
+   pipnick_astrometry n1_2x2_slow_full.ecsv --dry_run
+   pipnick_astrometry n1_2x2_slow_full.ecsv --max_submissions 1
 
 Rerunning the script is safe: solved images are not changed, and nothing is
 submitted unless an image cannot be solved otherwise.
@@ -227,8 +227,8 @@ submission to astrometry.net:
 
   .. code-block:: console
 
-     pipnick_reduce -t n1_2x2_slow_full.ecsv
-     pipnick_astrometry -t n1_2x2_slow_full.ecsv
+     pipnick_reduce n1_2x2_slow_full.ecsv
+     pipnick_astrometry n1_2x2_slow_full.ecsv
 
   ``pipnick_reduce`` reprocesses only the images whose table values changed
   (see :doc:`reduce`), writing the corrected coordinates to
