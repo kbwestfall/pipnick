@@ -7,6 +7,17 @@ The processing scripts share their layout of the outputs, their logs and
 verdicts, their rules for rerunning, and their QA figures.  These are
 described here once, and referred to by the page of each script.
 
+Command-line options
+--------------------
+
+For all pipnick scripts, you can get basic help with all the command line
+options using the ``-h`` option, such as:
+
+.. code-block:: bash
+
+    pipnick_metadata -h
+
+
 The reduction directory
 -----------------------
 
