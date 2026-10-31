@@ -42,8 +42,8 @@ from pipnick import log
 from pipnick.astrometry.cache import anet_input_hash, invalidate_chains, restore_solution
 from pipnick.astrometry.services import GaiaCatalog, astrometry_net_hints
 from pipnick.astrometry.solve import (
-    AstrometryImage, Session, group_by_pointing, group_order, group_reference, handle_result,
-    log_pointing_offset, nsources, read_image, solve_group
+    AstrometryImage, Session, check_pointing, group_by_pointing, group_order, group_reference,
+    handle_result, log_pointing_offset, nsources, read_image, solve_group
 )
 from pipnick.datamodel.dataset import DataSet
 from pipnick.image.detect import brightest, find_sources
@@ -201,7 +201,7 @@ def _summarize(images, astro_dir):
     The summary gives, for each image, its status (``solved``, ``unsolved``,
     ``pending``, or ``skipped`` if not selected), the method, the reference,
     the number of matched sources, the RMS residual (arcsec), and the pointing
-    error (arcmin; see :func:`~pipnick.astrometry.solve._pointing_error`) of
+    error (arcmin; see :func:`~pipnick.astrometry.solve.pointing_error`) of
     its solution, and, for images that are not solved, the reason and a
     suggestion.
     """
@@ -504,6 +504,7 @@ def astrometry_all(
         if image.status == 'solved':
             # An existing solution, restored above
             _report.check_version(image.name, image.header.get('PNASTVER'))
+            check_pointing(image, settings.search)
     log_pointing_offset(_images)
     groups = group_by_pointing(_images, settings.group_radius)
 

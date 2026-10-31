@@ -515,7 +515,11 @@ def test_points(tmp_path):
     astrometry_all(
         table, rdxdir=rdxdir, solver=solver, catalog=FakeCatalog(coords, flux), qa=False
     )
-    assert fits.getheader(image)['PNASTMTH'] == 'points', 'The user solution should be restored'
+    hdr = fits.getheader(image)
+    assert hdr['PNASTMTH'] == 'points', 'The user solution should be restored'
+    assert hdr['PNASTNPT'] == 10 and hdr['PNASTRMS'] == round(stats['rms'], 4), (
+        'The statistics of the user solution should be restored with it'
+    )
     assert len(solver.calls) == 0, 'Nothing should be submitted'
     assert solution_error(image, wcs) < 1e-3, 'The restored solution should be unchanged'
 
@@ -688,6 +692,83 @@ def test_wide_search(tmp_path, caplog):
     )
     assert fits.getheader(rdxdir / stale_2)['PNASTREF'] == stale_1, (
         'The image should be bootstrapped from the first stale image'
+    )
+
+
+def test_restored_pointing_error(tmp_path, caplog):
+    # Two distant images, each given the pointing of the other
+    images = {'n7001': ((0., 0.), 0.), 'n7004': ((150., 90.), 0.)}
+    table, rdxdir, truth, coords, flux = write_field(
+        tmp_path, images=images, stale={'n7001': 'n7004', 'n7004': 'n7001'}
+    )
+    first, second = sorted(truth.keys())
+
+    # A user solution applied outside the pipeline has no pointing error until
+    # the pipeline checks it
+    apply_wcs(rdxdir / first, truth[first])
+    assert 'PNASTPOE' not in fits.getheader(rdxdir / first), (
+        'apply_wcs should not record a pointing error unless given one'
+    )
+    solver = FakeSolver(truth, coords)
+    astrometry_all(
+        table, rdxdir=rdxdir, solver=solver, catalog=FakeCatalog(coords, flux), qa=False
+    )
+    errors = {name: fits.getheader(rdxdir / name).get('PNASTPOE') for name in truth}
+    assert all(e is not None and e > 1. for e in errors.values()), (
+        'The pointing error should be recorded for every image, however it was solved'
+    )
+    methods = {name: fits.getheader(rdxdir / name)['PNASTMTH'] for name in truth}
+    assert methods[first] == 'points', 'The user solution should be kept'
+
+    # A rerun changes nothing
+    before = {name: (rdxdir / name).stat().st_mtime_ns for name in truth}
+    astrometry_all(
+        table, rdxdir=rdxdir, solver=solver, catalog=FakeCatalog(coords, flux), qa=False
+    )
+    assert {name: (rdxdir / name).stat().st_mtime_ns for name in truth} == before, (
+        'A rerun should not rewrite images whose pointing error is already recorded'
+    )
+
+    # Rewritten images get their pointing errors back with the restored
+    # solutions
+    for name in truth:
+        with fits.open(rdxdir / name, mode='update') as hdu:
+            header._remove_wcs(hdu[0].header)
+    ncalls = len(solver.calls)
+    astrometry_all(
+        table, rdxdir=rdxdir, solver=solver, catalog=FakeCatalog(coords, flux), qa=False
+    )
+    assert len(solver.calls) == ncalls, 'Restoring the solutions should not submit anything'
+    for name in truth:
+        hdr = fits.getheader(rdxdir / name)
+        assert hdr['PNASTMTH'] == methods[name], f'The solution of {name} should be restored'
+        assert hdr.get('PNASTPOE') == errors[name], (
+            f'The pointing error of {name} should be recorded again'
+        )
+
+    # The same, for a cached astrometry.net solution; the images are closer, so
+    # that the solution is within the radius of the submission
+    (tmp_path / 'b').mkdir()
+    images = {'n7001': ((0., 0.), 0.), 'n7002': ((80., 40.), 0.)}
+    table, rdxdir, truth, coords, flux = write_field(
+        tmp_path / 'b', images=images, stale={'n7001': 'n7002', 'n7002': 'n7001'}
+    )
+    solver = FakeSolver(truth, coords)
+    astrometry_all(
+        table, rdxdir=rdxdir, solver=solver, catalog=FakeCatalog(coords, flux), qa=False
+    )
+    submitted = rdxdir / solver.calls[0][1]
+    error = fits.getheader(submitted).get('PNASTPOE')
+    assert error is not None, 'The pointing error of the submitted image should be recorded'
+    with fits.open(submitted, mode='update') as hdu:
+        header._remove_wcs(hdu[0].header)
+    caplog.clear()
+    astrometry_all(
+        table, rdxdir=rdxdir, solver=solver, catalog=FakeCatalog(coords, flux), qa=False
+    )
+    assert 'cached astrometry.net solution' in caplog.text, 'The cache should be used'
+    assert fits.getheader(submitted).get('PNASTPOE') == error, (
+        'The pointing error should be recorded with the cached astrometry.net solution'
     )
 
 

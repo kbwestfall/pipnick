@@ -22,7 +22,7 @@ from pipnick.astrometry.fit import (
     fit_wcs, image_center, predict_wcs, scale_and_rotation, to_icrs, wcs_from_header,
     wcs_from_transform, wcs_residuals
 )
-from pipnick.astrometry.header import apply_wcs
+from pipnick.astrometry.header import apply_wcs, set_pointing_error
 from pipnick.astrometry.match import match_frames
 from pipnick.astrometry.services import AstrometryNetSolver, icrs_header
 from pipnick.image.io import read_reduced
@@ -104,7 +104,7 @@ class AstrometryImage:
         self.submit_failed = False
         # The distance (arcmin) between the image center and the pointing in
         # the metadata table, if larger than the search distance (i.e., the
-        # pointing is likely incorrect); see _pointing_error
+        # pointing is likely incorrect); see pointing_error
         self.pointing_error = None
         # Whether the image is selected for solving
         self.selected = True
@@ -276,7 +276,7 @@ def pointing_offset(images):
     Return the median offset between the solved and the telescope pointing of
     the solved images, as longitude and latitude offsets in arcsec; see
     :func:`astropy.coordinates.SkyCoord.spherical_offsets_to`.  Images with
-    likely incorrect pointings (see :func:`_pointing_error`) are excluded.
+    likely incorrect pointings (see :func:`pointing_error`) are excluded.
     The offset is 0 if no image is solved.
     """
     dlon = []
@@ -299,7 +299,7 @@ def _predicted_center(image, images):
     the pointing offset of the solved images; see :func:`pointing_offset`.
 
     If a solved image with a likely incorrect pointing in the metadata table
-    (see :func:`_pointing_error`) has the same pointing (to within 1 arcsec),
+    (see :func:`pointing_error`) has the same pointing (to within 1 arcsec),
     the pointing is likely stale for both, and the offset measured for that
     image is used instead.
     """
@@ -315,7 +315,7 @@ def _predicted_center(image, images):
 
 
 
-def _pointing_error(image, wcs, session):
+def pointing_error(image, wcs, search):
     """
     Check the pointing in the metadata table against a solution.
 
@@ -325,6 +325,16 @@ def _pointing_error(image, wcs, session):
     image is excluded from the pointing offset used to predict the positions
     of other images (see :func:`pointing_offset`).
 
+    Parameters
+    ----------
+    image : :class:`AstrometryImage`
+        The image.
+    wcs : :class:`astropy.wcs.WCS`
+        The solution.
+    search : float
+        The distance in arcsec beyond which the pointing is likely incorrect;
+        see :class:`~pipnick.pkg.settings.AstrometrySettings`.
+
     Returns
     -------
     float, None
@@ -333,7 +343,7 @@ def _pointing_error(image, wcs, session):
     """
     center = image_center(wcs, image.shape)
     offset = center.separation(image.pointing).arcsec
-    if offset <= session.settings.search:
+    if offset <= search:
         return None
     log.warning(
         f'{image.name} is centered at {center.to_string("hmsdms", sep=":", precision=1)}, '
@@ -342,6 +352,36 @@ def _pointing_error(image, wcs, session):
         'and rerunning pipnick_reduce.'
     )
     return offset / 60
+
+
+
+def check_pointing(image, search):
+    """
+    Check the pointing in the metadata table against an existing or restored
+    solution, and record the result in the header of the image.
+
+    The solutions kept or restored by
+    :func:`~pipnick.astrometry.cache.restore_solution` (e.g., one provided by
+    the user, or a cached astrometry.net solution) are checked in the same way
+    as those found in the current run, so that the pointing error
+    (``PNASTPOE``) is recorded however the image was solved; see
+    :func:`pointing_error`.  The header is only rewritten if the recorded
+    pointing error changes.
+
+    Parameters
+    ----------
+    image : :class:`AstrometryImage`
+        The solved image.  Its state is updated.
+    search : float
+        The distance in arcsec beyond which the pointing is likely incorrect.
+    """
+    error = pointing_error(image, image.wcs, search)
+    recorded = image.header.get('PNASTPOE')
+    if error is None and recorded is None:
+        return
+    if error is not None and recorded is not None and round(error, 3) == float(recorded):
+        return
+    image.set_solution(set_pointing_error(image.path, error))
 
 
 
@@ -496,7 +536,8 @@ def _bootstrap_frame(image, ref, images, session):
     image.set_solution(
         apply_wcs(
             image.path, wcs, method='bootstrap', stats=stats, reference=ref.name,
-            reference_hash=ref.solution_hash, pointing_error=_pointing_error(image, wcs, session)
+            reference_hash=ref.solution_hash,
+            pointing_error=pointing_error(image, wcs, session.settings.search)
         )
     )
     image.matched = _matched_positions(image, match, wcs, coords, ref.name)
@@ -522,7 +563,7 @@ def _bootstrap_gaia(image, ref, images, session, wide=False):
     ``wide_min_matches`` matched sources are required.
 
     For any solution, a pointing error larger than ``search`` is recorded in
-    the header (``PNASTPOE``) and reported; see :func:`_pointing_error`.
+    the header (``PNASTPOE``) and reported; see :func:`pointing_error`.
 
     Returns
     -------
@@ -571,7 +612,7 @@ def _bootstrap_gaia(image, ref, images, session, wide=False):
     image.set_solution(
         apply_wcs(
             image.path, wcs, method='gaia', stats=stats, reference='Gaia DR3',
-            pointing_error=_pointing_error(image, wcs, session)
+            pointing_error=pointing_error(image, wcs, session.settings.search)
         )
     )
     image.matched = _matched_positions(
@@ -648,7 +689,8 @@ def handle_result(image, status, header, submission_id, session):
     image.set_solution(
         apply_wcs(
             image.path, wcs, method='astrometry.net', input_hash=image.input_hash,
-            submission_id=submission_id, pointing_error=_pointing_error(image, wcs, session)
+            submission_id=submission_id,
+            pointing_error=pointing_error(image, wcs, session.settings.search)
         )
     )
 

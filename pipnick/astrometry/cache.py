@@ -115,11 +115,12 @@ def restore_solution(image, images, astro_dir):
     image whose solution has since changed, or it is an astrometry.net
     solution not labeled as ICRS (see
     :func:`~pipnick.astrometry.services.icrs_header`).  Otherwise, a solution provided by
-    the user (``astrometry/<image>_points.fits``) or a cached astrometry.net
-    result (matched by the hash of the input)
-    is applied (see :func:`_anet_record`).  A failed or rejected submission
-    prevents the image from being submitted again, and a pending submission
-    is monitored instead of submitting the image again.
+    the user (``astrometry/<image>_points.fits``, with its fit statistics) or a
+    cached astrometry.net result (matched by the hash of the input) is applied
+    (see :func:`_anet_record`).  The pointing error of the solution is checked
+    afterward; see :func:`~pipnick.astrometry.solve.check_pointing`.  A failed
+    or rejected submission prevents the image from being submitted again, and a
+    pending submission is monitored instead of submitting the image again.
 
     Parameters
     ----------
@@ -149,7 +150,13 @@ def restore_solution(image, images, astro_dir):
 
     points = points_file(image.path)
     if points.is_file():
-        image.set_solution(apply_wcs(image.path, wcs_from_header(fits.getheader(points))))
+        # The fit statistics of the provided solution are restored with it
+        saved = fits.getheader(points)
+        stats = (
+            {'npts': saved['PNASTNPT'], 'rms': saved['PNASTRMS']}
+            if 'PNASTNPT' in saved and 'PNASTRMS' in saved else None
+        )
+        image.set_solution(apply_wcs(image.path, wcs_from_header(saved), stats=stats))
         return
     record = _anet_record(astro_dir, image.input_hash)
     if record is None:
