@@ -3,28 +3,43 @@
 Common script behavior
 ======================
 
-The processing scripts share their layout of the outputs, their logs and
-verdicts, their rules for rerunning, and their QA figures.  These are
-described here once, and referred to by the page of each script.
+The pipnick processing scripts share a number of commonalities.  Discussion of
+these are collected here to minimize repetition in the documentation.
 
 Command-line options
 --------------------
 
-For all pipnick scripts, you can get basic help with all the command line
-options using the ``-h`` option, such as:
+All pipnick scripts will provide basic help when you use the ``-h`` option, such
+as:
 
 .. code-block:: bash
 
     pipnick_metadata -h
 
+This lists all the required and optional arguments and a short description of
+their purpose.
+
 
 The reduction directory
 -----------------------
 
-Each per-setup metadata table is reduced into its own **reduction
-directory**, which can hold the products of only one setup.  It is set by
-``pipnick_reduce -r`` (by default, the parent of the raw directory), saved to
-the table, and found there by the later steps.  Its layout is:
+Reductions and analysis are expected to be performed for each mode of the
+instrument for each night in its own top-level reduction directory.  For
+simplicity, pipnick adopts a fixed directory structure below this top-level
+directory.
+
+.. warning::
+
+    If you move any files within the following directory structure, pipnick will
+    assume it was not produced.  Execution of subsequent processing scripts may
+    try to reproduce moved files (adding them to their expected on-disk
+    locations), or they may not be able to proceed because of the missing file.
+
+When you run ``pypeit_reduce``, the reduction directory is saved in the header
+of the ECSV metadata table, and it is referenced this way through the other
+processing scripts.
+
+The directory structure pipnick uses for its output is as follows:
 
 .. code-block:: text
 
@@ -44,69 +59,87 @@ the table, and found there by the later steps.  Its layout is:
         report/                                index.html, ... (pipnick_report)
         log/                                   the logs of every script
 
-The reduced science images are the hub: each later step adds to their headers
-(the astrometric solution, the photometric calibration) or writes products
-named for them.
+Completion of each processing step can result in both new files and edits to the
+reduced science images.  For example, ``pipnick_astrometry`` both adds the new
+data in the ``astrometry/`` directory, but also adds the astrometric solution
+(WCS) to the processed file headers.
 
 Logs
 ----
 
-Each script writes a log by default, to a new file in the ``log``
-subdirectory of the reduction directory, named for the script and the time
-(UT) it started; e.g., ``<rdxdir>/log/pipnick_reduce_20261028T175048.log``.
-Logs are never overwritten or appended to: two runs started in the same
-second get distinct names (``..._2.log``).
+Each script writes a log file by default.  For example, the log file for the
+basic image processing is saved to
+``<rdxdir>/log/pipnick_reduce_<UT-date>.log``.  A new log file is produced every
+time the script is executed, meaning logs are never overwritten or appended to.
+If two logs would have the same name, the second one will be named
+``..._2.log``, etc.
 
-Scripts without a reduction directory write their logs to the nearest output
-directory: ``pipnick_metadata`` to the default reduction directory (the
-parent of the raw directory), ``pipnick_mosaic`` with ``--outdir`` to that
-directory, and ``pipnick_rgb`` next to its output image.
+Scripts that do not operate within the reduction directory will write their logs
+nearest to their output directory: ``pipnick_metadata`` writes logs to the
+default reduction directory (the parent of the raw directory),
+``pipnick_mosaic`` writes logs to the ``--outdir``, if it is set, and
+``pipnick_rgb`` writes logs next to its output image.
 
 Every script has the same logging options:
 
-- ``-v``, ``--verbosity``: The verbosity of the output to the terminal: 0
-  (warnings and errors), 1 (the default; also informational messages), or 2
-  (also debugging messages and the calling sequence).
-- ``--log_file``: A different log file, which must not exist.
-- ``--log_level``: The verbosity of the log file, if it differs from the
-  terminal's.
+- ``-v``, ``--verbosity``: This sets the verbosity of the output written to the
+  terminal: 0 only prints warnings and error, 1 adds informational messages (the
+  default), and 2 added debugging messages and the python calling sequence.
+
+- ``--log_file``: Use this to define the log file name directly instead of using
+  the default naming convention.  **The log file must not exist.**
+
+- ``--log_level``: Use this to set the verbosity of the log file if you want it
+  to be different from the default (verbosity level 2).
 
 Versions
 --------
 
-The first line of every log is the full pipnick version, and the version is
-recorded in every product:
+The first line of every log is the full pipnick version.  It is possible for
+different pipnick versions to be used for different steps.  For this reason, the
+version is saved in multiple places with names specific to the step executed:
 
-- the ``PNVERS`` header keyword of the reduced images and mosaics;
-- the ``PNASTVER`` keyword of an astrometric solution, and the ``PNCALVER``
-  keyword of a photometric calibration recorded in a header;
-- the ``pipnick_version`` metadata of the metadata tables, source tables,
+- the ``PNVERS`` keyword is added to header of
+  the reduced images and mosaics;
+
+- the ``PNASTVER`` keyword is the pipnick version specific to the astrometric
+  solution, and the ``PNCALVER`` keyword is specific to the photometric
+  calibration;
+
+- the ``pipnick_version`` is added to the metadata tables, source tables,
   calibration files, and summaries.
 
-When a step reuses an existing product made by a different version of pipnick
-(or by an earlier version that did not record it), it issues one warning
-listing these products.  They are still used: the version never causes a
-product to be rebuilt.  However, rerunning all of the processing steps with
-``--overwrite`` is recommended.  ``pipnick_version`` reports the installed
-version.
+When a step reuses an existing product made by a different version of pipnick,
+it issues one warning listing these products.  They are still used: the version
+never causes a product to be rebuilt.  **However, we strongly recommend
+rerunning all of the processing steps anytime you upgrade pipnick.**  This can
+be done using the ``--overwrite`` option, by deleting existing data, or by
+sending the output to a new reduction directory.
 
-Verdicts and summaries
-----------------------
+.. note::
+    
+    The ``pipnick_version`` script always reports the currently installed version.
 
-Each step ends with a verdict:
+Outcome status and summaries
+----------------------------
 
-- ``<STEP> OK``: everything worked;
-- ``<STEP> NEEDS ATTENTION``: the step finished, but some results need a
-  look, e.g., a missing flat or a measurement outside its expected range;
-  the problems are repeated in the verdict;
-- ``<STEP> FAILED``: some products could not be constructed.  The other
-  products are still constructed, the failures are listed, and the script
-  ends with a non-zero exit status.
+Each step ends with an outcome status indicating the end state of the execution:
 
-The verdict is followed by the next command to run.  Each step also writes a
-summary table to its output directory, ``<step>/summary.ecsv``, with one row
-per product and its status; the summary is also logged.  The columns of each
-summary are described on the page of its script.
+- ``<STEP> OK``: Everything executed successfully
+
+- ``<STEP> NEEDS ATTENTION``: The processing/analysis step finished, but some
+  results need to be inspected.  This could be a missing flat or a measurement
+  outside its expected range.  The specific problems encountered are repeated in
+  the outcome.
+
+- ``<STEP> FAILED``: A fatal error occurred, meaning that outputs were not fully
+  constructed.  The specific failures are listed and the script ends with a
+  non-zero exit status.
+
+The outcome status is followed by the next command to run.  Each step also
+writes a summary table to its output directory, ``<step>/summary.ecsv``, with
+one row per product and its status; the summary is also logged.  The columns of
+each summary are described on the page of its script.
 
 Reruns
 ------
@@ -119,42 +152,53 @@ Every step can be rerun at any time, and only does the work that is needed:
 - a product that is up to date is reported as such, and reused;
 - ``--overwrite`` rebuilds every product of the step.
 
-So, after adding frames to a night or changing a setting, rerun the steps in
-order; each one rebuilds only what changed.  ``pipnick_status`` reports which
-steps are out of date (see :doc:`checking`).
+After adding frames to a night or changing a setting, you can simply rerun the
+steps in order, and each step will only rebuild the outputs that must be
+updated.  The ``pipnick_status`` script will report which steps are out of date
+(see :doc:`checking`).
 
 QA figures
 ----------
 
-Each step writes QA figures by default, to the ``qa`` subdirectory of its
-output directory (use ``--no_qa`` to skip them):
+Each step writes a set of fixed-format QA figures to the ``qa`` subdirectory of
+its main directory, such as ``reduce/``.  You can skip writing these figures
+using the ``--no_qa``; however, you are strongly encouraged to keep them so that
+you can check the results.
 
-- ``reduce/qa/<product>.png``: each combined calibration frame and reduced
-  science image, with the histogram of its pixel values and its measurements;
-- ``astrometry/qa/<image>.png``: the detected sources and, for an image solved
-  in the run, the sources matched by the solution with their residuals;
-- ``photometry/qa/<image>_psf.png`` and ``<image>_sources.png``: the PSF model
-  and the measured sources;
-- ``calibrate/qa/<setup>_<night>_residuals.png``: the residuals of the
-  calibration;
-- ``mosaic/qa/<mosaic>.png``: the mosaic, its coverage, the flux scales, and
-  the PSF matching.
+- ``reduce/qa/<product>.png``: An image of each processed frame and a histogram
+  of its pixel values.
 
-A figure is redrawn when its product is rebuilt, and drawn for any product
-that lacks one.  A figure that cannot be drawn needs attention, but does not
-stop the step.  ``pipnick_report`` collects all of the figures in one place
-(see :doc:`checking`).
+- ``astrometry/qa/<image>.png``: The processed image with the detected sources
+  overlaid.  For each image solved, residuals between the source and solution
+  coordinates are shown.
+
+- ``photometry/qa/<image>_psf.png`` and ``photometry/qa/<image>_sources.png``:
+  Quality check for the PSF model and the measured sources.
+
+- ``calibrate/qa/<setup>_<night>_residuals.png``: A plot of the calibration
+  residuals.
+
+- ``mosaic/qa/<mosaic>.png``: An image of the mosaic, its sky coverage, the flux
+  scales, and the PSF matching.
+
+Each QA figure is redrawn if its output product is rebuilt, and it is drawn for
+any product that lacks one.  A figure that cannot be drawn is flagged as needing
+attention, but does not stop the step.  ``pipnick_report`` collects all of the
+figures in one place (see :doc:`checking`).
 
 Expected ranges
 ---------------
 
-These measurements are checked against the expected values for the camera,
+Specific measurements are checked against the expected values for the camera, as
 set in its configuration file (``[expected]`` and ``[quality]``):
 
 - the bias level (ADU);
+
 - the read noise, against the nominal value of the readout;
+
 - the PSF FWHM of each image (arcsec);
+
 - the RMS of each astrometric solution (arcsec).
 
-A value outside its range needs attention; data are never rejected because of
-it.
+A value outside its range is flagged as needing attention, but data are never
+rejected due to these checks.

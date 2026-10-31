@@ -239,8 +239,8 @@ outputs that rely on frames whose data was changed.
 Troubleshooting
 ---------------
 
-The following are a set of issues that may occur, the reason we explain why this
-happened, and our suggestion for how to deal with the issue.
+The following are a set of issues that may occur, their possible causes, and our
+suggestion for how to deal with the issue.
 
 - **"Files in ... are from more than one camera"**:  This message should be rare
   and indicates that frames from more than one camera were found.  Fix this by

@@ -98,15 +98,26 @@ columns (``comb_id``, ``mosaic``, ``wcs_group``), see :doc:`metadata`.
 2. Reduce the images
 --------------------
 
+The next step is to perform the basic image processing/reduction.  Continuing
+the example from above, the command looks like this:
+
 .. code-block:: console
 
     pipnick_reduce n3_2x2_fast_full.ecsv -r rdx
 
-The bias and the dome flats of each filter are combined, and each science
-frame is bias-subtracted, flat-fielded, and cleaned of cosmic rays.  The
-metadata table is the only required argument of this and every later step.
-``-r`` sets the reduction directory, which is saved to the table, so the later
-steps need only the table.
+The metadata table is the only required argument.  Using ``-r`` allows you to
+set the reduction directory, which is saved to the table, so the later steps
+need only the table.
+
+A brief summary of the processing is:
+
+- All frames are overscan subtracted and trimmed.
+- All bias frames are combined.
+- All flat frames are bias-subtracted and combined.
+- All science frames are bias-subtracted, field-flattened, and cosmic rays are masked.
+
+The script will print many messages to the screen as it works, which will look
+similar to this:
 
 .. code-block:: text
 
@@ -124,15 +135,18 @@ steps need only the table.
     ...
     [INFO] - REDUCTION OK: 81 products (0 up to date, 81 built, 0 failed); summary in reduce/summary.ecsv.
 
-The reduced images are written to ``rdx``, named for their object, filter,
-combination group, and date (the object of these frames is "M11 V", so the
-filter appears twice).  Each step writes QA figures by default; e.g.,
-``rdx/reduce/qa/M11_V_V_C096_2026-08-20.png``:
+The reduced images are written to the specified reduction directory (``rdx`` in
+the example call above), and named according to their object, filter,
+combination group, and date.  Note that, in this example, the object name
+entered by the observer was "M11 V"; by combining this with the filter name, "V"
+will appear in the file name twice.  To avoid this, you can always edit the
+object name in the metadata table.  Each reduced image produces a QA figure; for
+example, ``rdx/reduce/qa/M11_V_V_C096_2026-08-20.png``:
 
 .. figure:: figures/quickstart_reduce.png
    :width: 100%
 
-   A reduced image of M11 in V, and the histogram of its pixel values.
+   A reduced image of M11 in V and the histogram of its pixel values.
 
 See :doc:`reduce`.
 
