@@ -3,30 +3,9 @@
 
 ## Checks
 
-- How are pre/over-scans treated for the new Andor camera?
-
-- Make sure that every step can force a re-reduction; if not, docs
-  should indicate that previous reductions need to be deleted.  Maybe
-  provide a simple `pipnick_clean` convenience script?
-
-- How often and where are globals used?  Minimize this.
-
 - Performance benchmarks, particularly for the photometry.  I expect the
   slow-down is driven by photutils, but maybe there are some Moffat
   function evaluations we can speed up...
-
-- Status of a failed band: when a band's calibration fails (here, I),
-  pipnick_status reports its images as calibrated: missing and keeps
-  suggesting pipnick_calibrate, though rerunning it can't help.
-
-- Photometry: some sources removed as failed were detected far outside
-  the image by the photometry's second iteration (4 of 39 in SA 111 1965
-  V C021).
-
-- Does the photometric calibration accept data from different nights?
-  The documentation seems to indicate it does, but it only takes a
-  single metadata table for a fixed setup.
-
 
 ## Docs
 
@@ -49,8 +28,10 @@
 
 ## Enhancements
 
-- How are source groups treated in the PSF photometry?  (When are)/Can
-  source groups combined into a single source for photometry?
+- Investigate the details regarding how source groups are treated in the PSF
+  photometry.  This may need refinement.  Based on the QA figures for M11, it
+  seems like the code is finding too many clustered sources and missing obvious
+  faint sources.
 
 - Apart from the toml files in the data/cameras directory, is there
   anything in the code that is specific to the Nickel telescope?  I.e.,

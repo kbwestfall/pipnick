@@ -211,10 +211,10 @@ def vet_sources(phot, shape, fwhm):
 
         - their fitted position or flux is not finite (the fit failed);
         - their fitted position is outside the image;
-        - their fitted position moved more than one FWHM from where they were
-          detected, i.e., onto another source (which is at least one FWHM
-          away), typically for spurious detections in the residuals of bright
-          sources;
+        - their fitted position moved more than one FWHM from the initial
+          position of the fit, i.e., onto another source (which is at least
+          one FWHM away), typically for spurious detections in the residuals of
+          bright sources;
         - their fitted flux is not positive.
 
     Parameters
@@ -237,7 +237,10 @@ def vet_sources(phot, shape, fwhm):
     rejected : :class:`astropy.table.Table`
         The removed sources, written to ``photometry/<image>_removed.ecsv``
         (see :func:`~pipnick.pkg.paths.removed_table`): the 0-based pixel
-        coordinates where they were detected (``x_init``, ``y_init``), their
+        coordinates at which their fit started (``x_init``, ``y_init``; the
+        position fitted in the previous iteration for a source detected
+        before the last iteration of the ``'all'`` mode of
+        :class:`photutils.psf.IterativePSFPhotometry`), their
         fitted coordinates and flux (``x_fit``, ``y_fit``, ``flux_fit``;
         masked if not finite), the iteration of the PSF photometry that
         detected them (``iter_detected``, if available), and the ``reason``

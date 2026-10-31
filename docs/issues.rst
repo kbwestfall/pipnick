@@ -44,10 +44,12 @@ Photometry
   detections).  Rebuilding the photometry of an image, even with the same
   settings, can therefore change the calibration and mosaics that use it.
 
-- **Sources detected outside the image.**  Some sources are removed as
-  ``failed`` because their fitted positions are far outside the image.  They
-  are recorded in ``photometry/<image>_removed.ecsv`` and do not affect the
-  source table.
+- **Removed sources that appear to be outside the image.**  Some sources
+  removed as ``failed`` have starting coordinates (``x_init``, ``y_init`` in
+  ``photometry/<image>_removed.ecsv``) far outside the image.  They were
+  detected within the image, but their fit in that iteration ran off the image.  With ``--mode all``, the next
+  iteration starts their fit from that position, where there are no pixels to
+  fit, so the fit fails.  These sources do not affect the source table.
 
 Mosaics
 -------
