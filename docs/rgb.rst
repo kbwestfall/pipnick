@@ -3,27 +3,30 @@
 Three-color Image Construction
 ==============================
 
-``pipnick_rgb`` makes a three-color image from three images of the same
-area of sky, e.g., the mosaics of one object in three filters.
+With a set of three mosaics, all mapped to the same WCS, pipnick provides the
+``pipnick_rgb`` convenience script to use these images to construce a
+three-color image.
 
 The algorithm
 -------------
 
-1. **Check the images.**  The three images must have the same WCS and shape,
-   so that their pixels are aligned.
-2. **Normalize each image.**  Its background (the median) is subtracted
-   (unless ``--no_subtract``), and it is divided by its ``--percentile``
-   (99.5) percentile, so that the channels have comparable brightness.  With
+1. **Check the images.**  The three images must have the same WCS and shape such
+   that their pixels are exactly aligned.
+
+2. **Normalize each image.**  Its background (the median) is subtracted (unless
+   ``--no_subtract``), and it is divided by its ``--percentile`` (99.5)
+   percentile, so that the channels have comparable brightness.  With
    ``--common``, all of the images are instead divided by the largest of these
-   percentiles, which keeps their relative fluxes.  ``--scales`` multiplies the
-   three normalized images, to adjust the color balance.
+   percentiles, which keeps their relative fluxes.  The ``--scales`` option
+   multiplies the three normalized images, to adjust the color balance.
+
 3. **Stretch.**  The image is made with the scheme of Lupton et al. (2004;
-   ``--method lupton``, the default, with ``--stretch`` and ``--Q``; see
+   ``--method lupton`` with ``--stretch`` and ``--Q``; see
    :func:`astropy.visualization.make_lupton_rgb`), or a linear or logarithmic
-   stretch (``--method linear`` or ``log``, with ``--log_a``; see
+   stretch (``--method linear`` or ``log`` with ``--log_a``; see
    :func:`astropy.visualization.make_rgb`).  See the `astropy documentation
-   <https://docs.astropy.org/en/stable/visualization/rgb.html>`__ for the
-   effect of each parameter.  Masked pixels are black.
+   <https://docs.astropy.org/en/stable/visualization/rgb.html>`__ for the effect
+   of each parameter.  Masked pixels are black.
 
 Inputs
 ------
@@ -33,28 +36,33 @@ Inputs
   (see :ref:`mosaic`).  The masks of the images (the ``MASK`` extension) are
   used if they exist.
 
-Running it
-----------
+Execution
+---------
+
+An example call looks like this:
 
 .. code-block:: console
 
     pipnick_rgb M11_R.fits M11_V.fits M11_B.fits -o M11.png
 
-The options are (the logging options are common to every script; see
-:ref:`common`):
+The three images are required, and the optional arguments are:
 
-- ``red``, ``green``, ``blue``: The images for the three channels.
-- ``-o``, ``--ofile``: The output image (default ``rgb.png``); its format
-  (e.g., ``png`` or ``jpg``) is set by its extension.
+- ``-o``, ``--ofile``: The output image (default ``rgb.png``); its format (e.g.,
+  ``png`` or ``jpg``) is set by its extension.
+
 - ``--method``: ``lupton`` (default), ``linear``, or ``log``.
+
 - ``--stretch``, ``--Q``: The linear stretch (default 0.5, in units of the
   normalized images) and the softening (default 8) of the Lupton scheme.
+
 - ``--log_a``: The parameter of the logarithmic stretch (default 1000).
-- ``--percentile``: The percentile used to normalize each image (default
-  99.5).
-- ``--common``: Normalize all of the images by the largest of their
-  percentiles.
+
+- ``--percentile``: The percentile used to normalize each image (default 99.5).
+
+- ``--common``: Normalize all of the images by the largest of their percentiles.
+
 - ``--no_subtract``: Do not subtract the background of each image.
+
 - ``--scales``: Three factors applied to the normalized red, green, and blue
   images (default 1 1 1).
 
@@ -63,23 +71,28 @@ Outputs
 
 - **The color image** (``--ofile``), with north up for the mosaics of
   ``pipnick_mosaic``.
+
 - **The log**, in the ``log`` subdirectory of the directory of the output
   image; see :ref:`common`.
 
 Troubleshooting
 ---------------
 
-- **The images do not have the same WCS and shape**: ``pipnick_rgb`` stops
-  with an error.  Construct them with ``pipnick_mosaic``, with all of them in
-  the same WCS group (a mosaic can have a single image; see :ref:`mosaic`).
+- **The images do not have the same WCS and shape**: ``pipnick_rgb`` stops with
+  an error.  Construct them with ``pipnick_mosaic``, with all of them in the
+  same WCS group.  Note a "mosaic" can be composed of a single image; see
+  :ref:`mosaic`.
+
 - **Colored halos around stars**: the images have different seeing.  Match
   their PSFs to the worst seeing of the group with ``pipnick_mosaic
   --psf_match group``.
-- **Black cores with colored rims in bright stars**: their saturated
-  pixels are masked, and masked pixels are black.  The rims are where the
-  masks of the three images differ.
-- **One color dominates**: adjust ``--scales``, or use ``--common`` to keep
-  the relative fluxes of the images (e.g., if they are calibrated).
+
+- **Black cores with colored rims in bright stars**: their saturated pixels are
+  masked, and masked pixels are black.  The rims are where the masks of the
+  three images differ.
+
+- **One color dominates**: adjust ``--scales``, or use ``--common`` to keep the
+  relative fluxes of the images (e.g., if they are calibrated).
 
 Using the function in Python
 ----------------------------
