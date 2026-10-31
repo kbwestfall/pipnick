@@ -22,7 +22,17 @@ frames.  The algorithm is as follows:
    - Convert the counts to electrons using the hard-coded detector gain.
 
    - Subtract the overscan, as determined using the mean of the overscan pixels
-     of each row, and trim the image to its data section.
+     of each row, and trim the image to its data section.  The data and
+     overscan sections are read from the header (``DATASEC`` and ``BIASSEC``)
+     if it provides them, and otherwise set by the camera configuration
+     (``pipnick/data/cameras``).  For the Andor camera, unbinned columns 1-19
+     are prescan and are discarded, columns 20-2067 are data, and the overscan
+     level is measured from columns 2075-2088, skipping the first overscan
+     columns, which show charge trailing.  For the C2 camera, columns 1-2048
+     are data and the overscan level is measured from columns 2049-2112.
+     Binned pixels that straddle these boundaries are excluded.  A readout
+     window that excludes the overscan is not overscan-subtracted (with a
+     warning); the bias subtraction then removes the bias level.
 
    - Subtract the bias.
    

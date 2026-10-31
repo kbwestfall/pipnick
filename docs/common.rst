@@ -156,6 +156,23 @@ Every step can be rerun at any time, and only does the work that is needed:
 - ``--overwrite`` (``--resolve`` for ``pipnick_astrometry``) rebuilds every
   product of the step.
 
+You never need to delete earlier products to force a step to be redone.  Note,
+however, that forcing a rebuild can discard work:
+
+- ``pipnick_metadata --overwrite`` rebuilds the tables from scratch, discarding
+  your edits (use ``--append`` to keep them);
+
+- ``pipnick_astrometry --resolve`` replaces the solutions you provided, and can
+  submit images to astrometry.net again, so combine it with ``--images``;
+
+- ``pipnick_calibrate --overwrite`` refits each night, replacing a calibration
+  file you edited.
+
+``pipnick_rgb`` keeps no record of its inputs; it always writes its output
+image.  To start over completely, write the products to a new reduction
+directory (``pipnick_reduce --rdxdir``); the astrometry.net results cached in the
+old directory are then not used, so images may be submitted again.
+
 After adding frames to a night or changing a setting, you can simply rerun the
 steps in order, and each step will only rebuild the outputs that must be
 updated.  The ``pipnick_status`` script will report which steps are out of date

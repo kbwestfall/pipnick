@@ -190,6 +190,11 @@ Inputs
   see :ref:`metadata`.  It provides the airmass and observation time of each
   image.
 
+  One run calibrates the images of one table, i.e., one instrument setup.  If
+  the table includes frames from more than one night (UT date), each night is
+  fit separately; no fit combines nights.  Nights and setups in other tables
+  are calibrated by running ``pipnick_calibrate`` on each table.
+
 - **The photometry source tables** of the science images, with celestial
   coordinates (see :ref:`photometry` and :ref:`astrometry`).  They must be up to
   date.

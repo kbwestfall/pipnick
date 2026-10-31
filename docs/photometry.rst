@@ -41,9 +41,10 @@ For each image, photometry proceeds as follows:
    together are consolidated into a single source.
 
 4. **Vet the sources.**  Sources are removed if their fit failed, their fitted
-   position is outside the image or moved by more than one FWHM from where they
-   were detected, or their fitted flux is not positive.  These sources are typically spurious detections in the residuals
-   of bright stars.  They are listed, with the reason, in
+   position is outside the image or moved by more than one FWHM from its
+   initial position in the last fit, or their fitted flux is not positive.
+   These sources are typically spurious detections in the residuals of bright
+   stars.  They are listed, with the reason, in
    ``photometry/<image>_removed.ecsv``.
 
 5. **Aperture photometry** is also performed by summing the
@@ -165,12 +166,16 @@ removed by the vetting, the settings used to perform the photometry, and the
 provenance of the image and its astrometric solution.
 
 All sources removed (see :ref:`photometry-algorithm`, step 4) are written to
-``photometry/<image>_removed.ecsv``, with the 0-based pixel coordinates where
-they were detected (``x_init``, ``y_init``), their fitted coordinates and flux
-(``x_fit``, ``y_fit``, ``flux_fit``, which are masked if the fit failed), the
-iteration of the PSF photometry that detected them (``iter_detected``), and the
-reason they were removed (``failed``, ``outside``, ``moved``, or
-``nonpositive``).
+``photometry/<image>_removed.ecsv``, with the 0-based pixel coordinates at
+which their last fit started (``x_init``, ``y_init``), their fitted coordinates
+and flux (``x_fit``, ``y_fit``, ``flux_fit``, which are masked if the fit
+failed), the iteration of the PSF photometry that detected them
+(``iter_detected``), and the reason they were removed (``failed``,
+``outside``, ``moved``, or ``nonpositive``).  The starting coordinates are where
+the source was detected only for sources detected in the last iteration (or for
+every source with ``--mode new``).  With ``--mode all``, every iteration fits
+all the sources again, starting from their positions fitted in the previous
+iteration.
 
 A summary of the photometry is provided by ``photometry/summary.ecsv``, which
 summarizes the results for each image.  It provides the photometry status

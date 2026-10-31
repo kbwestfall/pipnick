@@ -171,7 +171,8 @@ def test_consolidate_groups():
         {
             'id': [1, 2, 3], 'group_id': [1, 2, 2], 'group_size': [1, 2, 2],
             'x_fit': [10., 20., 22.], 'y_fit': [5., 5., 5.], 'flux_fit': [100., 300., 100.],
-            'flux_err': [1., 2., 2.], 'local_bkg': [0., 1., 1.], 'flags': [0, 1, 4]
+            'flux_err': [1., 2., 2.], 'x_err': [0.1, 0.2, 0.4], 'y_err': [0.1, 0.2, 0.4],
+            'local_bkg': [0., 1., 1.], 'flags': [0, 1, 4]
         }
     )
     new = psf_photometry.consolidate_groups(phot)
@@ -179,6 +180,16 @@ def test_consolidate_groups():
     row = new[new['group_id'] == 2][0]
     assert row['flux_fit'] == 400. and np.isclose(row['x_fit'], 20.5), (
         'The fluxes should be summed and the positions flux-weighted'
+    )
+    assert np.isclose(row['flux_err'], np.sqrt(8.)), (
+        'The flux errors should be added in quadrature'
+    )
+    assert np.isclose(row['x_err'], np.sqrt(60.**2 + 40.**2) / 400.), (
+        'The position error should be the error of the flux-weighted mean'
+    )
+    single = new[new['group_id'] == 1][0]
+    assert single['flux_err'] == 1. and single['x_err'] == 0.1, (
+        'The errors of a source not in a group should be unchanged'
     )
     assert row['flags'] == 5, 'The flags should be combined'
     assert len(psf_photometry.consolidate_groups(phot, preserve=[2])) == 3, (

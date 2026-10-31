@@ -197,11 +197,16 @@ def psf_analysis(
 
 
 def consolidate_groups(phot_data, preserve=None):
-    """
+    r"""
     Consolidate groups of sources in photometric source into one source.
 
     This function combines data for sources that are identified as belonging
     to the same group by summing fluxes and weighted-averaging other parameters.
+    The weights are the absolute fitted fluxes.  The flux error is the
+    quadrature sum of the errors of the fluxes, and the error in each position
+    is the error of its weighted average, :math:`(\sum_i w_i^2
+    \sigma_i^2)^{1/2} / \sum_i w_i`.  Both neglect the covariance between the
+    parameters of sources fit together, and the error in the weights.
 
     Parameters
     ----------
@@ -232,7 +237,7 @@ def consolidate_groups(phot_data, preserve=None):
         'local_bkg', 'x_init', 'y_init', 'flux_init', 'x_fit', 'y_fit', 'qfit', 'cfit',
         'reduced_chi2'
     ]
-    summed = ['flux_fit', 'x_err', 'y_err', 'flux_err', 'n_pixels_fit']
+    summed = ['flux_fit', 'n_pixels_fit']
     for id in group_ids:
         group = group_data[group_data['group_id'] == id]
         weights = np.absolute(group['flux_fit'])
@@ -242,6 +247,12 @@ def consolidate_groups(phot_data, preserve=None):
                 new_row[name] = np.average(group[name], weights=weights)
             elif name in summed:
                 new_row[name] = np.sum(group[name])
+            elif name == 'flux_err':
+                new_row[name] = np.sqrt(np.sum(np.square(group[name])))
+            elif name in ['x_err', 'y_err']:
+                new_row[name] = (
+                    np.sqrt(np.sum(np.square(weights * group[name]))) / np.sum(weights)
+                )
             elif name == 'iter_detected':
                 new_row[name] = group[name][-1]
             elif name == 'flags':
