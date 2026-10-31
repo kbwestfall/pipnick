@@ -1,5 +1,5 @@
-Version 0.1.0dev
-================
+Version 1.0.0
+=============
 
 The first versioned development release of ``pipnick``, following the original
 pipeline developed by Allison Eto as part of her Akamai internship in 2024.  The
