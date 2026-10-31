@@ -23,8 +23,8 @@ The algorithm
    matched to the Landolt catalog (within ``--match_radius``).  Any image with a
    standard in its field is used for calibration.  Images whose source tables
    have no celestial coordinates are skipped with a warning.  Source tables that
-   are out of date (either because its image or astrometric solution changed
-   after it was measured) raises an error, reporting that the photometry needs
+   are out of date (either because their image or astrometric solution changed
+   after they were measured) raise an error, reporting that the photometry needs
    to be reanalyzed using ``pipnick_photometry``.
 
 2. **Select the measurements.**  A matched standard is not used if its
@@ -82,14 +82,14 @@ The algorithm
 
    - the fit is undetermined because there are as many or more terms to fit as
      there are measurements,
-   
+
    - or the fitted terms are degenerate (e.g., the color does not vary).
 
    The ``--force`` option downgrades the first two to warnings.  Large
    coefficient errors and a negative extinction are reported as warnings.  The
    run stops with an error only if no band can be calibrated.  A night whose
    calibration fails for another reason (e.g., an unreadable source table) is
-   recorded as failed in the summary and the verdict and the other nights are
+   recorded as failed in the summary and the verdict, and the other nights are
    still calibrated.
 
 5. **Assess the fit.**  The residuals (calibrated minus catalog magnitudes)
@@ -113,8 +113,8 @@ the observatory.
 
 .. warning::
 
-    **If the standards of a band do not span at least ``--min_airmass_span``
-    in airmass (0.2 by default), the extinction cannot be measured, and it is
+    **If the standards of a band do not span at least** ``--min_airmass_span``
+    **in airmass (0.2 by default), the extinction cannot be measured, and it is
     fixed at its nominal value.**  The ``airmass_color`` term, if used, is also
     fixed at 0.  This *extinction fallback* is expected to happen often: on most
     nights, the standards are observed over a small range of airmass.
@@ -138,10 +138,11 @@ the observatory.
     - an "EXTINCTION NOT MEASURED" label is added to every panel of the band in
       the relevant QA figures,
 
-    - the ``extinction`` column and a banner at the end of the output listing
-      every band that fell back is noted in the summary table.
+    - the ``extinction`` column of the summary table is ``fallback``,
 
-    To avoid the fallback, observe standards over a wider range of airmass To
+    - a banner at the end of the log lists every band that fell back.
+
+    To avoid the fallback, observe standards over a wider range of airmass.  To
     make the band fail instead, use ``--no_fallback``.
 
 The nominal extinction of each band is computed by
@@ -169,7 +170,7 @@ Uncertainties
 All of the reported errors --- the coefficients, the zero points, and the
 calibrated magnitudes --- are **statistical only**.  Fixed and fallback terms
 have no error, and the systematic error they introduce is not included.  The
-leave-one-out residuals can provie a better estimate of the actual accuracy of a
+leave-one-out residuals can provide a better estimate of the actual accuracy of a
 calibration from few stars.
 
 Drift of the zero point
@@ -284,7 +285,7 @@ warning.
 Outputs
 -------
 
-The output files are in added to the ``calibrate`` subdirectory of the reduction
+The output files are added to the ``calibrate`` subdirectory of the reduction
 directory:
 
 - ``<setup>_<night>.toml`` provides the calibration results (see below).
@@ -300,11 +301,11 @@ directory:
 
 - ``summary.ecsv`` provides the calibration status of each band, the numbers of
   stars and measurements, the rms and leave-one-out rms of the residuals, how
-  the extinction was set (``fit``, ``fixed``, ``fallback``, or ``failed``), the
-  extinction coefficient, the zero point above the atmosphere (airmass 0, for
-  color 0) and its error (``zp``, ``zp_err``), the drift, and what was done with
-  the calibration file (``action``: ``fit``, ``up to date``, or ``edited
-  (kept)``).
+  the extinction was set (``fit``, ``fixed``, ``fallback``, ``none`` if there is
+  no airmass term, or ``failed``), the extinction coefficient, the zero point
+  above the atmosphere (airmass 0, for color 0) and its error (``zp``,
+  ``zp_err``), the drift, and what was done with the calibration file
+  (``action``: ``fit``, ``up to date``, ``edited (kept)``, or ``failed``).
 
 - ``qa/<setup>_<night>_residuals.png`` shows the residuals of each band against
   airmass, color, catalog magnitude, and time.
@@ -312,7 +313,7 @@ directory:
 - ``<image>_cal.ecsv`` provides the calibrated source table
   of each science image, if ``--apply catalog`` is set.
 
-If ``--apply image`` is set, the calibration keywords are also added to the 
+If ``--apply image`` is set, the calibration keywords are also added to the
 headers of the reduced images; see :ref:`calibrate-applied`.
 
 The log is ``log/pipnick_calibrate_<time>.log`` and placed in the reduction
@@ -321,14 +322,16 @@ directory; see :ref:`common`.
 The calibration file
 --------------------
 
-The calibration is saved as TOML file so that it can be read and edited.  Its
+The calibration is saved as a TOML file so that it can be read and edited.  Its
 ``[calibration]`` table records the setup, night, camera, catalog, the
-instrumental magnitude calibrated, the creation time, the overall drift, and two
-hashes.  The ``input_hash`` is for the source tables and settings used and the
-``fit_hash`` is for the content of the file.  Each band has a ``[band.<band>]``
+instrumental magnitude calibrated, the creation time, the pipnick version
+(``pipnick_version``), the overall drift, and three hashes.  The
+``catalog_hash`` is for the standard-star catalog, the ``input_hash`` is for the
+source tables and settings used, and the ``fit_hash`` is for the content of the
+file.  Each band has a ``[band.<band>]``
 table with its ``status`` (``ok`` or ``failed`` with a ``reason``), the color,
 the ``terms``, their ``coefficients``, ``errors``, ``source`` (``fit``,
-``fixed``, or ``fallback``), and ``covariance``.  Each band also provides and
+``fixed``, or ``fallback``), and ``covariance``.  Each band also provides an
 assessment of the results providing the numbers of stars, measurements, rejected
 and unusable measurements, the rms, reduced chi-square, and leave-one-out rms of
 the residuals, the drift, the airmass and color ranges, and the images used.
@@ -393,6 +396,8 @@ with the keywords:
 
 - ``PNCALFIL``, ``PNCALHSH``: the calibration file and its hash;
 
+- ``PNCALVER``: the pipnick version that applied the calibration;
+
 - ``PHOTZP``: the zero point for :math:`C = 0`, equal to ``PNCALZP``.
 
 The keywords are rewritten only when the calibration file changes.  The keywords
@@ -424,7 +429,6 @@ Troubleshooting
 ---------------
 
 - **"No source table has celestial coordinates"**:  The standards are found by
-
   their coordinates, which means that ``pipnick_astrometry`` and
   ``pipnick_photometry`` must have been executed (in that order) to ensure
   coordinates are included in the source tables.
@@ -451,9 +455,9 @@ Troubleshooting
 - **A band that cannot be calibrated**:  This may be because no standards were
   observed in it.  The code will not calibrate the relevant images, and
   ``pipnick_status`` will continue to suggest running ``pipnick_calibrate`` for
-  them.  This is currently an unsolved :ref:`issues`.
+  them.  This is currently an unsolved issue; see :ref:`issues`.
 
-- **Filters other than UBVRI**: Unfortuntely, these cannot yet be calibrated
+- **Filters other than UBVRI**: Unfortunately, these cannot yet be calibrated
   with pipnick.  We will support use of other standard catalogs for photometric
   calibration in the future.
 

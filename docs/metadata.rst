@@ -54,10 +54,10 @@ The algorithm used by ``pipnick_metadata`` is summarized as follows:
 
 #. **Classify each frame.**  Based on the header data, each frame is classified
    as a ``bias``, ``dark``, ``domeflat``, ``skyflat``, ``science``, ``focus``,
-   ``pointing``, or ``unknown``.  This classification is performed using a
-   deterministic set of rules in the camera's configuration file (e.g.,
-   closed-shutter frames shorter than 1 s are biases; an object name of "dome
-   flat" marks a dome flat).  **This classification can be wrong and must be
+   ``pointing``, ``test``, or ``unknown``.  This classification is performed
+   using a deterministic set of rules in the camera's configuration file (e.g.,
+   for the Andor camera, closed-shutter frames of at most 1 s are biases; an
+   object name of "dome flat" marks a dome flat).  **This classification can be wrong and must be
    checked.**
 
 #. **Check each frame.** Each frame is compared with the camera's ``[quality]``
@@ -66,9 +66,9 @@ The algorithm used by ``pipnick_metadata`` is summarized as follows:
    the ``--classify stats`` option is set, the image data are also read and an
    image is rejected if it is empty, has too many saturated pixels, indicates
    that the shutter is closed but the counts are significantly above the bias
-   level, or was identified as a flat but has too few counts.  Frames labeled as
-   calibrations are reclassified as biases if their level is that expected for a
-   bias.  **Rejected frames are commented out of the table, with the reason in
+   level, or was identified as a flat but has too few counts.  Frames classified
+   as ``unknown`` (e.g., named as a bias but exposed) are reclassified as biases
+   if their exposure time and level are those expected for a bias.  **Rejected frames are commented out of the table, with the reason in
    the** ``note`` **column.**
 
 #. **Assign the setups.**  Frames with the same camera, binning, readout mode,
@@ -149,7 +149,7 @@ Outputs
 -------
 
 The primary output is one or more metadata tables.  When ``--split`` is not set,
-the name is as provided on the command line.  When using ``--split``, the file
+the name is ``raw_table``, with ``.ecsv`` appended if it is omitted.  When using ``--split``, the file
 name is ``<base>_<xbin>x<ybin>_<readmode>_<window>.ecsv``; e.g.,
 ``n3_2x2_fast_full.ecsv``.
 
@@ -169,9 +169,10 @@ one row per frame with the following columns:
 
 - ``frametype``: the frame type (algorithm step 3);
 
-- ``setup``: the setup label (algorithm step 5);
+- ``setup``: the setup label (algorithm step 5; in a per-setup table, this is
+  stored once, in the file header; see below);
 
-- ``object``, ``filter``, ``exptime``, ``airmass``, ``ra``, ``dec`` ``date``,
+- ``object``, ``filter``, ``exptime``, ``airmass``, ``ra``, ``dec``, ``date``,
   ``mjd``: details regarding the target and exposure all pulled (or constructed)
   from the header;
 
@@ -185,10 +186,10 @@ one row per frame with the following columns:
   (see :ref:`above<comb_id>`), and ``mosaic`` and ``wcs_group``, the labels of
   the mosaics (empty unless assigned; see :ref:`mosaic`).
 
-The ECSV table also contains a commented YAML format heaader with setup
+The ECSV table also contains a commented YAML format header with setup
 metadata.  This metadata can be edited via various scripts (e.g.,
-``pipnick_reduce`` adds the data with the reduction output).  The base-level
-information added by ``pypeit_metadata`` includes the camera, the raw directory,
+``pipnick_reduce`` adds the directory with the reduction output).  The base-level
+information added by ``pipnick_metadata`` includes the camera, the raw directory,
 the setups, the classification method, and the pipnick version.
 
 As with all pipnick scripts, a log is also produced in the parent of the raw
@@ -197,7 +198,7 @@ directory (``log/``); see :ref:`common`.
 Editing the table
 -----------------
 
-The ECSV table produced by the ``pypeit_metadata`` script is really just a
+The ECSV table produced by the ``pipnick_metadata`` script is really just a
 starting point.  **You should always check the file and correct it.**  The table
 is used by nearly all of the remaining scripts and becomes the authoritative
 version of the metadata.  That is, for any quantities in the table that differ
@@ -229,11 +230,11 @@ Some typical edits you will make are:
 
 .. note::
     
-    Edits are preserved when using the ``--append`` optin, but they are ignored
-    when using ``--overwrite``
+    Edits are preserved when using the ``--append`` option, but they are ignored
+    when using ``--overwrite``.
 
 If you edit the table after running any of the processing scripts, pipnick will
-incorporate the edit into subsequent processing steps and reprocesses only the
+incorporate the edit into subsequent processing steps and reprocess only the
 outputs that rely on frames whose data was changed.
 
 Troubleshooting

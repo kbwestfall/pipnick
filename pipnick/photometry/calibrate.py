@@ -19,7 +19,7 @@ where the terms :math:`x_t` are selected by name (see
       :math:`x = X C`;
 
 for the airmass :math:`X` and the (catalog) color :math:`C`.  The
-instrumental magnitudes are :math:`m = -2.5\logf / t)`, for the flux
+instrumental magnitudes are :math:`m = -2.5\log(f / t)`, for the flux
 :math:`f` in electrons and the exposure time :math:`t`, so the zero point
 applies to count rates in electrons per second.
 

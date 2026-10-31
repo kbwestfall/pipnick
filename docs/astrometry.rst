@@ -54,11 +54,13 @@ positions of up to 100 of the brightest sources), not the image.  The
 solutions are not publicly visible on astrometry.net.
 
 The results of the submissions are cached, keyed by what was submitted: the
-positions of the sources, in order of brightness.  Anything that changes the
-detected sources, or their ranking, changes the key, so that a cached result
-is no longer found and the image could be submitted again; e.g.,
-``--max_sources``, ``--detect_thresh``, or ``--fwhm``, but also a version of
-``photutils`` that measures the sources differently.  (photutils 3.1 changed
+positions of the sources, in order of brightness (or the image, with
+``--upload_image``), and the pointing and pixel scale given to astrometry.net.
+Any change to these changes the key, so that a cached result is no longer found
+and the image could be submitted again: e.g., editing the pointing (``ra``,
+``dec``) in the metadata table, or anything that changes the detected sources or
+their ranking, such as ``--max_sources``, ``--detect_thresh``, or ``--fwhm``, but
+also a version of ``photutils`` that measures the sources differently.  (``photutils`` 3.1 changed
 the flux used to rank the sources, which is why pipnick requires it.)
 
 Inputs
@@ -164,6 +166,8 @@ record how the solution was found:
   image), ``gaia``, or ``points`` (provided by you).
 
 - ``PNASTWH``: A hash of the solution.
+
+- ``PNASTVER``: The pipnick version that found the solution.
 
 - ``PNASTNPT`` and ``PNASTRMS``: The number of matched sources and the RMS
   residual in arcsec (for bootstrapped, Gaia, and provided solutions).

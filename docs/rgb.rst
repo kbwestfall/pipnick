@@ -4,7 +4,7 @@ Three-color Image Construction
 ==============================
 
 With a set of three mosaics, all mapped to the same WCS, pipnick provides the
-``pipnick_rgb`` convenience script to use these images to construce a
+``pipnick_rgb`` convenience script to use these images to construct a
 three-color image.
 
 The algorithm

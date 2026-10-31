@@ -31,9 +31,9 @@ For each image, photometry proceeds as follows:
 
 3. **PSF photometry.**  Sources are detected using
    :class:`photutils.detection.DAOStarFinder`, identifying all sources above
-   ``--thresh`` times the background noise.  Sources that are no closer than
-   ``--min_sep`` FWHM are independently modeled by the (fixed-shape) PSF model,
-   whereas sources closer than ``--group_sep`` FWHM are fit simultaneously.  The
+   ``--thresh`` times the background noise and at least ``--min_sep`` FWHM
+   apart.  Each source is modeled by the (fixed-shape) PSF model, and sources
+   closer than ``--group_sep`` FWHM are fit simultaneously.  The
    fit is performed iteratively (using
    :class:`photutils.psf.IterativePSFPhotometry`; see ``--mode``) where each
    iteration fits and subtracts the model sources, and the subsequent iteration
@@ -41,9 +41,8 @@ For each image, photometry proceeds as follows:
    together are consolidated into a single source.
 
 4. **Vet the sources.**  Sources are removed if their fit failed, their fitted
-   positions that are either outside the image or moved by more than one FWHM
-   from where their original detected location, or their fitted fluxes are not
-   positive.  These soucres are typically spurious detections in the residuals
+   position is outside the image or moved by more than one FWHM from where they
+   were detected, or their fitted flux is not positive.  These sources are typically spurious detections in the residuals
    of bright stars.  They are listed, with the reason, in
    ``photometry/<image>_removed.ecsv``.
 
@@ -54,15 +53,15 @@ For each image, photometry proceeds as follows:
 The image uncertainties used to weight the fits and compute the flux errors are
 the uncertainties propagated by ``pipnick_reduce`` (the ``UNCERT`` extension of
 the reduced image).  This includes the read noise, the Poisson noise of the
-counts,  and all uncertainties propagated through the image processing steps
+counts, and all uncertainties propagated through the image processing steps
 (overscan and bias subtraction, and field-flattening).
 
 Inputs
 ------
 
 - **The ECSV metadata table** (``raw_table``), written by ``pipnick_metadata``;
-  see :ref:`metadata`.  The pointing of each image (``ra``, ``dec``) is taken
-  from it.
+  see :ref:`metadata`.  The object, filter, exposure time, and airmass of each
+  image are taken from it.
 
 - **The reduced science images**, with their uncertainties (``UNCERT``) and
   masks (``MASK``).
@@ -160,8 +159,8 @@ source catalog contains the following columns:
   background and the fit-quality measures and flags provided by ``photutils``.
 
 The table metadata records the image name, its object, filter, exposure time,
-airmass, and MJD.  It also records the PSF model parameters, (type, parameters,
-FWHM in pixels and arcsec, and the number of stars used) the number of sources
+airmass, and MJD.  It also records the PSF model (type, parameters, FWHM in
+pixels and arcsec, and the number of stars used), the number of sources
 removed by the vetting, the settings used to perform the photometry, and the
 provenance of the image and its astrometric solution.
 
@@ -184,7 +183,7 @@ camera's expected range; see :ref:`common`.
 There are two QA figures for each image:
 
 - ``photometry/qa/<image>_psf.png`` shows the stacked PSF stars, the model, the
-  residuals, and the radial profile
+  residuals, and the radial profile.
 
 - ``photometry/qa/<image>_sources.png`` shows the image with the measured
   sources numbered by decreasing PSF flux.
@@ -198,7 +197,7 @@ standard stars were observed during the night (see :ref:`calibrate`).
 Troubleshooting
 ---------------
 
-- **"No sources are good enough to model the PSF"**.  This occurs if their are
+- **"No sources are good enough to model the PSF"**.  This occurs if there are
   too few bright, isolated, unsaturated stars.  To successfully analyze this
   image, try lowering ``--psf_thresh`` or giving a better guess for the
   ``--fwhm``.
@@ -222,8 +221,12 @@ Troubleshooting
   :ref:`issues`.
 
 - **A later step reports that a source table "is out of date"**. The image was
-  reduced (or solved) again after it was measured, meaning that you should rerun
-  the photometry.
+  reduced again after it was measured, meaning that you should rerun the
+  photometry.
+
+- **A later step reports that "the celestial coordinates" of a source table
+  "are out of date"**. The astrometric solution of the image changed after it
+  was measured; rerun the photometry to update the coordinates.
 
 Using the pipeline in Python
 ----------------------------

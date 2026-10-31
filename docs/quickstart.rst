@@ -89,7 +89,7 @@ The output file is in `ECSV
 file that you will almost always need to directly edit.  The most important
 edits to make are: comment out bad frames (place a ``#`` character at the
 beginning of the line), correct object names, filters, and frame types
-(``bias``, ``domeflat``, etc), and change which frames are combined
+(``bias``, ``domeflat``, etc.), and change which frames are combined
 (``comb_id``) or mosaicked (``mosaic``, ``wcs_group``).  Frames identified as
 either focus or pointing observations should automatically be commented out.
 For additional information, including the meaning for the different combination
@@ -246,7 +246,7 @@ See :ref:`photometry`.
 The standard stars observed during the night are identified, and the calibration
 of each band is fit to their measurements and applied to every image: ``--apply
 both`` both writes the calibrated source tables,
-``rdx/calibrate/<image>_cal.ecsv`` and records the zero points in the image
+``rdx/calibrate/<image>_cal.ecsv``, and records the zero points in the image
 headers.  The latter ensures image mosaics are calibrated, as well.
 
 By default, the calibration fits a zero point, a color term, and the extinction,
@@ -281,7 +281,7 @@ Images with slightly offset pointings can be assigned to a mosaic group, and
 groups of mosaic images can be forced to have the same WCS coordinates.  Both
 are set via the metadata table.  Importantly, every image assigned to a mosaic
 *must* have an astrometric solution.  For images that do not have an astrometric
-solution, clear its ``mosaic`` and ``wcs_group`` column values, like so:
+solution, clear their ``mosaic`` and ``wcs_group`` column values, like so:
 
 .. code-block:: text
 

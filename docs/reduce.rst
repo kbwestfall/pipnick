@@ -52,8 +52,8 @@ frames.  The algorithm is as follows:
 
 Dark images are combined, but they are not yet included in the image processing.
 
-If ``pipnick_reduce`` is executed more than once, processing is only redone its
-raw frames, its metadata table values (object, filter, exposure time,
+If ``pipnick_reduce`` is executed more than once, processing is only redone if
+its raw frames, its metadata table values (object, filter, exposure time,
 coordinates, airmass), or the calibrations it used have changed.  It is possible
 to force all the data to be reprocessed using ``--overwrite``.
 
@@ -83,7 +83,7 @@ The options are:
 - ``-r``, ``--rdxdir``: The path for the reduction output files.  If not
   provided and not set in the metadata table, the parent directory of the
   directory containing the raw data is used.  We **strongly** recommend you set
-  this directory explicitly.  The directory is saved to metadata table so that
+  this directory explicitly.  The directory is saved to the metadata table so that
   it is not a required command-line argument for all remaining scripts.
 
 - ``-o``, ``--overwrite``: Rebuild every product, even if it is up to date.
@@ -100,15 +100,15 @@ The reduction directory will contain the following processed FITS files:
 - ``Bias.fits``: The combined bias.
 
 - ``Dark_<exptime>s.fits``: The combined, bias-subtracted darks of each
-    exposure time (rounded to 0.1 s), e.g., ``Dark_120s.fits``.
+  exposure time (rounded to 0.1 s), e.g., ``Dark_120s.fits``.
 
 - ``SkyFlat_<filter>.fits`` and ``DomeFlat_<filter>.fits``: The combined
-    flats for each filter.
+  flats for each filter.
 
 - ``<object>_<filter>_C<comb_id>_<date>.fits``:  The science images, e.g.,
-    ``M11_V_C096_2026-08-20.fits``, named for the most common object name of
-    the group, its filter (a prime written as ``p``, e.g., ``ip`` for
-    ``i'``), its combination group, and the UT date of its first frame.
+  ``M11_V_C096_2026-08-20.fits``, named for the most common object name of
+  the group, its filter (a prime written as ``p``, e.g., ``ip`` for
+  ``i'``), its combination group, and the UT date of its first frame.
 
 Each FITS file has three extensions:
 
@@ -121,7 +121,8 @@ Each FITS file has three extensions:
 
 The primary header contains a copy of the header from the first frame in the
 combination group.  Additionally, it contains the object, filter, exposure time,
-coordinates, and airmass from the metadata table; if any of these values differ
+coordinates, and airmass from the metadata table (only the filter and exposure
+time for the calibration frames); if any of these values differ
 from the one in the raw header, an ``ORIG*`` version is kept as a record of the
 difference.  For example, ``ORIGOBJ`` may be added to include the original
 ``OBJECT``; other such keywords are ``ORIGFILT``, ``ORIGEXP``, ``ORIGRA``,
@@ -170,9 +171,9 @@ that needs attention.
 
 - **"There is no bias"** or **"There is no <filter> flat"**:  There are missing
   calibration images.  The reduction will continue without the relevant
-  corrections, meaning further processing will be severely limited.  We recomend
-  addint the relevant raw calibration frames to the metadata table (e.g.,
-  ``pipnick_metadata --split --append`` or restore commented-out rows) and
+  corrections, meaning further processing will be severely limited.  We recommend
+  adding the relevant raw calibration frames to the metadata table (e.g.,
+  ``pipnick_metadata raw n3 --split --append`` or restore commented-out rows) and
   rerun.
 
 - **The bias level or read noise is outside its expected range**:  Check the

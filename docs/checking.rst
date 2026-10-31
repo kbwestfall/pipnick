@@ -146,7 +146,7 @@ and the QA figures of every step.
 pipnick_inspect
 ---------------
 
-``pipnick_inspect`` allows to obtain detailed traces of specific images and
+``pipnick_inspect`` allows you to obtain detailed traces of specific images and
 sources through the processing steps.
 
 Example calls include:
@@ -158,13 +158,13 @@ Example calls include:
     pipnick_inspect n3_2x2_fast_full.ecsv 96 --source 282.77,-6.27
     pipnick_inspect n3_2x2_fast_full.ecsv 96 --source 18:51:04.8,-06:16:12 --ofile c96.png
 
-**Inputs.**  A per-setup metadata table, its reduction directory, and one of
-its science images, given by its file name (with or without the extension) or
-its combination group.
+**Inputs.**  A per-setup metadata table (``raw_table``), its reduction
+directory, and one of its science images (``image``), given by its file name
+(with or without the extension) or its combination group.
 
 **Options.**
 
-- ``raw_table``, ``-r``, ``--rdxdir``, ``--mosaic_dir``: As for
+- ``-r``, ``--rdxdir``, ``--mosaic_dir``: As for
   ``pipnick_status``.
 
 - ``--id``: Trace the source with this ``id`` in the source table of the

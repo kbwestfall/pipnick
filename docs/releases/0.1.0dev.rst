@@ -21,8 +21,7 @@ Breaking Changes
   replaced by ``pipnick_metadata`` (builds the raw-data metadata table) and
   ``pipnick_reduce``.  All scripts now share the logging options ``-v
   {0,1,2}``, ``--log_file``, and ``--log_level``, which replace the previous
-  ``-v``/``-vv``/``--verbosity`` options; a log file is only written when
-  requested.
+  ``-v``/``-vv``/``--verbosity`` options.
 
 - The reduction and photometry pipelines no longer accept the ``--excl_files``,
   ``--excl_objs``, and ``--excl_filts`` options; frames are instead selected
@@ -43,7 +42,7 @@ Breaking Changes
   table, so that user edits to it are preserved; use ``pipnick_metadata
   --overwrite`` to rebuild it.
 
-- ``pipnick_reduce`` requires a per-setup metadata file (``-t``), written by
+- ``pipnick_reduce`` requires a per-setup metadata file, written by
   ``pipnick_metadata --split``; the ``--rawdir`` and ``--append`` options are
   removed.  Reduced science images are named
   ``<object>_<filter>_C<comb_id>_<UT date>.fits`` instead of ``<raw file>_rdx.fits``.
@@ -51,7 +50,7 @@ Breaking Changes
   paths to the reduced science images.
 
 - ``pipnick_astrometry`` takes the per-setup metadata file used by
-  ``pipnick_reduce`` (``-t``) and writes the astrometric solutions to the
+  ``pipnick_reduce`` and writes the astrometric solutions to the
   headers of the reduced images.  The API key is no longer a command-line
   argument; it is read from the ``ASTROMETRY_NET_API_KEY`` environment variable
   or the ``astroquery`` configuration.  The ``maindir``, ``--use_table``,
@@ -59,7 +58,7 @@ Breaking Changes
   The script module is renamed ``pipnick.scripts.astrometry``.
 
 - ``pipnick_photometry`` takes the per-setup metadata file used by
-  ``pipnick_reduce`` (``-t``) and writes an ECSV source table for each image to
+  ``pipnick_reduce`` and writes an ECSV source table for each image to
   the ``photometry`` subdirectory of the reduction directory, instead of CSV
   tables; the ``-p`` option is removed, and the detection threshold is set
   with ``--thresh`` (was ``-s``).  The script module is renamed
@@ -104,7 +103,7 @@ Breaking Changes
 Dependency Changes
 ------------------
 
-- Supports python 3.12, 3.13, and 3.14.
+- Supports Python 3.12, 3.13, and 3.14.
 
 - Requires ``photutils>=3.1``, for ``photutils.psf.MoffatPSF``, the
   photutils 3.x PSF-photometry interface, and the definition of the
@@ -162,7 +161,7 @@ Functionality/Performance Improvements and Additions
   (including the error in the subtracted overscan level), the Poisson noise
   of the counts, and the uncertainties of the bias and the flat.  When frames
   are combined, their uncertainties are propagated, instead of being replaced
-  by the scatter of the combined values; see ``pipnick.utils.combiner``.
+  by the scatter of the combined values; see ``pipnick.reduction.combiner``.
   Previously, the uncertainty of a single-frame science image was that of
   the calibrations only, and the uncertainty of a combined image was
   estimated from the scatter of just a few frames.
@@ -217,7 +216,7 @@ Functionality/Performance Improvements and Additions
 - Added ``pipnick.astrometry``, with source detection and matching, WCS
   fitting from matched pixel and sky coordinates (``fit_wcs``), and the
   interfaces to astrometry.net and Gaia.
-  ``pipnick.pipelines.astrometry.apply_wcs`` writes a solution, e.g., one fit
+  ``pipnick.astrometry.header.apply_wcs`` writes a solution, e.g., one fit
   to user-provided coordinates, to a reduced image.
 
 - ``pipnick_metadata`` identifies the instrument setup (camera, binning, read
@@ -375,8 +374,8 @@ Functionality/Performance Improvements and Additions
 Under-the-hood Improvements
 ---------------------------
 
-- Functions used by more than one module are public: ``metadata.safe_name``
-  and ``metadata.filter_name``.  The code follows the conventions in
+- Functions used by more than one module are public: ``metadata.names.safe_name``
+  and ``metadata.names.filter_name``.  The code follows the conventions in
   ``AGENTS.md``, which no longer allow private functions to be imported into
   other modules.
 

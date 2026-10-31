@@ -3,7 +3,7 @@
 Common script behavior
 ======================
 
-The pipnick processing scripts share a number of commonalities.  Discussion of
+The pipnick processing scripts share a number of commonalities.  Discussions of
 these are collected here to minimize repetition in the documentation.
 
 Command-line options
@@ -35,7 +35,7 @@ directory.
     try to reproduce moved files (adding them to their expected on-disk
     locations), or they may not be able to proceed because of the missing file.
 
-When you run ``pypeit_reduce``, the reduction directory is saved in the header
+When you run ``pipnick_reduce``, the reduction directory is saved in the header
 of the ECSV metadata table, and it is referenced this way through the other
 processing scripts.
 
@@ -60,37 +60,39 @@ The directory structure pipnick uses for its output is as follows:
         log/                                   the logs of every script
 
 Completion of each processing step can result in both new files and edits to the
-reduced science images.  For example, ``pipnick_astrometry`` both adds the new
-data in the ``astrometry/`` directory, but also adds the astrometric solution
+reduced science images.  For example, ``pipnick_astrometry`` not only adds the
+new data in the ``astrometry/`` directory, but also adds the astrometric solution
 (WCS) to the processed file headers.
 
 Logs
 ----
 
-Each script writes a log file by default.  For example, the log file for the
-basic image processing is saved to
-``<rdxdir>/log/pipnick_reduce_<UT-date>.log``.  A new log file is produced every
+Each processing script writes a log file by default.  For example, the log file
+for the basic image processing is saved to
+``<rdxdir>/log/pipnick_reduce_<UT-timestamp>.log`` (e.g.,
+``pipnick_reduce_20261028T153614.log``).  A new log file is produced every
 time the script is executed, meaning logs are never overwritten or appended to.
 If two logs would have the same name, the second one will be named
 ``..._2.log``, etc.
 
 Scripts that do not operate within the reduction directory will write their logs
-nearest to their output directory: ``pipnick_metadata`` writes logs to the
-default reduction directory (the parent of the raw directory),
-``pipnick_mosaic`` writes logs to the ``--outdir``, if it is set, and
-``pipnick_rgb`` writes logs next to its output image.
+in a ``log/`` subdirectory nearest to their output: ``pipnick_metadata`` writes
+logs to ``log/`` in the default reduction directory (the parent of the raw
+directory), ``pipnick_mosaic`` writes logs to ``log/`` in the ``--outdir``, if
+it is set, and ``pipnick_rgb`` writes logs to ``log/`` in the directory of its
+output image.
 
-Every script has the same logging options:
+Every processing script has the same logging options:
 
 - ``-v``, ``--verbosity``: This sets the verbosity of the output written to the
-  terminal: 0 only prints warnings and error, 1 adds informational messages (the
-  default), and 2 added debugging messages and the python calling sequence.
+  terminal: 0 only prints warnings and errors, 1 adds informational messages
+  (the default), and 2 adds debugging messages and the python calling sequence.
 
 - ``--log_file``: Use this to define the log file name directly instead of using
   the default naming convention.  **The log file must not exist.**
 
 - ``--log_level``: Use this to set the verbosity of the log file if you want it
-  to be different from the default (verbosity level 2).
+  to be different from the terminal verbosity (the default).
 
 Versions
 --------
@@ -99,7 +101,7 @@ The first line of every log is the full pipnick version.  It is possible for
 different pipnick versions to be used for different steps.  For this reason, the
 version is saved in multiple places with names specific to the step executed:
 
-- the ``PNVERS`` keyword is added to header of
+- the ``PNVERS`` keyword is added to the header of
   the reduced images and mosaics;
 
 - the ``PNASTVER`` keyword is the pipnick version specific to the astrometric
@@ -113,7 +115,8 @@ When a step reuses an existing product made by a different version of pipnick,
 it issues one warning listing these products.  They are still used: the version
 never causes a product to be rebuilt.  **However, we strongly recommend
 rerunning all of the processing steps anytime you upgrade pipnick.**  This can
-be done using the ``--overwrite`` option, by deleting existing data, or by
+be done using the ``--overwrite`` option (``--resolve`` for
+``pipnick_astrometry``), by deleting existing data, or by
 sending the output to a new reduction directory.
 
 .. note::
@@ -150,7 +153,8 @@ Every step can be rerun at any time, and only does the work that is needed:
   frames, an edited metadata table, a new astrometric solution, other
   options), which is recorded by hashes in its header or metadata;
 - a product that is up to date is reported as such, and reused;
-- ``--overwrite`` rebuilds every product of the step.
+- ``--overwrite`` (``--resolve`` for ``pipnick_astrometry``) rebuilds every
+  product of the step.
 
 After adding frames to a night or changing a setting, you can simply rerun the
 steps in order, and each step will only rebuild the outputs that must be
@@ -162,7 +166,7 @@ QA figures
 
 Each step writes a set of fixed-format QA figures to the ``qa`` subdirectory of
 its main directory, such as ``reduce/``.  You can skip writing these figures
-using the ``--no_qa``; however, you are strongly encouraged to keep them so that
+using the ``--no_qa`` option; however, you are strongly encouraged to keep them so that
 you can check the results.
 
 - ``reduce/qa/<product>.png``: An image of each processed frame and a histogram

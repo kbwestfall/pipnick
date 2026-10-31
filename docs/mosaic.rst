@@ -29,7 +29,7 @@ Inputs
 
 - **The ECSV metadata table** (``raw_table``), written by ``pipnick_metadata``;
   see :ref:`metadata`.  The table must include the ``mosaic`` and ``wcs_group``
-  columns (see below).  The can be added using ``--assign_mosaics`` or edited
+  columns (see below).  They can be added using ``--assign_mosaics`` or edited
   into the metadata table directly.
 
 - **The reduced science images** (see :ref:`reduce`), with their
@@ -63,7 +63,7 @@ issued if it combines images with different filters.
 
 By default, the columns are empty, i.e., no mosaics are defined.  Either edit
 the tables, or assign the mosaics automatically with ``pipnick_metadata
---assign_mosaics``:
+--split --assign_mosaics``:
 
 - The science frames are grouped by pointing: pointings within
   ``--mosaic_radius`` (by default, half of the field of view) of each other,
@@ -76,11 +76,11 @@ the tables, or assign the mosaics automatically with ``pipnick_metadata
 - The WCS group is labeled with the most common object name of its frames,
   without a trailing filter name, e.g. ``NGC_7331`` for ``NGC 7331 V``, and the
   mosaic with the WCS group and the filter, e.g. ``NGC_7331_V``.  The object
-  names are not used to group the frames because they can be incorrecet (e.g.,
+  names are not used to group the frames because they can be incorrect (e.g.,
   observers can mistakenly neglect to update the filter in the name).
 
 - Only frames without labels are assigned, meaning direct edits are always kept.
-  When running ``pypeit_metadata`` with ``--append``, the labels are assigned
+  When running ``pipnick_metadata`` with ``--append``, the labels are assigned
   even if there are no new frames.
 
 A mosaic can have a single image.  To sample several images on the same pixel
@@ -144,8 +144,9 @@ Each mosaic is then constructed as follows.
    observed at the lowest airmass, but it can be set directly using
    ``--reference``.  The scales are measured from the sources common to
    overlapping images: their fluxes are measured on the matched images, in
-   apertures of 1.5 times the target FWHM with a local background, and the
-   magnitude offsets of all of the images are fit together.  Images that do not
+   apertures of 1.5 times the target FWHM with a local background (with
+   ``--psf_match none``, their PSF fluxes from the source tables are used), and
+   the magnitude offsets of all of the images are fit together.  Images that do not
    share any sources with the reference are scaled through the other images in
    the mosaic that they overlap.  Images that share too few sources with the
    others (``--min_common``) are not scaled and a warning is issued.  The
@@ -268,7 +269,8 @@ subdirectory of the reduction directory).  Each mosaic is written to
   of the encircled energy of the matched PSF model to that of the target within
   1.5 times the target FWHM), magnitude offsets and scales, the number of
   magnitude differences used, the reference, the relative weights, and the
-  background levels subtracted.  Values that are unknown (e.g., an airmass) or
+  background offsets applied by ``--match_background`` (``level``; 0 without
+  this option).  Values that are unknown (e.g., an airmass) or
   not measured (e.g., ``fwhm_out`` and ``match_ee`` without PSF matching) are
   masked.  Masked values are stored as NaN, the FITS null value for
   floating-point columns, and :meth:`astropy.table.Table.read` masks them again.
@@ -287,7 +289,7 @@ The output directory also has:
 
 - ``<wcs_group>_wcs.fits``: the output WCS of each WCS group (a header only);
 
-- ``summary.ecsv``: at table with one row per mosaic providing the WCS group,
+- ``summary.ecsv``: a table with one row per mosaic providing the WCS group,
   filter, number of images and of scaled images, target FWHM, status
   (``constructed``, ``up to date``, or ``failed``, with the ``reason``), and
   file;
@@ -301,14 +303,17 @@ Troubleshooting
 ---------------
 
 - **"No mosaics are defined"**: The ``mosaic`` columns of the tables are empty
-  and must be filled.  Assign them using ``pipnick_metadata --split --append
-  --assign_mosaics`` or edit the tables directly.
+  and must be filled.  Assign them using ``pipnick_metadata raw n3 --split
+  --append --assign_mosaics`` or edit the tables directly.
 
-- **"... has no astrometric solution"** or **"... has no PSF model"**:  Every
-  image assigned to a mosaic must have both astrometry and photometry (run
-  ``pipnick_astrometry`` and ``pipnick_photometry``).  If one image is missing
-  either, construction of all mosaics stop.  You can either run the necessary
-  code or clear its ``mosaic`` and ``wcs_group`` labels in the table.
+- **"... has no astrometric solution"**, **"... has no source table"**, or
+  **"... has no PSF model"**:  Every image assigned to a mosaic must have both
+  astrometry and photometry (run ``pipnick_astrometry`` and
+  ``pipnick_photometry``).  If one image has no astrometric solution or source
+  table, construction of all mosaics stops.  If one image has no PSF model, only
+  its mosaic fails (or its whole WCS group, with ``--psf_match group``).  You can
+  either run the necessary code or clear the image's ``mosaic`` and
+  ``wcs_group`` labels in the table.
 
 - **"Mosaic ... combines images from several nights"**: Mosaics of several
   nights are not yet supported; give the images of each night their own
