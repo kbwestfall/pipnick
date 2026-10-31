@@ -6,7 +6,7 @@
 
 [![License](https://img.shields.io/badge/license-BSD--3--Clause-blue)](LICENSE.rst)
 
-**Photometric pipeline for the 1-meter Nickel Telescope at Lick Observatory.**
+**Photometric Imaging Pipeline for the 1-meter Nickel Telescope at Lick Observatory.**
 
 `pipnick` reduces and calibrates data taken with the science cameras on the
 Nickel Telescope at Lick Observatory on Mt. Hamilton, CA (the previous C2 camera
@@ -27,8 +27,6 @@ image mosaics:
   the Landolt standards.
 - **Mosaics:** PSF-matched, flux-scaled mosaics of dithered images, sharing one
   WCS across filters, and three-color images.
-
-`pipnick` was originally developed for an Akamai 2024 internship project.
 
 ## Status
 
@@ -136,6 +134,10 @@ you run into bugs or have feature requests.
 
 If you use `pipnick` in your research, please cite it using the metadata in
 [`CITATION.cff`](CITATION.cff).
+
+`pipnick` was originally developed by Allison Eto as part of her 2024 Akamai
+2024 internship.  Since then, K. Westfall has used Claude Code to make
+significant additions to core functionality, and he now maintains the code.
 
 ## License
 
