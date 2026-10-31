@@ -309,7 +309,7 @@ def photometry_all(
           a circular aperture of radius ``aper_radius`` times the FWHM, masked
           if the aperture includes masked pixels;
         - ``mag_inst``, ``mag_inst_err``: the instrumental magnitude,
-          :math:`-2.5 \log_{10}(f / t)` for the PSF flux :math:`f` and the
+          :math:`-2.5 \log(f / t)` for the PSF flux :math:`f` and the
           exposure time :math:`t`;
         - ``local_bkg``, ``qfit``, ``cfit``, ``reduced_chi2``, ``flags``: the
           local background and the fit-quality measures and flags of

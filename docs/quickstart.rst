@@ -19,10 +19,10 @@ order, each step can be run at any time.  The code will raise an error if it doe
 not have all the required data to complete the step.  And when re-run on a given
 dataset, it will only redo processing if something has changed in the results
 from one of the previous steps (unless you force it to redo the step).  For more
-information along these lines, see :doc:`common`.
+information along these lines, see :ref:`common`.
 
 Before you start, make sure you have installed pipnick and set up your
-astrometry.net API key; see :doc:`install`.
+astrometry.net API key; see :ref:`install`.
 
 1. Build the tables of raw frames
 ---------------------------------
@@ -93,7 +93,7 @@ beginning of the line), correct object names, filters, and frame types
 (``comb_id``) or mosaicked (``mosaic``, ``wcs_group``).  Frames identified as
 either focus or pointing observations should automatically be commented out.
 For additional information, including the meaning for the different combination
-columns (``comb_id``, ``mosaic``, ``wcs_group``), see :doc:`metadata`.
+columns (``comb_id``, ``mosaic``, ``wcs_group``), see :ref:`metadata`.
 
 2. Reduce the images
 --------------------
@@ -148,7 +148,7 @@ example, ``rdx/reduce/qa/M11_V_V_C096_2026-08-20.png``:
 
    A reduced image of M11 in V and the histogram of its pixel values.
 
-See :doc:`reduce`.
+See :ref:`reduce`.
 
 3. Solve the astrometry
 -----------------------
@@ -201,7 +201,7 @@ solved image has a QA figure, e.g.,
    the solution (orange crosses), and their residuals (red, magnified 20
    times).
 
-See :doc:`astrometry`.
+See :ref:`astrometry`.
 
 4. Measure the sources
 ----------------------
@@ -230,7 +230,7 @@ step 6.  The PSF model of each image is shown in
    The PSF of an image of M11: the observed stars, the Moffat model, the
    residual, and the radial profile.
 
-See :doc:`photometry`.
+See :ref:`photometry`.
 
 5. Calibrate the photometry
 ---------------------------
@@ -262,7 +262,7 @@ night has only two standard stars in each band, so only the zero point is fit
     2026-08-20    I     ok       2      8          0 0.094   0.172       none        -- 22.875 -0.018    fit
     [INFO] - CALIBRATION OK: 4 of 4 bands calibrated; summary in calibrate/summary.ecsv.
 
-See :doc:`calibrate`.
+See :ref:`calibrate`.
 
 6. Build the mosaics
 --------------------
@@ -321,7 +321,7 @@ matching:
 
    The V mosaic of M11.
 
-See :doc:`mosaic`.
+See :ref:`mosaic`.
 
 7. Make a color image
 ----------------------
@@ -336,7 +336,7 @@ See :doc:`mosaic`.
 
    M11 in R, V, and B (north is up and east is left).
 
-See :doc:`rgb`.
+See :ref:`rgb`.
 
 8. Check the results
 --------------------
@@ -363,7 +363,7 @@ images that need attention:
 
 ``pipnick_report`` collects the summaries and QA figures of every step in an
 HTML report; open ``rdx/report/index.html`` in a browser.  To follow one image
-or source through the steps, use ``pipnick_inspect``.  See :doc:`checking`.
+or source through the steps, use ``pipnick_inspect``.  See :ref:`checking`.
 
 The products
 ------------
@@ -377,4 +377,4 @@ At the end, the reduction directory holds:
   ``PHOTZP``;
 - the summary, QA figures, and log of every step.
 
-See :doc:`common` for the layout of the reduction directory.
+See :ref:`common` for the layout of the reduction directory.

@@ -27,8 +27,8 @@ directly from, say, a Jupyter notebook.  We also provide status and inspection
 functions that can be executed at any time to determine the state and success of
 each processing step.
 
-To use pipnick with your data, start with :doc:`install` and the
-:doc:`quickstart`.
+To use pipnick with your data, start with :ref:`install` and the
+:ref:`quickstart`.
 
 Please `submit an issue <https://github.com/UCObservatories/pipnick/issues>`__
 if you run into bugs or have specific feature requests.

@@ -28,7 +28,7 @@ Astrometry
 ----------
 
 - **Sparse fields.**  Images with very few stars may not be solved; see the
-  troubleshooting of :doc:`astrometry`.
+  troubleshooting of :ref:`astrometry`.
 
 Photometry
 ----------
@@ -53,7 +53,7 @@ Mosaics
 - **One unsolved image stops every mosaic.**  ``pipnick_mosaic`` requires an
   astrometric solution and a PSF model for every image assigned to a mosaic,
   and stops with an error otherwise, instead of skipping the affected mosaic.
-  Clear the labels of the image (see :doc:`mosaic`).
+  Clear the labels of the image (see :ref:`mosaic`).
 
 Status and report
 -----------------

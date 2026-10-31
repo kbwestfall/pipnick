@@ -7,11 +7,11 @@ Image Mosaicking
 into mosaics: dithered pointings of an extended object, or repeated exposures
 of one field (which registers them).  The mosaics of one object in different
 filters can share an identical output WCS and shape, so that they can be
-combined into color images (see :doc:`rgb`).
+combined into color images (see :ref:`rgb`).
 
 The images are combined using their astrometric solutions, and the PSF models
 and source tables of the photometry, so run ``pipnick_astrometry`` (see
-:doc:`astrometry`) and ``pipnick_photometry`` (see :doc:`photometry`) first.
+:ref:`astrometry`) and ``pipnick_photometry`` (see :ref:`photometry`) first.
 The workflow is:
 
 .. code-block:: console
@@ -27,14 +27,14 @@ Inputs
 
 - **One or more per-setup metadata tables** (``raw_table``), with the mosaics
   defined in their ``mosaic`` and ``wcs_group`` columns (see below).
-- **The reduced science images** (see :doc:`reduce`), with their
+- **The reduced science images** (see :ref:`reduce`), with their
   **astrometric solutions** from ``pipnick_astrometry`` (see
-  :doc:`astrometry`); an image without one is an error.
-- **Their source tables** (see :doc:`photometry`), up to date, for the PSF
+  :ref:`astrometry`); an image without one is an error.
+- **Their source tables** (see :ref:`photometry`), up to date, for the PSF
   models (unless ``--psf_match none``) and the scaling by common sources (the
   default ``--scale sources``).
 - For ``--scale calib``, **their photometric calibrations** in the headers
-  (``pipnick_calibrate --apply image``; see :doc:`calibrate`).
+  (``pipnick_calibrate --apply image``; see :ref:`calibrate`).
 
 Defining the mosaics
 --------------------
@@ -133,7 +133,7 @@ Each mosaic is then constructed as follows.
    images that share no sources with the reference are scaled through the
    images they overlap.  Images that share too few sources with the others
    (``--min_common``) are not scaled, with a warning.  ``--scale calib`` uses
-   the photometric calibrations of the images instead (see :doc:`calibrate`),
+   the photometric calibrations of the images instead (see :ref:`calibrate`),
    and ``--scale none`` turns the scaling off.
 
 4. **Match the background levels** (``--match_background``, optional).  The
@@ -170,7 +170,7 @@ Running it
    pipnick_mosaic n3_2x2_fast_full.ecsv n3_2x2_slow_full.ecsv --outdir mosaics
 
 The options are (the logging options are common to every script; see
-:doc:`common`):
+:ref:`common`):
 
 - ``raw_table``: One or more per-setup metadata files (required).
 - ``--outdir``: The output directory.  If not provided, the ``mosaic``
@@ -251,7 +251,7 @@ The output directory also has:
 - ``qa/<mosaic>.png``: the QA figure of each mosaic (see above).
 
 The log is written to the ``log`` subdirectory of the reduction directory
-(or of ``--outdir``); see :doc:`common`.
+(or of ``--outdir``); see :ref:`common`.
 
 Troubleshooting
 ---------------

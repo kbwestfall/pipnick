@@ -56,7 +56,7 @@ step is:
 The ``attention`` column flags images reduced by another pipnick version
 (``version``), without a bias or flat (``no bias``, ``no flat``), or with an
 FWHM or astrometric RMS outside its expected range (``fwhm``, ``wcs rms``;
-see :doc:`common`).  The status ends with the next command to run.
+see :ref:`common`).  The status ends with the next command to run.
 
 The status uses the same checks as the steps, except for the mosaics: it can
 check that an image is unchanged since its mosaic was made, but not the

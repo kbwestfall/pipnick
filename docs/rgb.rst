@@ -30,7 +30,7 @@ Inputs
 
 - **Three images with the same WCS and shape**, given in the order red,
   green, blue; e.g., the mosaics of one WCS group made by ``pipnick_mosaic``
-  (see :doc:`mosaic`).  The masks of the images (the ``MASK`` extension) are
+  (see :ref:`mosaic`).  The masks of the images (the ``MASK`` extension) are
   used if they exist.
 
 Running it
@@ -41,7 +41,7 @@ Running it
     pipnick_rgb M11_R.fits M11_V.fits M11_B.fits -o M11.png
 
 The options are (the logging options are common to every script; see
-:doc:`common`):
+:ref:`common`):
 
 - ``red``, ``green``, ``blue``: The images for the three channels.
 - ``-o``, ``--ofile``: The output image (default ``rgb.png``); its format
@@ -64,14 +64,14 @@ Outputs
 - **The color image** (``--ofile``), with north up for the mosaics of
   ``pipnick_mosaic``.
 - **The log**, in the ``log`` subdirectory of the directory of the output
-  image; see :doc:`common`.
+  image; see :ref:`common`.
 
 Troubleshooting
 ---------------
 
 - **The images do not have the same WCS and shape**: ``pipnick_rgb`` stops
   with an error.  Construct them with ``pipnick_mosaic``, with all of them in
-  the same WCS group (a mosaic can have a single image; see :doc:`mosaic`).
+  the same WCS group (a mosaic can have a single image; see :ref:`mosaic`).
 - **Colored halos around stars**: the images have different seeing.  Match
   their PSFs to the worst seeing of the group with ``pipnick_mosaic
   --psf_match group``.

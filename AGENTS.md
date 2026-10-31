@@ -87,6 +87,8 @@
   in other packages take an **explicit role** so that intersphinx resolves them
   — `` :class:`numpy.ndarray` ``, `` :func:`astropy.stats.sigma_clip` `` — not
   the default role. Bare package names in prose are literals: ``` ``photutils`` ```.
+- **`ln` is the natural logarithm and `log` the base-10 logarithm** in
+  docstrings, comments, and the documentation (e.g., `:math:` roles).
 - **Write in American English** — in names, comments, docstrings, messages, and
   the documentation: `color`, `behavior`, `labeled`, `normalize`, `center`,
   `catalog`. The exception is quoted text, which keeps its original spelling

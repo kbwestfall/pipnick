@@ -155,7 +155,7 @@ Every step can be rerun at any time, and only does the work that is needed:
 After adding frames to a night or changing a setting, you can simply rerun the
 steps in order, and each step will only rebuild the outputs that must be
 updated.  The ``pipnick_status`` script will report which steps are out of date
-(see :doc:`checking`).
+(see :ref:`checking`).
 
 QA figures
 ----------
@@ -184,7 +184,7 @@ you can check the results.
 Each QA figure is redrawn if its output product is rebuilt, and it is drawn for
 any product that lacks one.  A figure that cannot be drawn is flagged as needing
 attention, but does not stop the step.  ``pipnick_report`` collects all of the
-figures in one place (see :doc:`checking`).
+figures in one place (see :ref:`checking`).
 
 Expected ranges
 ---------------

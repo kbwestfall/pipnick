@@ -65,7 +65,7 @@ Inputs
 ------
 
 - **The ECSV metadata table** (``raw_table``), written by ``pipnick_metadata``;
-  see :doc:`metadata`.  The pointing of each image (``ra``, ``dec``) is taken
+  see :ref:`metadata`.  The pointing of each image (``ra``, ``dec``) is taken
   from it.
 
 - **The reduced science images**, in the reduction directory.
@@ -223,7 +223,7 @@ the log also gives the details of every attempt to match an image (the shift,
 rotation, number of votes and matches, and RMS residual).
 
 The log of each run is written to ``log/pipnick_astrometry_<time>.log`` in the
-reduction directory; see :doc:`common`.
+reduction directory; see :ref:`common`.
 
 Troubleshooting
 ---------------
@@ -270,7 +270,7 @@ submission to astrometry.net:
      pipnick_astrometry n1_2x2_slow_full.ecsv
 
   ``pipnick_reduce`` reprocesses only the images whose table values changed
-  (see :doc:`reduce`), writing the corrected coordinates to
+  (see :ref:`reduce`), writing the corrected coordinates to
   their headers, and ``pipnick_astrometry`` then solves them with the usual
   matching.  This is the better choice if the reduced images will be used
   elsewhere because it also corrects the coordinates in their headers.

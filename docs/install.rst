@@ -60,7 +60,7 @@ This will print the installed versions of pipnick and all its dependencies.
 The astrometry.net API key
 --------------------------
 
-:doc:`astrometry` will submit some images to the astrometry.net web service.  To
+:ref:`astrometry` will submit some images to the astrometry.net web service.  To
 use this service, you must register for a free account at
 https://nova.astrometry.net and copy your API key from your profile to a
 location pipnick can find it.

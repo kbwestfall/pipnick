@@ -48,7 +48,7 @@ frames.  The algorithm is as follows:
    code reports the bias level and read noise of the biases, the level of the
    flats, and the sky level and fraction of pixels affected by cosmic rays of
    the science images.  The bias level and read noise are checked against the
-   camera's expected values; see :doc:`common`.
+   camera's expected values; see :ref:`common`.
 
 Dark images are combined, but they are not yet included in the image processing.
 
@@ -63,7 +63,7 @@ Inputs
 The primary inputs for ``pipnick_reduce`` are:
 
 - **The ECSV metadata table** (``raw_table``), written by ``pipnick_metadata``;
-  see :doc:`metadata`.
+  see :ref:`metadata`.
 
 - **The raw frames**
 
@@ -155,10 +155,10 @@ measurements (``bias_level`` in ADU, ``read_noise`` and the nominal
 the cosmic-ray fraction ``cr_frac``), and the ``bias`` and ``flat`` used.
 
 QA plots are added to ``reduce/qa`` that show a plot of the image and a
-histogram of its pixel values; see :doc:`common`.
+histogram of its pixel values; see :ref:`common`.
 
 Finally, the log is saved to ``log/pipnick_reduce_<time>.log``; see
-:doc:`common`.
+:ref:`common`.
 
 The metadata table is updated only to record the reduction directory.
 
@@ -185,7 +185,7 @@ that needs attention.
   difference between the pointings of any of the frames being combined.  Check
   that the frames have identical pointings, then either correct the RA/Dec
   coordinates in the metadata table or give them different ``comb_id`` values
-  and combine them as a mosaic instead (see :doc:`mosaic`).
+  and combine them as a mosaic instead (see :ref:`mosaic`).
 
 - **Products "not produced by this reduction"**: Files were found in the
   reduction directory that were not part of this reduction process.  This may be
@@ -197,7 +197,7 @@ that needs attention.
   different setup.  Use a different directory for each setup (``-r``).
 
 - **Flat-fielding residuals** (e.g., dust that is not fully removed) are a
-  known limitation; see :doc:`issues`.
+  known limitation; see :ref:`issues`.
 
 Using the pipeline in Python
 ----------------------------

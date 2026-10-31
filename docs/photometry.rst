@@ -10,7 +10,7 @@ and aperture photometry.  The results are written to source tables for each
 image.  It does not require an astrometric solution: the source coordinates can
 be provided in pixels only.  However, given that most of the subsequent
 processing steps require the astrometric solution, we encourage users to perform
-the astrometry (see :doc:`astrometry`) before the photometry.
+the astrometry (see :ref:`astrometry`) before the photometry.
 
 .. _photometry-algorithm:
 
@@ -61,13 +61,13 @@ Inputs
 ------
 
 - **The ECSV metadata table** (``raw_table``), written by ``pipnick_metadata``;
-  see :doc:`metadata`.  The pointing of each image (``ra``, ``dec``) is taken
+  see :ref:`metadata`.  The pointing of each image (``ra``, ``dec``) is taken
   from it.
 
 - **The reduced science images**, with their uncertainties (``UNCERT``) and
   masks (``MASK``).
 
-- Optionally, **the astrometric solution** (see :doc:`astrometry`), for the
+- Optionally, **the astrometric solution** (see :ref:`astrometry`), for the
   celestial coordinates of the sources.  The photometry can be run before or
   after the astrometry: rerunning the photometry after obtaining an astrometric
   solution only adds the coordinates to the output source catalog.
@@ -179,21 +179,21 @@ summarizes the results for each image.  It provides the photometry status
 ``failed``, with the ``reason``), the number of sources, the FWHM in pixels and
 arcsec, the number of PSF stars, and the astrometric solution method (``none``
 if the coordinates are masked).  The FWHM of each image is checked against the
-camera's expected range; see :doc:`common`.
+camera's expected range; see :ref:`common`.
 
 There are two QA figures for each image:
 
 - ``photometry/qa/<image>_psf.png`` shows the stacked PSF stars, the model, the
-residuals, and the radial profile
+  residuals, and the radial profile
 
 - ``photometry/qa/<image>_sources.png`` shows the image with the measured
-sources numbered by decreasing PSF flux.
+  sources numbered by decreasing PSF flux.
 
-The log is written to ``log/pipnick_photometry_<time>.log``; see :doc:`common`.
+The log is written to ``log/pipnick_photometry_<time>.log``; see :ref:`common`.
 
 The instrumental magnitudes are *not* calibrated.  Use ``pipnick_calibrate`` to
 perform photometric calibration; currently this can only be done if Landolt
-standard stars were observed during the night (see :doc:`calibrate`).
+standard stars were observed during the night (see :ref:`calibrate`).
 
 Troubleshooting
 ---------------
@@ -216,10 +216,10 @@ Troubleshooting
   photometry iterations.  They are then often removed by the vetting process.
   This can bias the PSF fluxes of bright stars because the residuals identified
   as separate sources should instead be incorporated into the flux of the
-  original source; see :doc:`issues`.
+  original source; see :ref:`issues`.
 
 - **The source tables differ slightly between runs** on the same images; see
-  :doc:`issues`.
+  :ref:`issues`.
 
 - **A later step reports that a source table "is out of date"**. The image was
   reduced (or solved) again after it was measured, meaning that you should rerun

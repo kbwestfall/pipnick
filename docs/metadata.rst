@@ -80,7 +80,7 @@ The algorithm used by ``pipnick_metadata`` is summarized as follows:
    write one table per setup, add a ``comb_id`` column that groups the frames to
    combine, and comment out the pointing and focus frames.  When the
    ``--assign_mosaics`` option is used, the table also assigns frames to a set
-   of expected mosaics (see :doc:`mosaic`).
+   of expected mosaics (see :ref:`mosaic`).
 
 Inputs
 ------
@@ -119,7 +119,7 @@ The options are:
   use this option.
 
 - ``--assign_mosaics`` (requires ``--split``): Label the science frames with the
-  mosaics they belong to, grouped by pointing and filter (see :doc:`mosaic`).
+  mosaics they belong to, grouped by pointing and filter (see :ref:`mosaic`).
   Only frames without labels are assigned.
 
 - ``--mosaic_radius``: The linking length (arcmin) of the pointing groups of
@@ -143,7 +143,7 @@ The options are:
 
 A table is never written to a file that already exists without setting
 ``--overwrite`` or ``--append``.  The logging options (``-v``, ``--log_file``,
-``--log_level``) are common to every script; see :doc:`common`.
+``--log_level``) are common to every script; see :ref:`common`.
 
 Outputs
 -------
@@ -183,7 +183,7 @@ one row per frame with the following columns:
 
 - For per-setup tables only: ``comb_id``, which groups the frames to combine
   (see :ref:`above<comb_id>`), and ``mosaic`` and ``wcs_group``, the labels of
-  the mosaics (empty unless assigned; see :doc:`mosaic`).
+  the mosaics (empty unless assigned; see :ref:`mosaic`).
 
 The ECSV table also contains a commented YAML format heaader with setup
 metadata.  This metadata can be edited via various scripts (e.g.,
@@ -192,7 +192,7 @@ information added by ``pypeit_metadata`` includes the camera, the raw directory,
 the setups, the classification method, and the pipnick version.
 
 As with all pipnick scripts, a log is also produced in the parent of the raw
-directory (``log/``); see :doc:`common`.
+directory (``log/``); see :ref:`common`.
 
 Editing the table
 -----------------
@@ -225,7 +225,7 @@ Some typical edits you will make are:
   999 or lower.
 
 - **Define the mosaics** by editing the ``mosaic`` and ``wcs_group`` labels;
-  see :doc:`mosaic`.
+  see :ref:`mosaic`.
 
 .. note::
     
@@ -270,7 +270,7 @@ suggestion for how to deal with the issue.
 
 - **The C2 fast readout cannot yet be classified:** The header value of the C2's
   fast readout is not yet confirmed, so C2 frames taken in this mode may be
-  rejected as having an undefined readout setting; see :doc:`issues`.
+  rejected as having an undefined readout setting; see :ref:`issues`.
 
 Using the function in Python
 ----------------------------
