@@ -1,141 +1,232 @@
-Point-Source and Aperture Photometry
-====================================
+.. _photometry:
 
-``pipnick_photometry`` measures the sources in each reduced science image with
-point-spread-function (PSF) and aperture photometry, and writes a source table
-for each image.  It does not require an astrometric solution: the pixel
-coordinates of the sources are always provided, and their celestial
-coordinates are provided for images with a solution from
-``pipnick_astrometry`` (see :doc:`astrometry`).
+Point-Spread-Function (PSF) and Aperture Photometry
+===================================================
 
-Overview
---------
+After performing basic image processing, pipnick can perform point-source
+photometry using ``pipnick_photometry``.  This script detects and measures the
+flux for sources in each reduced science image with point-spread-function (PSF)
+and aperture photometry.  The results are written to source tables for each
+image.  It does not require an astrometric solution: the source coordinates can
+be provided in pixels only.  However, given that most of the subsequent
+processing steps require the astrometric solution, we encourage users to perform
+the astrometry (see :ref:`astrometry`) before the photometry.
 
-For each image:
+.. _photometry-algorithm:
 
-1. **Model the PSF.**  Bright, isolated stars are detected, background-
-   subtracted cutouts around them are stacked (``--stack``, mean by default),
-   and a circular or elliptical (``--fittype``) Moffat function is fit to the
-   stack.  The fit sets the FWHM used for all the scales below.
+The algorithm
+-------------
+
+For each image, photometry proceeds as follows:
+
+1. **Model the PSF.**  To perform PSF photometry, the code must first build an
+   empirical measurement of the point-spread function using isolated bright
+   stars.  These stars are detected, their local background is subtracted, and
+   they are stacked to form a high S/N PSF measurement, which is then modeled by
+   a circular or elliptical Moffat function.  The fit sets the FWHM used for all
+   the scales below.
 
 2. **Subtract the background.**  A smooth, 2D background is subtracted
-   from the image.
+   from the full image.
 
-3. **PSF photometry.**  Sources are detected above ``--thresh`` times the
-   background noise (with ``photutils``' ``DAOStarFinder``), no closer than
-   ``--min_sep`` FWHM to each other, and their fluxes and positions are fit
-   with the PSF, its shape fixed.  Sources closer than ``--group_sep`` FWHM are
-   fit together, and detection and fitting are repeated on the residual image
-   (``photutils``' ``IterativePSFPhotometry``; see ``--mode``).  With
-   ``--group``, sources fit together are consolidated into one.
+3. **PSF photometry.**  Sources are detected using
+   :class:`photutils.detection.DAOStarFinder`, identifying all sources above
+   ``--thresh`` times the background noise and at least ``--min_sep`` FWHM
+   apart.  Each source is modeled by the (fixed-shape) PSF model, and sources
+   closer than ``--group_sep`` FWHM are fit simultaneously.  The
+   fit is performed iteratively (using
+   :class:`photutils.psf.IterativePSFPhotometry`; see ``--mode``) where each
+   iteration fits and subtracts the model sources, and the subsequent iteration
+   detects new sources in the residual image.  With ``--group``, sources fit
+   together are consolidated into a single source.
 
-4. **Vet the sources.**  Sources whose fits failed, whose fitted positions
-   are outside the image or moved more than one FWHM from where they were
-   detected, or whose fitted fluxes are not positive are removed.  These are
-   typically spurious detections in the residuals of bright stars.  They are
-   listed, with the reason, in ``photometry/<image>_removed.ecsv``.
+4. **Vet the sources.**  Sources are removed if their fit failed, their fitted
+   position is outside the image or moved by more than one FWHM from where they
+   were detected, or their fitted flux is not positive.  These sources are typically spurious detections in the residuals
+   of bright stars.  They are listed, with the reason, in
+   ``photometry/<image>_removed.ecsv``.
 
-5. **Aperture photometry.**  The background-subtracted flux in a circular
-   aperture of radius ``--aper_radius`` FWHM is measured at the position of
-   each source.
+5. **Aperture photometry** is also performed by summing the
+   background-subtracted flux in a circular aperture of radius ``--aper_radius``
+   times the FWHM.
 
-The pixel errors used to weight the fits and compute the flux errors are the
-uncertainties propagated by ``pipnick_reduce`` (the ``UNCERT`` extension of
-the reduced image): the read noise (including the error in the subtracted
-overscan level), the Poisson noise of the counts, and the uncertainties of the
-bias and the flat, propagated through the combination of frames.  The object,
-filter, exposure time, and airmass are taken from the metadata table.
+The image uncertainties used to weight the fits and compute the flux errors are
+the uncertainties propagated by ``pipnick_reduce`` (the ``UNCERT`` extension of
+the reduced image).  This includes the read noise, the Poisson noise of the
+counts, and all uncertainties propagated through the image processing steps
+(overscan and bias subtraction, and field-flattening).
 
-Using the command-line script
------------------------------
+Inputs
+------
+
+- **The ECSV metadata table** (``raw_table``), written by ``pipnick_metadata``;
+  see :ref:`metadata`.  The object, filter, exposure time, and airmass of each
+  image are taken from it.
+
+- **The reduced science images**, with their uncertainties (``UNCERT``) and
+  masks (``MASK``).
+
+- Optionally, **the astrometric solution** (see :ref:`astrometry`), for the
+  celestial coordinates of the sources.  The photometry can be run before or
+  after the astrometry: rerunning the photometry after obtaining an astrometric
+  solution only adds the coordinates to the output source catalog.
+
+Execution
+---------
+
+An example call looks like this:
 
 .. code-block:: console
 
-   pipnick_photometry -t n1_2x2_slow_full.ecsv
+   pipnick_photometry n1_2x2_slow_full.ecsv
+
+The required argument is the per-setup metadata table.
 
 The options are:
 
-- ``-t``, ``--raw_table``: The per-setup metadata file used to reduce the
-  images (required).
 - ``-r``, ``--rdxdir``: The reduction directory.  If not provided, the
   directory saved in the metadata file is used.
-- ``--images``: Only measure these images, given by file name (with or without
-  the extension) or combination group (``comb_id``).
-- ``-o``, ``--overwrite``: Measure the images again, even if they are up to
-  date.
-- ``--no_qa``: Do not write the QA figures to ``photometry/qa``: the PSF model
-  (``<image>_psf.png``: the stacked stars, the model, the residuals, and the
-  radial profile) and the measured sources (``<image>_sources.png``).  By
-  default, the figures are redrawn for each measured image, and drawn for an
-  image that is up to date but lacks them (its PSF stars are stacked again
-  from the image, without measuring the sources again).
+
+- ``--images``: A restricted set of images to analyze, given by file name (with
+  or without the extension) or combination group (``comb_id``).
+
+- ``-o``, ``--overwrite``: Reanalyze the images, even if they are up to date.
+
+- ``--no_qa``: Do not write the QA figures to ``photometry/qa``.  By default,
+  the figures are drawn for each measured image, including for images that were
+  previously processed but have no QA figures.
+
 - ``--thresh``: The source detection threshold, as a multiple of the
   background noise (default 8).
+
 - ``--psf_thresh``: The detection threshold for the stars used to model the
   PSF (default 15).
+
 - ``--fwhm``: The initial guess for the FWHM in arcsec (default: typical for
   the camera).
-- ``--fittype``: The PSF model, ``circ`` (default) or ``ellip``.
-- ``--stack``: How the PSF stars are stacked, ``mean`` (default) or
-  ``median``.
-- ``--mode``: The iterative fitting mode, ``all`` (default) or ``new``.
-- ``--min_sep``, ``--group_sep``: The minimum separation of detected sources,
-  and the separation below which sources are fit together, in FWHM (defaults
-  1 and 2).
-- ``--group``: Consolidate the sources fit together into single sources.
-- ``--aper_radius``: The radius of the photometric apertures in FWHM (default
-  2).
 
-Rerunning the script is cheap: an image is measured again only if it changed
-(e.g., it was reduced again) or the settings changed.  If only its
-astrometric solution changed, for example because ``pipnick_astrometry`` was
-run after ``pipnick_photometry``, only the celestial coordinates are updated.
+- ``--fittype``: The PSF model shape to use.  Must be ``circ`` (default) or
+  ``ellip``.
+
+- ``--stack``: The method used to stack the PSF stars.  Must be ``mean``
+  (default) or ``median``.
+
+- ``--mode``: The iterative fitting mode.  Must be ``all`` (default) or ``new``;
+  see :class:`photutils.psf.IterativePSFPhotometry`.
+
+- ``--min_sep``, ``--group_sep``: The minimum separation of detected sources,
+  and the separation below which sources are fit together.  Both are in units of
+  the FWHM.
+
+- ``--group``: Consolidate the sources fit together into single sources.
+
+- ``--aper_radius``: The radius of the photometric apertures in FWHM.
+
+The execution time roughly scales with the number of sources identified.
+However, rerunning the script is cheap: an image is measured again only if it
+changed (e.g., it was reduced again) or the settings changed.  If only its
+astrometric solution changed, for example because ``pipnick_astrometry`` was run
+after ``pipnick_photometry``, only the celestial coordinates are updated.
 
 Outputs
 -------
 
-The source table for each image is ``photometry/<image>_phot.ecsv`` in the
-reduction directory, with these columns:
+A source catalog is provided for each image with the name
+``photometry/<image>_phot.ecsv`` and saved to the reduction directory.  The
+source catalog contains the following columns:
 
-- ``id``, ``group_id``, ``group_size``, ``iter_detected``: The source, the
-  group of sources fit together, and the iteration in which it was detected.
-- ``x``, ``y``, ``x_err``, ``y_err``: The 0-based pixel coordinates.  These
-  are always provided.
-- ``ra``, ``dec``: The ICRS coordinates in degrees, if the image has an
-  astrometric solution from ``pipnick_astrometry``, and masked otherwise.  The
-  nominal WCS that the reduced images inherit from the raw headers is never
-  used.
+- ``id``, ``group_id``, ``group_size``, ``iter_detected``: The source and group
+  identifiers, the number of sources fit together, and the iteration in which
+  each source was detected.
+
+- ``x``, ``y``, ``x_err``, ``y_err``: The 0-based pixel coordinates.
+
+- ``ra``, ``dec``: The ICRS coordinates in degrees.  These are only provided if
+  the image has an astrometric solution from ``pipnick_astrometry`` and they are
+  masked otherwise.  The nominal WCS that the reduced images inherit from the
+  raw headers is never used.
+
 - ``flux_psf``, ``flux_psf_err``: The PSF flux in electrons.
+
 - ``flux_aper``, ``flux_aper_err``: The aperture flux in electrons, masked if
   the aperture includes masked pixels or extends beyond the image.
-- ``mag_inst``, ``mag_inst_err``: The instrumental magnitude,
-  :math:`-2.5 \log_{10}(f / t)` for the PSF flux :math:`f` and the exposure
-  time :math:`t`.
-- ``local_bkg``, ``qfit``, ``cfit``, ``reduced_chi2``, ``flags``: The local
-  background and the fit-quality measures and flags of ``photutils``.
 
-Values that cannot be measured are masked.  The table metadata record the
-image and its object, filter, exposure time, airmass, and MJD; the PSF model
-(type, parameters, FWHM in pixels and arcsec, and the number of stars used);
-the number of sources removed by the vetting; the settings; and the
+- ``mag_inst``, ``mag_inst_err``: The instrumental magnitude,
+  :math:`-2.5 \log(f / t)` for the PSF flux :math:`f` (``flux_psf``) and the
+  exposure time :math:`t`.
+
+- ``local_bkg``, ``qfit``, ``cfit``, ``reduced_chi2``, ``flags``: The local
+  background and the fit-quality measures and flags provided by ``photutils``.
+
+The table metadata records the image name, its object, filter, exposure time,
+airmass, and MJD.  It also records the PSF model (type, parameters, FWHM in
+pixels and arcsec, and the number of stars used), the number of sources
+removed by the vetting, the settings used to perform the photometry, and the
 provenance of the image and its astrometric solution.
 
-The sources removed by the vetting are written to
+All sources removed (see :ref:`photometry-algorithm`, step 4) are written to
 ``photometry/<image>_removed.ecsv``, with the 0-based pixel coordinates where
 they were detected (``x_init``, ``y_init``), their fitted coordinates and flux
-(``x_fit``, ``y_fit``, ``flux_fit``; masked if the fit failed), the iteration
-of the PSF photometry that detected them (``iter_detected``), and the reason
-they were removed (``failed``, ``outside``, ``moved``, or ``nonpositive``).
-Source tables measured before this file existed gain it when they are next
-measured.
+(``x_fit``, ``y_fit``, ``flux_fit``, which are masked if the fit failed), the
+iteration of the PSF photometry that detected them (``iter_detected``), and the
+reason they were removed (``failed``, ``outside``, ``moved``, or
+``nonpositive``).
 
-``photometry/summary.ecsv``, also logged, summarizes each image: its status
+A summary of the photometry is provided by ``photometry/summary.ecsv``, which
+summarizes the results for each image.  It provides the photometry status
 (``measured``, ``up to date``, ``coordinates updated``, ``missing``, or
-``failed``), the number of sources, the FWHM, the number of PSF stars, and the
-astrometric solution method (``none`` if the coordinates are masked).
+``failed``, with the ``reason``), the number of sources, the FWHM in pixels and
+arcsec, the number of PSF stars, and the astrometric solution method (``none``
+if the coordinates are masked).  The FWHM of each image is checked against the
+camera's expected range; see :ref:`common`.
 
-The instrumental magnitudes are not calibrated; ``pipnick_calibrate`` fits the
-photometric calibration from the Landolt standard stars (see :doc:`calibrate`).
+There are two QA figures for each image:
+
+- ``photometry/qa/<image>_psf.png`` shows the stacked PSF stars, the model, the
+  residuals, and the radial profile.
+
+- ``photometry/qa/<image>_sources.png`` shows the image with the measured
+  sources numbered by decreasing PSF flux.
+
+The log is written to ``log/pipnick_photometry_<time>.log``; see :ref:`common`.
+
+The instrumental magnitudes are *not* calibrated.  Use ``pipnick_calibrate`` to
+perform photometric calibration; currently this can only be done if Landolt
+standard stars were observed during the night (see :ref:`calibrate`).
+
+Troubleshooting
+---------------
+
+- **"No sources are good enough to model the PSF"**.  This occurs if there are
+  too few bright, isolated, unsaturated stars.  To successfully analyze this
+  image, try lowering ``--psf_thresh`` or giving a better guess for the
+  ``--fwhm``.
+
+- **The FWHM is outside its expected range**.  This may occur if the focus or
+  tracking was bad.  Inspect the ``*_psf.png`` figure and potentially skip this
+  image or try fitting an elongated PSF (``--fittype ellip``).
+
+- **No celestial coordinates** (``wcs`` is ``none`` in the summary): the image
+  has no astrometric solution.  Run ``pipnick_astrometry``, then rerun the
+  photometry, which only adds the coordinates.
+
+- **Many removed sources around bright stars**.  The PSF fits leave residuals
+  around bright stars, which are then detected as sources in subsequent
+  photometry iterations.  They are then often removed by the vetting process.
+  This can bias the PSF fluxes of bright stars because the residuals identified
+  as separate sources should instead be incorporated into the flux of the
+  original source; see :ref:`issues`.
+
+- **The source tables differ slightly between runs** on the same images; see
+  :ref:`issues`.
+
+- **A later step reports that a source table "is out of date"**. The image was
+  reduced again after it was measured, meaning that you should rerun the
+  photometry.
+
+- **A later step reports that "the celestial coordinates" of a source table
+  "are out of date"**. The astrometric solution of the image changed after it
+  was measured; rerun the photometry to update the coordinates.
 
 Using the pipeline in Python
 ----------------------------

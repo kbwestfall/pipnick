@@ -13,9 +13,9 @@ from astropy.time import Time
 from pipnick import cameras
 from pipnick import log
 from pipnick.metadata.groups import add_mosaic_columns, assign_comb_ids, assign_mosaics
-from pipnick.metadata.names import default_table_name
+from pipnick.metadata.names import default_table_name, table_file_name
 from pipnick.metadata.setups import (
-    assign_setups, find_setup_files, setup_file_name, setup_keys, split_by_setup
+    assign_setups, find_setup_files, setup_file_keys, setup_file_name, setup_keys, split_by_setup
 )
 from pipnick.metadata.table import (
     metadata_columns, read_metadata, update_metadata_meta, write_metadata
@@ -49,6 +49,25 @@ def _column(name, values):
     return MaskedColumn(data, name=name, mask=mask) if np.any(mask) else Column(data, name=name)
 
 
+def _unidentified_row(name, hdr, camera):
+    """
+    Construct the metadata of a frame whose camera could not be identified.
+
+    The metadata are read using the camera identified from the other frames,
+    so that, e.g., a frame with a damaged header keeps the setup it was most
+    likely taken with.  If this fails (e.g., the header does not provide the
+    binning), only the file name, the frame type (``'unknown'``), and the note
+    are set, and the frame has no setup.
+    """
+    note = 'camera not identified'
+    try:
+        row = {'file': name, **camera.metadata(hdr)}
+    except (PipnickDataModelError, TypeError, ValueError):
+        return {'file': name, 'frametype': 'unknown', 'note': f'{note}; setup unknown'}
+    row['note'] = note
+    return row
+
+
 def build_camera_datatable(
     root, ext='.fits', path_key='path', camera=None, classify='header', skip_files=None
 ):
@@ -74,6 +93,8 @@ def build_camera_datatable(
         :func:`~pipnick.cameras.cameras.available_cameras`).  If None, the
         camera is identified from each file header, and all files must be from
         the same camera.  If provided, files from other cameras are skipped.
+        Either way, files whose camera cannot be identified are included and
+        rejected (see :func:`_unidentified_row`).
     classify : str, optional
         How the frames are classified and checked.  ``'header'`` uses only the
         file headers; ``'stats'`` also uses statistics of the image data, which
@@ -101,7 +122,7 @@ def build_camera_datatable(
         files.
     :exc:`~pipnick.pkg.exceptions.PipnickDataModelError`
         Raised if ``camera`` is not provided and the files are from more than
-        one camera, or the camera that produced a file cannot be identified.
+        one camera, or the camera cannot be identified for any file.
     """
     # Check the inputs
     _root = Path(root).absolute()
@@ -125,19 +146,26 @@ def build_camera_datatable(
     rows = []
     rejected = []
     found = {}
+    # The rows of the frames whose camera cannot be identified are filled
+    # once the camera of the other frames is known
+    unidentified = []
     for f in files:
         with fits.open(f) as hdu:
             hdr = hdu[0].header
-            if _camera is None:
+            if _camera is not None and _camera.matches(hdr):
+                cam = _camera
+            else:
                 try:
                     cam = cameras.identify_camera(hdr)
                 except PipnickDataModelError as e:
-                    raise PipnickDataModelError(f'{f.name}: {e}') from e
-            elif _camera.matches(hdr):
-                cam = _camera
-            else:
-                log.warning(f'{f.name} is not from the {_camera.name} camera; skipping.')
-                continue
+                    log.warning(f'{f.name}: {e}  Its row is commented out.')
+                    unidentified.append((len(rows), f.name, hdr))
+                    rows.append(None)
+                    rejected.append(True)
+                    continue
+                if _camera is not None:
+                    log.warning(f'{f.name} is not from the {_camera.name} camera; skipping.')
+                    continue
             found.setdefault(cam.name, []).append(f.name)
             row = {'file': f.name, **cam.metadata(hdr)}
             data = hdu[0].data if classify == 'stats' else None
@@ -153,6 +181,8 @@ def build_camera_datatable(
         rows.append(row)
         rejected.append(reject)
 
+    if len(found) == 0 and _camera is None:
+        raise PipnickDataModelError(f'Unable to determine the camera of any file in {_root}.')
     if len(found) == 0:
         raise PipnickPathError(f'No files from the {_camera.name} camera found in {_root}.')
     if len(found) > 1:
@@ -165,10 +195,12 @@ def build_camera_datatable(
         )
     camera_name = list(found.keys())[0]
     log.info(f'Camera identified as: {camera_name}')
+    for i, name, hdr in unidentified:
+        rows[i] = _unidentified_row(name, hdr, cameras.get_camera(camera_name))
 
     # Add the MJD
     for row in rows:
-        row['mjd'] = _date_to_mjd(row['date'])
+        row['mjd'] = _date_to_mjd(row.get('date'))
 
     # Construct the typed table
     columns = [
@@ -212,8 +244,11 @@ def summarize(tbl, commented=None):
     lines += ['Frames per setup (excluding commented rows):']
     width = max(len(t) for t in frametypes + ['setup'])
     lines += ['    ' + 'setup'.ljust(6) + ' '.join(t.rjust(width) for t in frametypes)]
+    # Frames without a setup (see assign_setups) have a masked setup label,
+    # which matches no setup
+    use_setup = np.ma.getdata(use['setup'])
     for label in tbl.meta.get('setups', {}).keys():
-        in_setup = use['setup'] == label
+        in_setup = use_setup == label
         lines += [
             '    ' + label.ljust(6) + ' '.join(
                 str(np.sum(in_setup & (use['frametype'] == t))).rjust(width) for t in frametypes
@@ -229,7 +264,7 @@ def summarize(tbl, commented=None):
     # Check for missing calibrations
     warnings = []
     for label in tbl.meta.get('setups', {}).keys():
-        in_setup = use[use['setup'] == label]
+        in_setup = use[use_setup == label]
         science = in_setup[in_setup['frametype'] == 'science']
         if len(science) == 0:
             continue
@@ -311,6 +346,15 @@ def _read_setup_files(files):
     srt = np.argsort(combined['file'])
     combined = combined[srt]
     commented = commented[srt]
+    # A frame without a setup is in every per-setup file (see
+    # split_by_setup); keep one row, without the setup values
+    _, first, counts = np.unique(combined['file'], return_index=True, return_counts=True)
+    if np.any(counts > 1):
+        combined = combined[first]
+        commented = commented[first]
+        for key in ['setup'] + setup_file_keys:
+            mask = np.ma.getmaskarray(combined[key]) | (counts > 1)
+            combined[key] = MaskedColumn(np.ma.getdata(combined[key]), mask=mask)
     combined.meta = {**meta, 'setups': dict(sorted(setups.items()))}
     return combined, commented
 
@@ -354,7 +398,9 @@ def build_metadata(
     filename : str, optional
         The full path (if needed) and file name to either write or load with
         metadata used during the data processing, or the base name of the
-        per-setup files if ``split`` is True.
+        per-setup files if ``split`` is True.  The ``.ecsv`` extension is
+        appended if the name does not end with it; see
+        :func:`~pipnick.metadata.names.table_file_name`.
     ext : str, optional
         Extension of the files to include in the search string used to find
         files.
@@ -398,7 +444,7 @@ def build_metadata(
     if overwrite and append:
         raise ValueError('Cannot both overwrite and append to the metadata table.')
     _rdxdir = None if rdxdir is None else str(Path(rdxdir).absolute())
-    _filename = None if filename is None else Path(filename).absolute()
+    _filename = None if filename is None else table_file_name(filename).absolute()
     if split:
         setup_files = [] if _filename is None else find_setup_files(_filename)
         exists = len(setup_files) > 0

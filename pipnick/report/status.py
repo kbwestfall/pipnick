@@ -337,10 +337,10 @@ def _next_step(rows, metafile):
     ]
     for column, script in steps:
         if any(row[column] in ['missing', 'stale', 'failed'] for row in rows):
-            return f'{script} -t {metafile}'
+            return f'{script} {metafile}'
     if all(row['calibrated'] == 'n/a' for row in rows):
         return (
-            f'pipnick_calibrate -t {metafile}, if the night has standards; otherwise, every '
+            f'pipnick_calibrate {metafile}, if the night has standards; otherwise, every '
             'step is up to date.'
         )
     return 'nothing; every step is up to date.'

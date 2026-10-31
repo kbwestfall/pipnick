@@ -19,7 +19,7 @@ where the terms :math:`x_t` are selected by name (see
       :math:`x = X C`;
 
 for the airmass :math:`X` and the (catalog) color :math:`C`.  The
-instrumental magnitudes are :math:`m = -2.5\log_{10}(f / t)`, for the flux
+instrumental magnitudes are :math:`m = -2.5\log(f / t)`, for the flux
 :math:`f` in electrons and the exposure time :math:`t`, so the zero point
 applies to count rates in electrons per second.
 
@@ -290,7 +290,7 @@ def zero_point(terms, coeff, cov, airmass):
 
     .. math::
 
-        M = -2.5\log_{10}(r) + Z + c_1\ C + c_2\ C^2,
+        M = -2.5\log(r) + Z + c_1\ C + c_2\ C^2,
 
     with :math:`Z = -(k_{\rm zp} + k_{\rm airmass} X)`, :math:`c_1 =
     -(k_{\rm color} + k_{\rm airmass\_color} X)`, and :math:`c_2 = -k_{\rm

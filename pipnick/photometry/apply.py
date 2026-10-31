@@ -28,8 +28,7 @@ def apply_to_headers(images, content, cfile, report=None):
 
     .. math::
 
-        M = -2.5\log_{10}(r) + {\rm PNCALZP} + {\rm PNCALCT}\ C
-            + {\rm PNCALC2}\ C^2;
+        M = -2.5\log(r) + {\rm PNCALZP} + {\rm PNCALCT}\ C + {\rm PNCALC2}\ C^2;
 
     see :func:`~pipnick.photometry.calibrate.zero_point`.  The keywords are:
 

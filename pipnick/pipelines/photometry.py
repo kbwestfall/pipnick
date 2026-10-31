@@ -309,7 +309,7 @@ def photometry_all(
           a circular aperture of radius ``aper_radius`` times the FWHM, masked
           if the aperture includes masked pixels;
         - ``mag_inst``, ``mag_inst_err``: the instrumental magnitude,
-          :math:`-2.5 \log_{10}(f / t)` for the PSF flux :math:`f` and the
+          :math:`-2.5 \log(f / t)` for the PSF flux :math:`f` and the
           exposure time :math:`t`;
         - ``local_bkg``, ``qfit``, ``cfit``, ``reduced_chi2``, ``flags``: the
           local background and the fit-quality measures and flags of
@@ -479,9 +479,9 @@ def photometry_all(
     text = f'{len(summary)} images ({counts})'
     if len(measured) > 0:
         text += f'; median FWHM {np.median([r["fwhm_arcsec"] for r in measured]):.2f} arcsec'
-    following = f'pipnick_calibrate -t {dataset.metafile} (for standards)'
+    following = f'pipnick_calibrate {dataset.metafile} (for standards)'
     if 'mosaic' in dataset.table.colnames and np.any(dataset.table['mosaic'] != ''):
-        following += f', or pipnick_mosaic -t {dataset.metafile}'
+        following += f', or pipnick_mosaic {dataset.metafile}'
     _report.finish(f'{text}; summary in photometry/summary.ecsv.', next_step=following)
     return outputs
 

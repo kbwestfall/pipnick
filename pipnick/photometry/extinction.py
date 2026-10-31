@@ -88,7 +88,7 @@ def band_extinction(wave, ext, band):
 
     .. math::
 
-        k = -2.5 \log_{10}\left[\frac{\int R(\lambda)\, \lambda\,
+        k = -2.5 \log\left[\frac{\int R(\lambda)\, \lambda\,
             10^{-0.4 k(\lambda)}\, d\lambda}{\int R(\lambda)\, \lambda\,
             d\lambda}\right],
 

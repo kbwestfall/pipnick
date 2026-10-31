@@ -7,9 +7,7 @@ build:
 
 sphinx:
    configuration: docs/conf.py
-   # TODO: Set to true once the documentation builds without warnings; the
-   # astrometry pipeline currently fails to import, which autodoc reports.
-   fail_on_warning: false
+   fail_on_warning: true
 
 python:
   install:

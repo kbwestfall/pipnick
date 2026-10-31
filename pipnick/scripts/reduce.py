@@ -18,7 +18,7 @@ class Reduce(scriptbase.ScriptBase):
             width=width
         )
         parser.add_argument(
-            '-t', '--raw_table', required=True,
+            'raw_table',
             help='Per-setup metadata file for the raw frames to process, written by '
                  'pipnick_metadata --split.  To add new frames, use pipnick_metadata --split '
                  '--append and rerun the reduction.'

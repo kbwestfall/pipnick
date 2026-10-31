@@ -1,10 +1,11 @@
 """
 Names derived from the metadata: safe file names, filter names, and the
-default table names.
+table names.
 """
 
 import datetime
 import re
+from pathlib import Path
 
 
 def safe_name(value):
@@ -31,6 +32,33 @@ def filter_name(filt):
     """
     name = safe_name(str(filt).replace("'", 'p'))
     return 'none' if len(name) == 0 else name
+
+
+
+def table_file_name(name):
+    """
+    Construct the file name of a metadata table from the name given by the
+    user.
+
+    The name can be given with or without the ``.ecsv`` extension: ``.ecsv`` is
+    appended to a name that does not end with it.  E.g., ``n3`` and
+    ``n3.ecsv`` both give ``n3.ecsv``, and ``n3.night`` gives
+    ``n3.night.ecsv``.  For per-setup files, the result is the base name used
+    by :func:`~pipnick.metadata.setups.setup_file_name`; e.g., ``n3`` gives
+    ``n3_2x2_fast_full.ecsv``.
+
+    Parameters
+    ----------
+    name : str, :class:`pathlib.Path`
+        The name of the table, with or without the extension.
+
+    Returns
+    -------
+    :class:`pathlib.Path`
+        The file name.
+    """
+    _name = Path(name)
+    return _name if _name.suffix == '.ecsv' else _name.with_name(f'{_name.name}.ecsv')
 
 
 

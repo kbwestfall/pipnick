@@ -234,7 +234,7 @@ def reduce_all(table, rdxdir=None, overwrite=False, qa=True, report=None):
     counts = count_statuses(rows, ['up to date', 'built', 'failed'], keep_zero=True)
     _report.finish(
         f'{len(rows)} products ({counts}); summary in reduce/summary.ecsv.',
-        next_step=f'pipnick_astrometry -t {dataset.metafile}'
+        next_step=f'pipnick_astrometry {dataset.metafile}'
     )
     return science
 

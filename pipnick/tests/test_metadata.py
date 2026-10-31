@@ -2,6 +2,8 @@
 Tests for the metadata table, using synthetic FITS files.
 """
 
+from pathlib import Path
+
 import numpy as np
 import pytest
 from astropy.coordinates import EarthLocation
@@ -14,6 +16,7 @@ from pipnick import cameras
 from pipnick.metadata import build, setups
 from pipnick.metadata.build import build_camera_datatable, build_metadata, summarize
 from pipnick.metadata.groups import mosaic_columns
+from pipnick.metadata.names import table_file_name
 from pipnick.metadata.setups import find_setup_files, setup_file_keys
 from pipnick.metadata.table import (
     metadata_columns, read_metadata, update_metadata_meta, write_metadata
@@ -211,6 +214,32 @@ def test_round_trip(tmp_path):
     assert list(reloaded['setup']) == ['A', 'B'], 'Reloading should read the existing table'
 
 
+def test_table_file_name(tmp_path):
+    assert table_file_name('n3') == Path('n3.ecsv'), (
+        'The .ecsv extension should be appended to a name without it'
+    )
+    assert table_file_name('rdx/n3.ecsv') == Path('rdx/n3.ecsv'), (
+        'A name with the .ecsv extension should be unchanged'
+    )
+    assert table_file_name('n3.night') == Path('n3.night.ecsv'), (
+        '.ecsv should be appended to a name with any other extension'
+    )
+
+    rawdir = tmp_path / 'raw'
+    rawdir.mkdir()
+    write_andor(rawdir / 'n4001.fits', OBSTYPE='DARK', OBJECT='bias', XPOSURE=0.207)
+    write_andor(rawdir / 'n4002.fits', AMPCONF='0.05MHz')
+    ofile, _ = build_metadata(rawdir=rawdir, filename=tmp_path / 'n4')
+    assert ofile == tmp_path / 'n4.ecsv' and ofile.is_file(), (
+        'A table named without the extension should be written to <name>.ecsv'
+    )
+    files, _ = build_metadata(rawdir=rawdir, filename=tmp_path / 'n4', split=True)
+    assert [f.name for f in files] == ['n4_2x2_fast_full.ecsv', 'n4_2x2_slow_full.ecsv'], (
+        'Per-setup tables of a base name without the extension should be named as for '
+        '<name>.ecsv'
+    )
+
+
 def test_mixed_cameras(tmp_path):
     write_c2(tmp_path / 'd1001.fits')
     write_andor(tmp_path / 'n1001.fits')
@@ -226,6 +255,93 @@ def test_unknown_camera(tmp_path):
     fits.PrimaryHDU(data=np.zeros((4, 4))).writeto(tmp_path / 'x.fits')
     with pytest.raises(PipnickDataModelError):
         build_camera_datatable(tmp_path)
+
+
+def write_unidentified_night(rawdir):
+    """
+    Write synthetic Andor files with two setups, a file with a damaged Andor
+    header (no camera ID), and a FITS file without any of the camera keywords.
+    """
+    rawdir.mkdir()
+    write_andor(rawdir / 'n5001.fits')
+    write_andor(rawdir / 'n5002.fits', AMPCONF='0.05MHz')
+    write_andor(rawdir / 'n5003.fits', AMPCONF='0.05MHz')
+    with fits.open(rawdir / 'n5003.fits', mode='update') as hdu:
+        del hdu[0].header['CAMID']
+    fits.PrimaryHDU(data=np.zeros((4, 4))).writeto(rawdir / 'n5004.fits')
+
+
+def test_unidentified_camera(tmp_path):
+    rawdir = tmp_path / 'raw'
+    write_unidentified_night(rawdir)
+    tbl, rejected = build_camera_datatable(rawdir)
+    assert list(tbl['file']) == ['n5001.fits', 'n5002.fits', 'n5003.fits', 'n5004.fits'], (
+        'Frames whose camera cannot be identified should be included, ordered by file'
+    )
+    assert list(rejected) == [False, False, True, True], (
+        'Frames whose camera cannot be identified should be rejected'
+    )
+    assert tbl['note'][2] == 'camera not identified', 'The reason should be noted'
+    assert tbl['setup'][2] == 'B' and tbl['xbin'][2] == 2, (
+        'A frame with a damaged header should be read with the camera of the other frames'
+    )
+    assert tbl['note'][3] == 'camera not identified; setup unknown', (
+        'A frame without the setup values should be noted as such'
+    )
+    assert tbl['frametype'][3] == 'unknown' and tbl['setup'].mask[3] and tbl['xbin'].mask[3], (
+        'A frame without the setup values should have an unknown type and no setup'
+    )
+    assert list(tbl.meta['setups'].keys()) == ['A', 'B'], (
+        'A frame without the setup values should not define a setup'
+    )
+
+    # The frames are commented out of the single table
+    ofile, used = build_metadata(rawdir=rawdir, filename=tmp_path / 'n5')
+    assert list(used['file']) == ['n5001.fits', 'n5002.fits'], (
+        'The frames whose camera cannot be identified should be excluded'
+    )
+    back, commented = read_metadata(ofile, include_commented=True)
+    assert list(commented) == [False, False, True, True] and back['setup'].mask[3], (
+        'The frames should be commented out of the single table, which should keep the '
+        'missing setup'
+    )
+
+    # With split, the damaged frame is in its setup's file, and the frame
+    # without a setup is in every file
+    files, _ = build_metadata(rawdir=rawdir, filename=tmp_path / 'n5', split=True)
+    expected = {
+        'n5_2x2_fast_full.ecsv': ['n5001.fits', 'n5004.fits'],
+        'n5_2x2_slow_full.ecsv': ['n5002.fits', 'n5003.fits', 'n5004.fits']
+    }
+    for f in files:
+        sub, commented = read_metadata(f, include_commented=True)
+        assert list(sub['file']) == expected[f.name], (
+            f'{f.name} should include the frames of its setup and the frame without a setup'
+        )
+        assert list(commented) == [n in ['n5003.fits', 'n5004.fits'] for n in sub['file']], (
+            f'The frames whose camera cannot be identified should be commented out of {f.name}'
+        )
+
+    # Appending keeps a single row for the frame without a setup, and comments
+    # out a new frame whose camera cannot be identified
+    fits.PrimaryHDU(data=np.zeros((4, 4))).writeto(rawdir / 'n5005.fits')
+    write_andor(rawdir / 'n5006.fits')
+    files, used = build_metadata(rawdir=rawdir, filename=tmp_path / 'n5', split=True, append=True)
+    assert list(used['file']) == ['n5001.fits', 'n5002.fits', 'n5006.fits'], (
+        'The new frame from the camera should be added and used'
+    )
+    expected = {
+        'n5_2x2_fast_full.ecsv': ['n5001.fits', 'n5004.fits', 'n5005.fits', 'n5006.fits'],
+        'n5_2x2_slow_full.ecsv': ['n5002.fits', 'n5003.fits', 'n5004.fits', 'n5005.fits']
+    }
+    for f in files:
+        sub, commented = read_metadata(f, include_commented=True)
+        assert list(sub['file']) == expected[f.name], (
+            f'After appending, {f.name} should include each frame without a setup once'
+        )
+        assert list(commented) == [
+            n in ['n5003.fits', 'n5004.fits', 'n5005.fits'] for n in sub['file']
+        ], f'The frames whose camera cannot be identified should be commented out of {f.name}'
 
 
 def test_no_files(tmp_path):

@@ -56,7 +56,44 @@ def _solution_header(
     if submission_id is not None:
         hdr['PNASTSUB'] = (str(submission_id), 'astrometry.net submission ID')
     if pointing_error is not None:
-        hdr['PNASTPOE'] = (round(pointing_error, 3), 'Pointing error in the table (arcmin)')
+        hdr['PNASTPOE'] = _pointing_error_card(pointing_error)
+    return hdr
+
+
+
+def _pointing_error_card(pointing_error):
+    """
+    Return the value and comment of the ``PNASTPOE`` keyword; see
+    :func:`apply_wcs`.
+    """
+    return round(pointing_error, 3), 'Pointing error in the table (arcmin)'
+
+
+
+def set_pointing_error(image, pointing_error):
+    """
+    Record the pointing error of the astrometric solution of a reduced image.
+
+    Parameters
+    ----------
+    image : str, :class:`pathlib.Path`
+        The reduced image, which is modified in place.
+    pointing_error : float, None
+        The pointing error in arcmin (``PNASTPOE``; see :func:`apply_wcs`), or
+        None to remove it.
+
+    Returns
+    -------
+    :class:`astropy.io.fits.Header`
+        The updated primary header of the image.
+    """
+    path = Path(image).absolute()
+    with fits.open(path, mode='update') as hdu:
+        if pointing_error is None:
+            hdu[0].header.remove('PNASTPOE', ignore_missing=True)
+        else:
+            hdu[0].header['PNASTPOE'] = _pointing_error_card(pointing_error)
+        hdr = hdu[0].header.copy()
     return hdr
 
 

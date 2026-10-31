@@ -1,10 +1,10 @@
 """
-Three-colour (RGB) images.
+Three-color (RGB) images.
 
 The three images must have the same WCS and shape, i.e., they must be
 sampled on the same pixel grid; use ``pipnick_mosaic`` with the images (or
 mosaics) in one WCS group to reproject them onto a common grid (see
-:mod:`pipnick.pipelines.mosaic`).  The colour image is made with
+:mod:`pipnick.pipelines.mosaic`).  The color image is made with
 :func:`astropy.visualization.make_lupton_rgb` (the scheme of Lupton et al.
 2004) or :func:`astropy.visualization.make_rgb`.
 """
@@ -145,10 +145,10 @@ def color_image(
     percentile=99.5, common=False, subtract=True
 ):
     """
-    Construct a three-colour image.
+    Construct a three-color image.
 
     The images are normalized (see :func:`normalize_channels`), multiplied by
-    ``scales`` (to adjust the colour balance), and combined:
+    ``scales`` (to adjust the color balance), and combined:
 
         - ``'lupton'``: with :func:`astropy.visualization.make_lupton_rgb`,
           with ``stretch`` and ``Q``;
@@ -208,7 +208,7 @@ def color_image(
 
 def write_color_image(ofile, rgb):
     """
-    Write a three-colour image (e.g., PNG or JPEG, from the extension of
+    Write a three-color image (e.g., PNG or JPEG, from the extension of
     ``ofile``), with the first row of the images at the bottom, so that
     north is up for the north-up mosaics of ``pipnick_mosaic``.
     """

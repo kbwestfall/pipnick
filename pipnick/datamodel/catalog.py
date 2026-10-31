@@ -164,9 +164,9 @@ class SourceCatalog:
         Return the instrumental magnitudes of the sources and their errors.
 
         For ``mag='psf'``, these are ``mag_inst`` and ``mag_inst_err``.  For
-        ``mag='aper'``, they are :math:`-2.5\log_{10}(f / t)` for the
-        aperture flux :math:`f` and the exposure time :math:`t`, masked where
-        the flux is masked or not positive.
+        ``mag='aper'``, they are :math:`-2.5\log(f / t)` for the aperture flux
+        :math:`f` and the exposure time :math:`t`, masked where the flux is
+        masked or not positive.
 
         Parameters
         ----------

@@ -5,13 +5,13 @@ The images to combine are selected by the ``mosaic`` and ``wcs_group``
 columns of the per-setup metadata tables (see
 :data:`~pipnick.metadata.groups.mosaic_columns`): images with the same ``mosaic``
 label are combined, and all of the mosaics with the same ``wcs_group`` label
-share an identical output WCS and shape (e.g., for colour images).  The
+share an identical output WCS and shape (e.g., for color images).  The
 labels are global, so a mosaic can combine the images of several tables,
 e.g., of different setups.
 
 A mosaic can have a single image, which is then only reprojected onto the WCS
 of its group, e.g., so that the images of an object in several filters are
-sampled on the same pixel grid for a colour image (see
+sampled on the same pixel grid for a color image (see
 :mod:`pipnick.utils.rgb`).
 
 The images must have astrometric solutions (``pipnick_astrometry``) and,
@@ -776,7 +776,7 @@ def mosaic_all(
     counts = count_statuses(summary.rows, ['constructed', 'up to date', 'failed'], keep_zero=True)
     _report.finish(
         f'{len(summary)} mosaics ({counts}); summary in {_outdir.name}/summary.ecsv.',
-        next_step='pipnick_rgb, to combine the mosaics of a WCS group into a colour image'
+        next_step='pipnick_rgb, to combine the mosaics of a WCS group into a color image'
     )
     return outputs
 
