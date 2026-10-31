@@ -153,7 +153,8 @@ See :ref:`reduce`.
 3. Solve the astrometry
 -----------------------
 
-First, check what would be done, without submitting anything:
+We first suggest that you check what would be done without submitting anything
+by executing a dry run:
 
 .. code-block:: console
 
@@ -167,21 +168,21 @@ First, check what would be done, without submitting anything:
     2 groups without a solved image.  At least 1 and, if all bootstrapping fails, at most 76 astrometry.net submissions would be made.
     [INFO] - ASTROMETRY OK: dry run of 76 images.
 
-Then solve the images:
+After assessing the output from the dry run, do the astrometry for real:
 
 .. code-block:: console
 
     pipnick_astrometry n3_2x2_fast_full.ecsv
 
-pipnick submits as few images as possible to astrometry.net (by default, only
-the positions of the brightest sources are sent, not the image).  The other
-images are solved locally: by matching their sources to those of a solved
-image with a similar pointing (*bootstrapping*), or to the Gaia catalog.
-Typically, one submission solves a whole night; here, the other images were
-bootstrapped from one solved image of SA 111 1965, and M11 was solved by
-matching to Gaia.  The submissions are cached, so a rerun submits nothing.
+pipnick submits as few images as possible to astrometry.net; by default, only
+the positions of the brightest sources are sent, not the image.  The other
+images are solved locally: by matching their sources to those of a solved image
+with a similar pointing (*bootstrapping*), or to the Gaia catalog.  Typically,
+one submission solves a whole night; here, the other images were bootstrapped
+from one solved image of SA 111 1965 and M11 was solved by matching to Gaia.
+The submissions are cached, so a rerun submits nothing.
 
-One image was not solved:
+In this example, one image was not solved:
 
 .. code-block:: text
 
@@ -189,10 +190,9 @@ One image was not solved:
     SA_111_1965_V_V_C131_2026-08-20.fits matched the 413 Gaia sources expected in or near the field
     in the wide search (minimum is 10). ...
 
-Only 17 sources were detected in it, and its seeing is poor (see below).  It
-is not worth more effort: we exclude it from the mosaics in step 6.  Each
-solved image has a QA figure, e.g.,
-``rdx/astrometry/qa/M11_V_V_C096_2026-08-20.png``:
+Only 17 sources were detected in it, and its seeing is poor (see below).  It is
+not worth more effort: we exclude it from the mosaics in step 6.  Each solved
+image has a QA figure, e.g., ``rdx/astrometry/qa/M11_V_V_C096_2026-08-20.png``:
 
 .. figure:: figures/quickstart_astrometry.jpg
    :width: 80%
@@ -203,15 +203,15 @@ solved image has a QA figure, e.g.,
 
 See :ref:`astrometry`.
 
-4. Measure the sources
-----------------------
+4. Measure the instrumental magnitudes of point sources
+-------------------------------------------------------
 
 .. code-block:: console
 
     pipnick_photometry n3_2x2_fast_full.ecsv
 
-Each image gets a PSF model and a source table with PSF and aperture
-photometry, ``rdx/photometry/<image>_phot.ecsv``.
+Each image gets a PSF model and a source table with PSF and aperture photometry,
+``rdx/photometry/<image>_phot.ecsv``.
 
 .. code-block:: text
 
@@ -232,6 +232,10 @@ step 6.  The PSF model of each image is shown in
 
 See :ref:`photometry`.
 
+.. important::
+
+    The aperture photometry *does not* include aperture corrections.
+
 5. Calibrate the photometry
 ---------------------------
 
@@ -239,17 +243,17 @@ See :ref:`photometry`.
 
     pipnick_calibrate n3_2x2_fast_full.ecsv --terms zp --min_stars 1 --apply both
 
-The standard stars observed during the night are identified, and the
-calibration of each band is fit to their measurements and applied to every
-image: ``--apply both`` writes the calibrated source tables,
-``rdx/calibrate/<image>_cal.ecsv``, and records the zero points in the image
-headers, so that the mosaics are calibrated too.
+The standard stars observed during the night are identified, and the calibration
+of each band is fit to their measurements and applied to every image: ``--apply
+both`` both writes the calibrated source tables,
+``rdx/calibrate/<image>_cal.ecsv`` and records the zero points in the image
+headers.  The latter ensures image mosaics are calibrated, as well.
 
-By default, the calibration fits a zero point, a color term, and the
-extinction, which needs several standard stars at different airmasses.  This
-night has only two standard stars in each band, so only the zero point is fit
-(``--terms zp``), and the minimum number of stars is lowered (``--min_stars
-1``).  With fewer standards, the calibration is less certain: check its RMS.
+By default, the calibration fits a zero point, a color term, and the extinction,
+which needs several standard stars at different airmasses.  This night has only
+two standard stars in each band, so only the zero point is fit (``--terms zp``),
+and the minimum number of stars is lowered (``--min_stars 1``).  With fewer
+standards, the calibration is less certain: check its RMS.
 
 .. code-block:: text
 
@@ -264,12 +268,20 @@ night has only two standard stars in each band, so only the zero point is fit
 
 See :ref:`calibrate`.
 
-6. Build the mosaics
---------------------
+.. important::
 
-Every image assigned to a mosaic must have an astrometric solution, so first
-remove the unsolved image from its mosaic: in the table, clear its ``mosaic``
-and ``wcs_group`` labels,
+    Photometric calibration is currently only possible for observations of
+    Landolt standards.  This will be expanded in future versions.
+
+
+6. Combine a set of dithered images into single image mosaics
+-------------------------------------------------------------
+
+Images with slightly offset pointings can be assigned to a mosaic group, and
+groups of mosaic images can be forced to have the same WCS coordinates.  Both
+are set via the metadata table.  Importantly, every image assigned to a mosaic
+*must* have an astrometric solution.  For images that do not have an astrometric
+solution, clear its ``mosaic`` and ``wcs_group`` column values, like so:
 
 .. code-block:: text
 
@@ -281,15 +293,15 @@ becomes
 
     n3250.fits science 131 "" "" "SA 111 1965 V" V ...
 
-Then:
+Then run, e.g.:
 
 .. code-block:: console
 
     pipnick_mosaic n3_2x2_fast_full.ecsv
 
-The images of each mosaic are matched to a common PSF, scaled to a common
-flux level, reprojected, and combined.  All of the mosaics of a WCS group (here,
-the B, V, R, and I mosaics of M11) share the same pixel grid.
+The images of each mosaic are matched to a common PSF, scaled to a common flux
+level, reprojected to a common pixel grid, and combined.  All of the mosaics of
+a WCS group (here, the B, V, R, and I mosaics of M11) share the same pixel grid.
 
 .. code-block:: text
 
@@ -308,13 +320,12 @@ the B, V, R, and I mosaics of M11) share the same pixel grid.
     SA_111_1965_V SA_111_1965      V      19      18        5.65 constructed SA_111_1965_V.fits      -
     [INFO] - MOSAICS OK: 8 mosaics (8 constructed, 0 up to date, 0 failed); summary in mosaic/summary.ecsv.
 
-The mosaics are written to ``rdx/mosaic``.  The poorest seeing of a mosaic
-sets its resolution, so the two images of SA 111 1965 in V with a FWHM above
-5 arcsec degrade its V mosaic to 5.65 arcsec.  To improve it, clear their
-labels too and rerun ``pipnick_mosaic``: only the mosaics of that WCS group
-are rebuilt.  The QA figure of each mosaic, e.g., ``rdx/mosaic/qa/M11_V.png``,
-shows the mosaic, its coverage, the flux scale of each image, and the PSF
-matching:
+The mosaics are written to ``rdx/mosaic``.  The poorest seeing of a mosaic sets
+its resolution, so the two images of SA 111 1965 in V with a FWHM above 5 arcsec
+degrade its V mosaic to 5.65 arcsec.  To improve it, clear their labels too and
+rerun ``pipnick_mosaic``: only the mosaics of that WCS group are rebuilt.  The
+QA figure of each mosaic, e.g., ``rdx/mosaic/qa/M11_V.png``, shows the mosaic,
+its coverage, the flux scale of each image, and the PSF matching:
 
 .. figure:: figures/quickstart_mosaic.png
    :width: 100%
@@ -323,8 +334,11 @@ matching:
 
 See :ref:`mosaic`.
 
-7. Make a color image
-----------------------
+7. Make a three-color image
+---------------------------
+
+With a set of image mosaics in hand, you can use them to construct a three-color
+image, like so:
 
 .. code-block:: console
 
@@ -341,13 +355,15 @@ See :ref:`rgb`.
 8. Check the results
 --------------------
 
+To check the processing of data in a given metadata table, you can run:
+
 .. code-block:: console
 
     pipnick_status n3_2x2_fast_full.ecsv
     pipnick_report n3_2x2_fast_full.ecsv
 
-``pipnick_status`` prints the state of every step for every image, and the
-images that need attention:
+``pipnick_status`` prints the state of every step for every image and indicates
+which images need attention:
 
 .. code-block:: text
 
@@ -362,8 +378,9 @@ images that need attention:
     [WARNING] - 3 image(s) need attention (see the attention column): SA_111_1965_V_V_C123_2026-08-20.fits, SA_111_1965_V_V_C127_2026-08-20.fits, SA_111_1965_V_V_C131_2026-08-20.fits
 
 ``pipnick_report`` collects the summaries and QA figures of every step in an
-HTML report; open ``rdx/report/index.html`` in a browser.  To follow one image
-or source through the steps, use ``pipnick_inspect``.  See :ref:`checking`.
+HTML report.  To view the report, open ``rdx/report/index.html`` in a browser.
+To follow one image or source through the steps, use ``pipnick_inspect``.  See
+:ref:`checking`.
 
 The products
 ------------
@@ -372,9 +389,12 @@ At the end, the reduction directory holds:
 
 - the reduced images, ``rdx/<image>.fits``, with their astrometric solutions
   and photometric zero points in their headers;
+
 - the calibrated source catalogs, ``rdx/calibrate/<image>_cal.ecsv``;
-- the mosaics, ``rdx/mosaic/<mosaic>.fits``, in e-/s with the zero point in
-  ``PHOTZP``;
+
+- the image mosaics, ``rdx/mosaic/<mosaic>.fits``, in e-/s with the zero point
+  in ``PHOTZP``;
+
 - the summary, QA figures, and log of every step.
 
 See :ref:`common` for the layout of the reduction directory.
